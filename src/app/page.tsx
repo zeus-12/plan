@@ -191,8 +191,8 @@ export default function Home() {
             onSettingsChange={updateSettings}
             isFirstVersion={isFirstVersion}
             annotations={latest.annotations}
-            onAddAnnotation={(sel, s, e, c) =>
-              addAnnotation(latestIdx, sel, s, e, c)
+            onAddAnnotation={(sel, s, e, c, side) =>
+              addAnnotation(latestIdx, sel, s, e, c, side)
             }
             onUpdateAnnotation={(id, c) =>
               updateAnnotation(latestIdx, id, c)

@@ -41,6 +41,7 @@ interface PendingSel {
   startOffset: number;
   endOffset: number;
   popoverPos: { top: number; left: number };
+  side: "left" | "right";
 }
 
 interface EditingAnn {
@@ -59,7 +60,8 @@ interface Props {
     sel: string,
     start: number,
     end: number,
-    comment: string
+    comment: string,
+    side: "left" | "right"
   ) => void;
   onUpdateAnnotation?: (id: string, comment: string) => void;
   onRemoveAnnotation?: (id: string) => void;
@@ -245,6 +247,8 @@ export function InteractiveDiff({
       const range = sel.getRangeAt(0);
       if (!contentRef.current.contains(range.commonAncestorContainer)) return;
 
+      let side: "left" | "right" = "right";
+
       if (effectiveViewMode === "split") {
         const startSide = findSplitSide(range.startContainer);
         const endSide = findSplitSide(range.endContainer);
@@ -252,6 +256,7 @@ export function InteractiveDiff({
           sel.removeAllRanges();
           return;
         }
+        if (startSide === "left") side = "left";
       }
 
       const text = sel.toString();
@@ -261,11 +266,18 @@ export function InteractiveDiff({
       const end = getAbsoluteOffset(range.endContainer, range.endOffset);
       if (start === -1 || end === -1) return;
 
+      // In unified view, determine side from the diff line type
+      if (effectiveViewMode === "unified") {
+        const lineIdx = getDiffLineForOffset(start, dLines);
+        if (dLines[lineIdx]?.type === "remove") side = "left";
+      }
+
       const rect = range.getBoundingClientRect();
       setPending({
         selectedText: text.trim(),
         startOffset: start,
         endOffset: end,
+        side,
         popoverPos: {
           top: rect.bottom + 8,
           left: Math.max(
@@ -283,7 +295,8 @@ export function InteractiveDiff({
       pending.selectedText,
       pending.startOffset,
       pending.endOffset,
-      comment
+      comment,
+      pending.side
     );
     setPending(null);
     window.getSelection()?.removeAllRanges();
@@ -344,20 +357,14 @@ export function InteractiveDiff({
     const segs = line.wordSegments!;
     const wordBg =
       line.type === "add"
-        ? "var(--diff-add-word)"
-        : "var(--diff-remove-word)";
+        ? "bg-[var(--diff-add-word)]"
+        : "bg-[var(--diff-remove-word)]";
 
     return (
       <>
         {segs.map((seg, i) =>
           seg.changed ? (
-            <span
-              key={i}
-              style={{
-                background: wordBg,
-                borderRadius: "2px",
-              }}
-            >
+            <span key={i} className={`${wordBg} rounded-sm`}>
               {seg.text}
             </span>
           ) : (
@@ -397,17 +404,13 @@ export function InteractiveDiff({
       parts.push(
         <span
           key={`h${s}${hl.kind}${hl.annId ?? ""}`}
-          className={isAnn ? "cursor-pointer" : ""}
+          className={`rounded-sm ${isAnn ? "cursor-pointer border-b-[1.5px] border-[var(--text-tertiary)]" : ""}`}
           style={{
             background: hovered
               ? "var(--highlight-bg-hover)"
               : isAnn
                 ? "var(--highlight-bg)"
                 : "var(--selection-bg)",
-            borderBottom: isAnn
-              ? "1.5px solid var(--text-tertiary)"
-              : undefined,
-            borderRadius: "2px",
           }}
           onClick={
             isAnn
@@ -477,31 +480,11 @@ export function InteractiveDiff({
     background: barColor(type),
   });
 
-  const separatorCellStyle: React.CSSProperties = {
-    height: SEPARATOR_HEIGHT_PX,
-    background: "var(--bg)",
-    color: "var(--text-tertiary)",
-    borderTop: "1px solid var(--border)",
-    borderBottom: "1px solid var(--border)",
-    textAlign: "center",
-    cursor: "pointer",
-    userSelect: "none",
-    fontSize: 11,
-  };
-
-  const stickyLabelStyle: React.CSSProperties = {
-    position: "sticky",
-    left: 0,
-    display: "block",
-    width: "100cqi",
-    textAlign: "center",
-    pointerEvents: "none",
-  };
-
   /* ── Inline comment card ─────────────────────────────────── */
 
   function renderInlineComment(ann: Annotation, index: number) {
     const hovered = hoveredAnnId === ann.id;
+
     const trunc =
       ann.comment.length > COMMENT_TRUNCATE_LEN
         ? ann.comment.slice(0, COMMENT_TRUNCATE_LEN) + "..."
@@ -522,16 +505,10 @@ export function InteractiveDiff({
         onMouseEnter={() => setHoveredAnnId(ann.id)}
         onMouseLeave={() => setHoveredAnnId(null)}
       >
-        <span
-          className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold"
-          style={{ background: "var(--accent)", color: "var(--bg)" }}
-        >
+        <span className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[8px] font-bold text-[var(--bg)]">
           {index + 1}
         </span>
-        <span
-          className="text-[11px] leading-snug"
-          style={{ color: "var(--text-secondary)" }}
-        >
+        <span className="text-[11px] leading-snug text-[var(--text-secondary)]">
           {trunc}
         </span>
       </div>
@@ -545,26 +522,16 @@ export function InteractiveDiff({
     return (
       <div className="mb-2 flex items-center justify-end gap-2">
         {!isFirstVersion && (
-          <div
-            className="inline-flex rounded-md border font-[family-name:var(--font-mono)] text-[11px]"
-            style={{ borderColor: "var(--border)" }}
-          >
+          <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
             {(["split", "unified"] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => onSettingsChange({ viewMode: mode })}
-                className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l"}`}
-                style={{
-                  borderColor: "var(--border)",
-                  background:
-                    settings.viewMode === mode
-                      ? "var(--accent)"
-                      : "transparent",
-                  color:
-                    settings.viewMode === mode
-                      ? "var(--bg)"
-                      : "var(--text-tertiary)",
-                }}
+                className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
+                  settings.viewMode === mode
+                    ? "bg-[var(--accent)] text-[var(--bg)]"
+                    : "text-[var(--text-tertiary)]"
+                }`}
               >
                 {mode === "split" ? "Split" : "Unified"}
               </button>
@@ -574,12 +541,12 @@ export function InteractiveDiff({
         <select
           value={settings.fontSize}
           onChange={(e) =>
-            onSettingsChange({ fontSize: Number(e.target.value) as DiffSettings["fontSize"] })
+            onSettingsChange({
+              fontSize: Number(e.target.value) as DiffSettings["fontSize"],
+            })
           }
-          className="cursor-pointer appearance-none rounded-md border bg-transparent px-2 py-1 pr-5 font-[family-name:var(--font-mono)] text-[11px] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
+          className="cursor-pointer appearance-none rounded-md border border-[var(--border)] bg-transparent px-2 py-1 pr-5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
           style={{
-            borderColor: "var(--border)",
-            color: "var(--text-tertiary)",
             backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
             backgroundRepeat: "no-repeat",
             backgroundPosition: "right 4px center",
@@ -595,15 +562,32 @@ export function InteractiveDiff({
           onClick={() =>
             onSettingsChange({ hideUnchanged: !settings.hideUnchanged })
           }
-          className="rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors"
-          style={{
-            borderColor: "var(--border)",
-            color: "var(--text-tertiary)",
-          }}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors"
         >
           {settings.hideUnchanged ? "Show all lines" : "Hide unchanged"}
         </button>
       </div>
+    );
+  }
+
+  /* ── Separator row ─────────────────────────────────────── */
+
+  function renderSeparatorTd(
+    colSpan: number,
+    hiddenCount: number,
+    sepIdx: number
+  ) {
+    return (
+      <td
+        colSpan={colSpan}
+        onClick={() => toggleSeparator(sepIdx)}
+        className="cursor-pointer select-none border-y border-[var(--border)] bg-[var(--bg)] text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+        style={{ height: SEPARATOR_HEIGHT_PX }}
+      >
+        <span className="sticky left-0 block w-[100cqi] text-center pointer-events-none">
+          ▸ {hiddenCount} unchanged lines
+        </span>
+      </td>
     );
   }
 
@@ -619,30 +603,16 @@ export function InteractiveDiff({
     const colCount = isFirstVersion ? 3 : 4;
 
     return (
-      <div className="overflow-x-auto" style={{ containerType: "inline-size" }}>
+      <div className="overflow-x-auto [container-type:inline-size]">
         <table
-          className="font-[family-name:var(--font-mono)]"
-          style={{
-            minWidth: "100%",
-            borderCollapse: "separate",
-            borderSpacing: 0,
-          }}
+          className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]"
         >
           <tbody>
             {expandedFiltered.map((item, i) => {
               if (item.type === "separator") {
                 return (
                   <tr key={`us${i}`}>
-                    <td
-                      colSpan={colCount}
-                      onClick={() => toggleSeparator(sepIndices[i])}
-                      className="font-[family-name:var(--font-mono)] transition-colors hover:bg-[var(--bg-surface-hover)]"
-                      style={separatorCellStyle}
-                    >
-                      <span style={stickyLabelStyle}>
-                        ▸ {item.hiddenCount} unchanged lines
-                      </span>
-                    </td>
+                    {renderSeparatorTd(colCount, item.hiddenCount, sepIndices[i])}
                   </tr>
                 );
               }
@@ -677,11 +647,7 @@ export function InteractiveDiff({
                     <tr key={`cmt-${ann.id}`}>
                       <td
                         colSpan={colCount}
-                        style={{
-                          padding: 0,
-                          borderTop: "1px solid var(--border)",
-                          borderBottom: "1px solid var(--border)",
-                        }}
+                        className="border-y border-[var(--border)] p-0"
                       >
                         {renderInlineComment(ann, index)}
                       </td>
@@ -716,7 +682,10 @@ export function InteractiveDiff({
           <td
             style={{ ...barCellStyle("context"), background: "var(--bg)" }}
           />
-          <td style={{ height: LINE_HEIGHT_PX, background: "var(--bg)" }} />
+          <td
+            className="bg-[var(--bg)]"
+            style={{ height: LINE_HEIGHT_PX }}
+          />
         </tr>
       );
     }
@@ -774,32 +743,14 @@ export function InteractiveDiff({
 
     function renderColumn(side: "left" | "right") {
       return (
-        <div
-          data-split-side={side}
-        >
-          <table
-            className="font-[family-name:var(--font-mono)]"
-            style={{
-              minWidth: "100%",
-              borderCollapse: "separate",
-              borderSpacing: 0,
-            }}
-          >
+        <div data-split-side={side}>
+          <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
             <tbody>
               {splitRows.map((row, i) => {
                 if (row.type === "separator") {
                   return (
                     <tr key={`s${side}${i}`}>
-                      <td
-                        colSpan={3}
-                        onClick={() => toggleSeparator(sepIndices[i])}
-                        className="font-[family-name:var(--font-mono)] transition-colors hover:bg-[var(--bg-surface-hover)]"
-                        style={separatorCellStyle}
-                      >
-                        <span style={stickyLabelStyle}>
-                          ▸ {row.hiddenCount} unchanged lines
-                        </span>
-                      </td>
+                      {renderSeparatorTd(3, row.hiddenCount, sepIndices[i])}
                     </tr>
                   );
                 }
@@ -814,17 +765,11 @@ export function InteractiveDiff({
                       <tr key={`cmt-${side}-${ann.id}`}>
                         <td
                           colSpan={3}
-                          style={{
-                            padding: 0,
-                            borderTop: "1px solid var(--border)",
-                            borderBottom: "1px solid var(--border)",
-                          }}
+                          className="border-y border-[var(--border)] p-0"
                         >
                           <div
-                            style={{
-                              height: INLINE_COMMENT_ROW_HEIGHT_PX,
-                              overflow: "hidden",
-                            }}
+                            className="overflow-hidden"
+                            style={{ height: INLINE_COMMENT_ROW_HEIGHT_PX }}
                           >
                             {side === "right"
                               ? renderInlineComment(ann, idx)
@@ -844,17 +789,10 @@ export function InteractiveDiff({
 
     return (
       <div className="flex">
-        <div
-          style={{
-            flex: "0 0 50%",
-            overflowX: "auto",
-            containerType: "inline-size",
-            borderRight: "1px solid var(--border)",
-          }}
-        >
+        <div className="shrink-0 basis-1/2 overflow-x-auto border-r border-[var(--border)] [container-type:inline-size]">
           {renderColumn("left")}
         </div>
-        <div style={{ flex: "0 0 50%", overflowX: "auto", containerType: "inline-size" }}>
+        <div className="shrink-0 basis-1/2 overflow-x-auto [container-type:inline-size]">
           {renderColumn("right")}
         </div>
       </div>
@@ -870,11 +808,7 @@ export function InteractiveDiff({
       <div
         ref={contentRef}
         onMouseUp={handleMouseUp}
-        className="overflow-hidden rounded-lg border"
-        style={{
-          background: "var(--bg-surface)",
-          borderColor: "var(--border)",
-        }}
+        className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]"
       >
         {effectiveViewMode === "unified" ? renderUnified() : renderSplit()}
       </div>

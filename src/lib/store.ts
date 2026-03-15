@@ -6,6 +6,7 @@ export interface Annotation {
   startOffset: number;
   endOffset: number;
   comment: string;
+  side: "left" | "right";
 }
 
 export interface PlanVersion {
@@ -58,7 +59,8 @@ export function useStore() {
       selectedText: string,
       startOffset: number,
       endOffset: number,
-      comment: string
+      comment: string,
+      side: "left" | "right"
     ) => {
       const annotation: Annotation = {
         id: crypto.randomUUID(),
@@ -66,6 +68,7 @@ export function useStore() {
         startOffset,
         endOffset,
         comment,
+        side,
       };
       const versions = store.versions.map((v, i) =>
         i === versionIndex
@@ -129,16 +132,38 @@ export function useStore() {
 
 const MESSAGE_TRUNCATE_LEN = 120;
 
+function formatAnnotation(a: Annotation, idx: number): string {
+  const truncated =
+    a.selectedText.length > MESSAGE_TRUNCATE_LEN
+      ? a.selectedText.slice(0, MESSAGE_TRUNCATE_LEN) + "..."
+      : a.selectedText;
+  return `${idx}. Regarding: "${truncated}"\n   → ${a.comment}`;
+}
+
 export function generateMessage(version: PlanVersion): string {
   if (version.annotations.length === 0) return "";
 
-  const lines = version.annotations.map((a, i) => {
-    const truncated =
-      a.selectedText.length > MESSAGE_TRUNCATE_LEN
-        ? a.selectedText.slice(0, MESSAGE_TRUNCATE_LEN) + "..."
-        : a.selectedText;
-    return `${i + 1}. Regarding: "${truncated}"\n   → ${a.comment}`;
-  });
+  const current = version.annotations.filter((a) => a.side === "right");
+  const previous = version.annotations.filter((a) => a.side === "left");
 
-  return `I have some changes to the plan:\n\n${lines.join("\n\n")}`;
+  // If all annotations are on the same side, skip the section headers
+  if (previous.length === 0) {
+    const lines = current.map((a, i) => formatAnnotation(a, i + 1));
+    return `I have some changes to the plan:\n\n${lines.join("\n\n")}`;
+  }
+  if (current.length === 0) {
+    const lines = previous.map((a, i) => formatAnnotation(a, i + 1));
+    return `I have some notes on the previous version of the plan:\n\n${lines.join("\n\n")}`;
+  }
+
+  const sections: string[] = [];
+  let idx = 1;
+
+  const currentLines = current.map((a) => formatAnnotation(a, idx++));
+  sections.push(`On the current version:\n\n${currentLines.join("\n\n")}`);
+
+  const previousLines = previous.map((a) => formatAnnotation(a, idx++));
+  sections.push(`On the previous version:\n\n${previousLines.join("\n\n")}`);
+
+  return `I have some changes to the plan:\n\n${sections.join("\n\n")}`;
 }
