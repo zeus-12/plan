@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #fafafa;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #a1a1aa;
+  --accent: #18181b;
+  --accent-hover: #3f3f46;
+  --added-text: #166534;
+  --removed-text: #991b1b;
+  --selection-bg: #bfdbfe;
+  --popover-bg: #ffffff;
+  --popover-border: #e4e4e7;
+  --highlight-bg: rgba(0, 0, 0, 0.05);
+  --highlight-bg-hover: rgba(0, 0, 0, 0.1);
+
+  --diff-add-bg: #dafbe1;
+  --diff-add-gutter: #aceebb;
+  --diff-add-bar: #1a7f37;
+  --diff-remove-bg: #ffebe9;
+  --diff-remove-gutter: #ffd7d5;
+  --diff-remove-bar: #cf222e;
+}
+
+.dark {
+  --bg: #09090b;
+  --bg-surface: #18181b;
+  --bg-surface-hover: #1f1f23;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #52525b;
+  --accent: #fafafa;
+  --accent-hover: #d4d4d8;
+  --added-text: #7ee787;
+  --removed-text: #ffa198;
+  --selection-bg: #1e3a5f;
+  --popover-bg: #1c1c1f;
+  --popover-border: #2e2e32;
+  --highlight-bg: rgba(255, 255, 255, 0.07);
+  --highlight-bg-hover: rgba(255, 255, 255, 0.14);
+
+  --diff-add-bg: rgba(46, 160, 67, 0.1);
+  --diff-add-gutter: rgba(46, 160, 67, 0.2);
+  --diff-add-bar: #3fb950;
+  --diff-remove-bg: rgba(248, 81, 73, 0.1);
+  --diff-remove-gutter: rgba(248, 81, 73, 0.2);
+  --diff-remove-bar: #f85149;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--selection-bg);
+}
