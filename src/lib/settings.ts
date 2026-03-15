@@ -11,12 +11,16 @@ export interface DiffSettings {
   viewMode: "split" | "unified";
   hideUnchanged: boolean;
   fontSize: FontSize;
+  lineWrap: boolean;
+  ignoreWhitespace: boolean;
 }
 
 const DEFAULTS: DiffSettings = {
   viewMode: "split",
   hideUnchanged: true,
   fontSize: 13,
+  lineWrap: false,
+  ignoreWhitespace: false,
 };
 
 export function useDiffSettings(): [

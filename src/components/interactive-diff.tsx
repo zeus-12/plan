@@ -69,6 +69,10 @@ interface Props {
 
 /* ── Style helpers ────────────────────────────────────────── */
 
+function visualType(line: DiffLine): DiffLine["type"] {
+  return line.whitespaceOnly ? "context" : line.type;
+}
+
 function barColor(type: DiffLine["type"]) {
   if (type === "add") return "var(--diff-add-bar)";
   if (type === "remove") return "var(--diff-remove-bar)";
@@ -118,8 +122,8 @@ export function InteractiveDiff({
   /* ── Diff computation ───────────────────────────────────── */
 
   const dLines = useMemo(
-    () => buildDiffLines(oldText, newText),
-    [oldText, newText]
+    () => buildDiffLines(oldText, newText, settings.ignoreWhitespace),
+    [oldText, newText, settings.ignoreWhitespace]
   );
 
   const filtered: FilteredItem[] = useMemo(() => {
@@ -381,7 +385,7 @@ export function InteractiveDiff({
     const hls = hlsForLine(lineIdx);
 
     if (hls.length === 0) {
-      if (line.wordSegments && line.wordSegments.length > 0) {
+      if (line.wordSegments && line.wordSegments.length > 0 && !line.whitespaceOnly) {
         return renderWordSegments(line);
       }
       return txt || "\u00A0";
@@ -461,12 +465,13 @@ export function InteractiveDiff({
   });
 
   const contentCellStyle = (type: DiffLine["type"]): React.CSSProperties => ({
-    height: LINE_HEIGHT_PX,
+    minHeight: LINE_HEIGHT_PX,
     lineHeight: `${LINE_HEIGHT_PX}px`,
     fontSize: settings.fontSize,
     color: "var(--text)",
     background: lineBg(type),
-    whiteSpace: "pre",
+    whiteSpace: settings.lineWrap ? "pre-wrap" : "pre",
+    wordBreak: settings.lineWrap ? "break-all" : undefined,
     paddingLeft: 12,
     paddingRight: 16,
   });
@@ -558,13 +563,44 @@ export function InteractiveDiff({
             </option>
           ))}
         </select>
+        <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
+          {([true, false] as const).map((hide) => (
+            <button
+              key={String(hide)}
+              onClick={() => onSettingsChange({ hideUnchanged: hide })}
+              className={`px-2.5 py-1 transition-colors ${hide ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
+                settings.hideUnchanged === hide
+                  ? "bg-[var(--accent)] text-[var(--bg)]"
+                  : "text-[var(--text-tertiary)]"
+              }`}
+            >
+              {hide ? "Changes only" : "All lines"}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() =>
-            onSettingsChange({ hideUnchanged: !settings.hideUnchanged })
+            onSettingsChange({ lineWrap: !settings.lineWrap })
           }
-          className="rounded-md border border-[var(--border)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors"
+          className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
+            settings.lineWrap
+              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+              : "border-[var(--border)] text-[var(--text-tertiary)]"
+          }`}
         >
-          {settings.hideUnchanged ? "Show all lines" : "Hide unchanged"}
+          Line wrap
+        </button>
+        <button
+          onClick={() =>
+            onSettingsChange({ ignoreWhitespace: !settings.ignoreWhitespace })
+          }
+          className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
+            settings.ignoreWhitespace
+              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+              : "border-[var(--border)] text-[var(--text-tertiary)]"
+          }`}
+        >
+          Ignore whitespace
         </button>
       </div>
     );
@@ -618,19 +654,20 @@ export function InteractiveDiff({
               }
 
               const lineAnns = annotationsByEndLine.get(item.idx);
+              const vt = visualType(item);
 
               return (
                 <Fragment key={`u${i}`}>
                   <tr>
-                    <td style={barCellStyle(item.type)} />
+                    <td style={barCellStyle(vt)} />
                     {!isFirstVersion && (
-                      <td style={numCellStyle(item.type, item.type === "add")}>
+                      <td style={numCellStyle(vt, item.type === "add")}>
                         {item.oldNum ?? ""}
                       </td>
                     )}
                     <td
                       style={{
-                        ...numCellStyle(item.type, item.type === "remove"),
+                        ...numCellStyle(vt, item.type === "remove"),
                         borderRight: "1px solid var(--border)",
                       }}
                     >
@@ -638,7 +675,7 @@ export function InteractiveDiff({
                     </td>
                     <td
                       data-dline={item.idx}
-                      style={contentCellStyle(item.type)}
+                      style={contentCellStyle(vt)}
                     >
                       {renderContent(item.idx)}
                     </td>
@@ -694,21 +731,22 @@ export function InteractiveDiff({
     const hideNum =
       (side === "left" && line.type === "add") ||
       (side === "right" && line.type === "remove");
+    const vt = visualType(line);
 
     return (
       <tr key={key}>
         <td
           style={{
-            ...numCellStyle(line.type, hideNum),
+            ...numCellStyle(vt, hideNum),
             borderRight: "1px solid var(--border)",
           }}
         >
           {hideNum ? "" : (num ?? "")}
         </td>
-        <td style={barCellStyle(line.type)} />
+        <td style={barCellStyle(vt)} />
         <td
           data-dline={line.idx}
-          style={contentCellStyle(line.type)}
+          style={contentCellStyle(vt)}
         >
           {renderContent(line.idx)}
         </td>

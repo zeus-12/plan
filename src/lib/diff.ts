@@ -13,6 +13,7 @@ export interface DiffLine {
   idx: number;
   flatOffset: number;
   wordSegments?: WordSegment[];
+  whitespaceOnly?: boolean;
 }
 
 export interface Separator {
@@ -32,7 +33,11 @@ export type SplitRow = SplitPair | Separator;
 
 const CONTEXT_LINES_AROUND_CHANGES = 3;
 
-export function buildDiffLines(oldText: string, newText: string): DiffLine[] {
+export function buildDiffLines(
+  oldText: string,
+  newText: string,
+  ignoreWhitespace = false
+): DiffLine[] {
   const changes = diffLines(oldText || "", newText || "");
   const result: DiffLine[] = [];
   let oldNum = 1;
@@ -66,6 +71,7 @@ export function buildDiffLines(oldText: string, newText: string): DiffLine[] {
   }
 
   computeWordDiffs(result);
+  if (ignoreWhitespace) markWhitespaceOnlyChanges(result);
   return result;
 }
 
@@ -97,6 +103,49 @@ function computeWordDiffs(lines: DiffLine[]): void {
       adds[j].wordSegments = changes
         .filter((c) => !c.removed)
         .map((c) => ({ text: c.value, changed: !!c.added }));
+    }
+  }
+}
+
+function markWhitespaceOnlyChanges(lines: DiffLine[]): void {
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type !== "remove") {
+      if (lines[i].type === "add" && lines[i].content.trim() === "") {
+        lines[i].whitespaceOnly = true;
+      }
+      i++;
+      continue;
+    }
+
+    const removes: DiffLine[] = [];
+    while (i < lines.length && lines[i].type === "remove") {
+      removes.push(lines[i]);
+      i++;
+    }
+    const adds: DiffLine[] = [];
+    while (i < lines.length && lines[i].type === "add") {
+      adds.push(lines[i]);
+      i++;
+    }
+
+    const pairs = Math.min(removes.length, adds.length);
+    for (let j = 0; j < pairs; j++) {
+      if (removes[j].content.trim() === adds[j].content.trim()) {
+        removes[j].whitespaceOnly = true;
+        adds[j].whitespaceOnly = true;
+      }
+    }
+
+    for (let j = pairs; j < removes.length; j++) {
+      if (removes[j].content.trim() === "") {
+        removes[j].whitespaceOnly = true;
+      }
+    }
+    for (let j = pairs; j < adds.length; j++) {
+      if (adds[j].content.trim() === "") {
+        adds[j].whitespaceOnly = true;
+      }
     }
   }
 }
