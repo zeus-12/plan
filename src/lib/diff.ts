@@ -155,7 +155,8 @@ export function filterUnchangedLines(
   ctx: number = CONTEXT_LINES_AROUND_CHANGES
 ): FilteredItem[] {
   if (dLines.length === 0) return [];
-  const hasChanges = dLines.some((l) => l.type !== "context");
+  const isRealChange = (l: DiffLine) => l.type !== "context" && !l.whitespaceOnly;
+  const hasChanges = dLines.some(isRealChange);
   if (!hasChanges) {
     return [{ type: "separator", hiddenCount: dLines.length }];
   }
@@ -163,7 +164,7 @@ export function filterUnchangedLines(
   const visible = new Array(dLines.length).fill(false);
 
   for (let i = 0; i < dLines.length; i++) {
-    if (dLines[i].type !== "context") {
+    if (isRealChange(dLines[i])) {
       const lo = Math.max(0, i - ctx);
       const hi = Math.min(dLines.length - 1, i + ctx);
       for (let j = lo; j <= hi; j++) visible[j] = true;
