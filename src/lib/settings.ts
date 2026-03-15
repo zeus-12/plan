@@ -4,14 +4,19 @@ import { useState, useEffect, useCallback } from "react";
 
 const STORAGE_KEY = "plan-settings";
 
+export const FONT_SIZE_OPTIONS = [11, 12, 13, 14, 15, 16] as const;
+export type FontSize = (typeof FONT_SIZE_OPTIONS)[number];
+
 export interface DiffSettings {
   viewMode: "split" | "unified";
   hideUnchanged: boolean;
+  fontSize: FontSize;
 }
 
 const DEFAULTS: DiffSettings = {
   viewMode: "split",
   hideUnchanged: true,
+  fontSize: 13,
 };
 
 export function useDiffSettings(): [

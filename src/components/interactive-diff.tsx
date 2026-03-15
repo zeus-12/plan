@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Annotation } from "@/lib/store";
-import type { DiffSettings } from "@/lib/settings";
+import { type DiffSettings, FONT_SIZE_OPTIONS } from "@/lib/settings";
 import {
   type DiffLine,
   type FilteredItem,
@@ -460,6 +460,7 @@ export function InteractiveDiff({
   const contentCellStyle = (type: DiffLine["type"]): React.CSSProperties => ({
     height: LINE_HEIGHT_PX,
     lineHeight: `${LINE_HEIGHT_PX}px`,
+    fontSize: settings.fontSize,
     color: "var(--text)",
     background: lineBg(type),
     whiteSpace: "pre",
@@ -486,6 +487,15 @@ export function InteractiveDiff({
     cursor: "pointer",
     userSelect: "none",
     fontSize: 11,
+  };
+
+  const stickyLabelStyle: React.CSSProperties = {
+    position: "sticky",
+    left: 0,
+    display: "block",
+    width: "100cqi",
+    textAlign: "center",
+    pointerEvents: "none",
   };
 
   /* ── Inline comment card ─────────────────────────────────── */
@@ -561,6 +571,26 @@ export function InteractiveDiff({
             ))}
           </div>
         )}
+        <select
+          value={settings.fontSize}
+          onChange={(e) =>
+            onSettingsChange({ fontSize: Number(e.target.value) as DiffSettings["fontSize"] })
+          }
+          className="cursor-pointer appearance-none rounded-md border bg-transparent px-2 py-1 pr-5 font-[family-name:var(--font-mono)] text-[11px] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
+          style={{
+            borderColor: "var(--border)",
+            color: "var(--text-tertiary)",
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "right 4px center",
+          }}
+        >
+          {FONT_SIZE_OPTIONS.map((size) => (
+            <option key={size} value={size}>
+              {size}px
+            </option>
+          ))}
+        </select>
         <button
           onClick={() =>
             onSettingsChange({ hideUnchanged: !settings.hideUnchanged })
@@ -589,7 +619,7 @@ export function InteractiveDiff({
     const colCount = isFirstVersion ? 3 : 4;
 
     return (
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" style={{ containerType: "inline-size" }}>
         <table
           className="font-[family-name:var(--font-mono)]"
           style={{
@@ -609,7 +639,9 @@ export function InteractiveDiff({
                       className="font-[family-name:var(--font-mono)] transition-colors hover:bg-[var(--bg-surface-hover)]"
                       style={separatorCellStyle}
                     >
-                      ▸ {item.hiddenCount} unchanged lines
+                      <span style={stickyLabelStyle}>
+                        ▸ {item.hiddenCount} unchanged lines
+                      </span>
                     </td>
                   </tr>
                 );
@@ -636,7 +668,6 @@ export function InteractiveDiff({
                     </td>
                     <td
                       data-dline={item.idx}
-                      className="text-[13px]"
                       style={contentCellStyle(item.type)}
                     >
                       {renderContent(item.idx)}
@@ -708,7 +739,6 @@ export function InteractiveDiff({
         <td style={barCellStyle(line.type)} />
         <td
           data-dline={line.idx}
-          className="text-[13px]"
           style={contentCellStyle(line.type)}
         >
           {renderContent(line.idx)}
@@ -750,17 +780,11 @@ export function InteractiveDiff({
           <table
             className="font-[family-name:var(--font-mono)]"
             style={{
-              width: "100%",
-              tableLayout: "fixed",
+              minWidth: "100%",
               borderCollapse: "separate",
               borderSpacing: 0,
             }}
           >
-            <colgroup>
-              <col style={{ width: numColW }} />
-              <col style={{ width: BAR_WIDTH_PX }} />
-              <col />
-            </colgroup>
             <tbody>
               {splitRows.map((row, i) => {
                 if (row.type === "separator") {
@@ -772,7 +796,9 @@ export function InteractiveDiff({
                         className="font-[family-name:var(--font-mono)] transition-colors hover:bg-[var(--bg-surface-hover)]"
                         style={separatorCellStyle}
                       >
-                        ▸ {row.hiddenCount} unchanged lines
+                        <span style={stickyLabelStyle}>
+                          ▸ {row.hiddenCount} unchanged lines
+                        </span>
                       </td>
                     </tr>
                   );
@@ -822,12 +848,13 @@ export function InteractiveDiff({
           style={{
             flex: "0 0 50%",
             overflowX: "auto",
+            containerType: "inline-size",
             borderRight: "1px solid var(--border)",
           }}
         >
           {renderColumn("left")}
         </div>
-        <div style={{ flex: "0 0 50%", overflowX: "auto" }}>
+        <div style={{ flex: "0 0 50%", overflowX: "auto", containerType: "inline-size" }}>
           {renderColumn("right")}
         </div>
       </div>
