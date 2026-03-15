@@ -1,4 +1,9 @@
-import { diffLines } from "diff";
+import { diffLines, diffWordsWithSpace } from "diff";
+
+export interface WordSegment {
+  text: string;
+  changed: boolean;
+}
 
 export interface DiffLine {
   type: "add" | "remove" | "context";
@@ -7,6 +12,7 @@ export interface DiffLine {
   newNum?: number;
   idx: number;
   flatOffset: number;
+  wordSegments?: WordSegment[];
 }
 
 export interface Separator {
@@ -59,7 +65,40 @@ export function buildDiffLines(oldText: string, newText: string): DiffLine[] {
     }
   }
 
+  computeWordDiffs(result);
   return result;
+}
+
+function computeWordDiffs(lines: DiffLine[]): void {
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type !== "remove") {
+      i++;
+      continue;
+    }
+
+    const removes: DiffLine[] = [];
+    while (i < lines.length && lines[i].type === "remove") {
+      removes.push(lines[i]);
+      i++;
+    }
+    const adds: DiffLine[] = [];
+    while (i < lines.length && lines[i].type === "add") {
+      adds.push(lines[i]);
+      i++;
+    }
+
+    const pairs = Math.min(removes.length, adds.length);
+    for (let j = 0; j < pairs; j++) {
+      const changes = diffWordsWithSpace(removes[j].content, adds[j].content);
+      removes[j].wordSegments = changes
+        .filter((c) => !c.added)
+        .map((c) => ({ text: c.value, changed: !!c.removed }));
+      adds[j].wordSegments = changes
+        .filter((c) => !c.removed)
+        .map((c) => ({ text: c.value, changed: !!c.added }));
+    }
+  }
 }
 
 export function filterUnchangedLines(

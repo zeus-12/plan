@@ -24,9 +24,11 @@
   --diff-add-bg: #dafbe1;
   --diff-add-gutter: #aceebb;
   --diff-add-bar: #1a7f37;
+  --diff-add-word: #aceebb;
   --diff-remove-bg: #ffebe9;
   --diff-remove-gutter: #ffd7d5;
   --diff-remove-bar: #cf222e;
+  --diff-remove-word: #ffd7d5;
 }
 
 .dark {
@@ -51,9 +53,11 @@
   --diff-add-bg: rgba(46, 160, 67, 0.1);
   --diff-add-gutter: rgba(46, 160, 67, 0.2);
   --diff-add-bar: #3fb950;
+  --diff-add-word: rgba(46, 160, 67, 0.4);
   --diff-remove-bg: rgba(248, 81, 73, 0.1);
   --diff-remove-gutter: rgba(248, 81, 73, 0.2);
   --diff-remove-bar: #f85149;
+  --diff-remove-word: rgba(248, 81, 73, 0.4);
 }
 
 * {

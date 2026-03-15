@@ -340,10 +340,45 @@ export function InteractiveDiff({
     return out.sort((a, b) => a.s - b.s);
   }
 
+  function renderWordSegments(line: DiffLine): ReactNode {
+    const segs = line.wordSegments!;
+    const wordBg =
+      line.type === "add"
+        ? "var(--diff-add-word)"
+        : "var(--diff-remove-word)";
+
+    return (
+      <>
+        {segs.map((seg, i) =>
+          seg.changed ? (
+            <span
+              key={i}
+              style={{
+                background: wordBg,
+                borderRadius: "2px",
+              }}
+            >
+              {seg.text}
+            </span>
+          ) : (
+            <span key={i}>{seg.text}</span>
+          )
+        )}
+      </>
+    );
+  }
+
   function renderContent(lineIdx: number): ReactNode {
-    const txt = dLines[lineIdx].content;
+    const line = dLines[lineIdx];
+    const txt = line.content;
     const hls = hlsForLine(lineIdx);
-    if (hls.length === 0) return txt || "\u00A0";
+
+    if (hls.length === 0) {
+      if (line.wordSegments && line.wordSegments.length > 0) {
+        return renderWordSegments(line);
+      }
+      return txt || "\u00A0";
+    }
 
     const parts: ReactNode[] = [];
     let cur = 0;
@@ -710,18 +745,22 @@ export function InteractiveDiff({
     function renderColumn(side: "left" | "right") {
       return (
         <div
-          className="overflow-x-auto"
-          style={{ flex: "0 0 50%" }}
           data-split-side={side}
         >
           <table
             className="font-[family-name:var(--font-mono)]"
             style={{
-              minWidth: "100%",
+              width: "100%",
+              tableLayout: "fixed",
               borderCollapse: "separate",
               borderSpacing: 0,
             }}
           >
+            <colgroup>
+              <col style={{ width: numColW }} />
+              <col style={{ width: BAR_WIDTH_PX }} />
+              <col />
+            </colgroup>
             <tbody>
               {splitRows.map((row, i) => {
                 if (row.type === "separator") {
@@ -778,17 +817,17 @@ export function InteractiveDiff({
     }
 
     return (
-      <div className="flex" style={{ overflow: "hidden" }}>
+      <div className="flex">
         <div
           style={{
             flex: "0 0 50%",
-            overflow: "hidden",
+            overflowX: "auto",
             borderRight: "1px solid var(--border)",
           }}
         >
           {renderColumn("left")}
         </div>
-        <div style={{ flex: "0 0 50%", overflow: "hidden" }}>
+        <div style={{ flex: "0 0 50%", overflowX: "auto" }}>
           {renderColumn("right")}
         </div>
       </div>
