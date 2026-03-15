@@ -2,10 +2,55 @@
 
 import { useState } from "react";
 import { useStore } from "@/lib/store";
+import { useDiffSettings } from "@/lib/settings";
 import { useTheme } from "@/components/theme-provider";
 import { PlanInput } from "@/components/plan-input";
 import { InteractiveDiff } from "@/components/interactive-diff";
 import { MessageOutput } from "@/components/message-output";
+
+const HISTORY_PREVIEW_LEN = 60;
+
+function SunIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
 
 export default function Home() {
   const {
@@ -17,29 +62,45 @@ export default function Home() {
     reset,
   } = useStore();
   const { theme, toggle } = useTheme();
-  const [compareOpen, setCompareOpen] = useState(false);
+  const [settings, updateSettings] = useDiffSettings();
   const [compareBase, setCompareBase] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
 
   const latestIdx = versions.length - 1;
   const latest = versions.length > 0 ? versions[latestIdx] : null;
-  const prev = latestIdx > 0 ? versions[latestIdx - 1] : null;
+  const isFirstVersion = versions.length === 1;
+
+  // The left side of the diff: user picks which version to compare against
+  const leftVersion = versions[compareBase] ?? null;
+  const leftText = leftVersion?.text ?? "";
+
+  // For v1, diff against empty string so everything shows as additions
+  const diffOldText = isFirstVersion ? "" : leftText;
+
+  function handleAddVersion(text: string) {
+    setCompareBase(versions.length - 1);
+    addVersion(text);
+  }
 
   return (
-    <div className="mx-auto min-h-screen max-w-6xl px-6 py-8">
+    <div className="mx-auto min-h-screen max-w-[1800px] px-6 py-8">
       {/* Header */}
       <header className="mb-8 flex items-center justify-between">
         <h1
           className="font-[family-name:var(--font-mono)] text-base font-semibold tracking-tight"
           style={{ color: "var(--text)" }}
         >
-          planwise
+          plan
         </h1>
         <div className="flex items-center gap-2">
           {versions.length > 0 && (
             <button
-              onClick={reset}
+              onClick={() => {
+                reset();
+                setCompareBase(0);
+                setHistoryOpen(false);
+              }}
               className="rounded-md px-3 py-1.5 text-xs transition-colors hover:opacity-70"
               style={{ color: "var(--text-tertiary)" }}
             >
@@ -48,13 +109,13 @@ export default function Home() {
           )}
           <button
             onClick={toggle}
-            className="rounded-md border px-3 py-1.5 text-xs transition-colors"
+            className="flex items-center justify-center rounded-md border p-2 transition-colors hover:bg-[var(--bg-surface-hover)]"
             style={{
               borderColor: "var(--border)",
               color: "var(--text-secondary)",
             }}
           >
-            {theme === "dark" ? "Light" : "Dark"}
+            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
       </header>
@@ -64,13 +125,13 @@ export default function Home() {
         <div className="mt-24 flex flex-col items-center">
           <p
             className="mb-1 font-[family-name:var(--font-mono)] text-sm"
-            style={{ color: "var(--text-tertiary)" }}
+            style={{ color: "var(--text-secondary)" }}
           >
             Paste a plan to start iterating.
           </p>
           <p
             className="mb-6 text-xs"
-            style={{ color: "var(--text-tertiary)" }}
+            style={{ color: "var(--text-secondary)" }}
           >
             Select text, comment, copy the message, send it back, paste the new
             version, repeat.
@@ -83,22 +144,52 @@ export default function Home() {
 
       {/* Active session */}
       {latest && (
-        <div className="space-y-6">
-          {/* Version label */}
-          <div
-            className="font-[family-name:var(--font-mono)] text-xs"
-            style={{ color: "var(--text-tertiary)" }}
-          >
-            {prev
-              ? `v${latestIdx} → v${latestIdx + 1}`
-              : "v1"}
-            {" — select text to comment"}
-          </div>
+        <div className="space-y-5">
+          {/* Version selector — only shown when >1 version */}
+          {versions.length > 1 && (
+            <div className="flex items-center gap-3 font-[family-name:var(--font-mono)] text-xs">
+              <div className="flex items-center gap-2">
+                <select
+                  value={compareBase}
+                  onChange={(e) => setCompareBase(parseInt(e.target.value))}
+                  className="cursor-pointer appearance-none rounded-md border bg-transparent px-2.5 py-1.5 pr-6 font-[family-name:var(--font-mono)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
+                  style={{
+                    borderColor: "var(--border)",
+                    color: "var(--text)",
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "right 6px center",
+                  }}
+                >
+                  {versions.slice(0, -1).map((_, i) => (
+                    <option key={i} value={i}>
+                      v{i + 1}
+                    </option>
+                  ))}
+                </select>
 
-          {/* Interactive diff (main view) */}
+                <span style={{ color: "var(--text-tertiary)" }}>→</span>
+
+                <span
+                  className="rounded-md border px-2.5 py-1.5"
+                  style={{
+                    borderColor: "var(--border)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  v{latestIdx + 1}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Interactive diff */}
           <InteractiveDiff
-            oldText={prev?.text ?? ""}
+            oldText={diffOldText}
             newText={latest.text}
+            settings={settings}
+            onSettingsChange={updateSettings}
+            isFirstVersion={isFirstVersion}
             annotations={latest.annotations}
             onAddAnnotation={(sel, s, e, c) =>
               addAnnotation(latestIdx, sel, s, e, c)
@@ -109,90 +200,13 @@ export default function Home() {
             onRemoveAnnotation={(id) => removeAnnotation(latestIdx, id)}
           />
 
-          {/* Generated message — right below diff, prominent */}
+          {/* Generated message */}
           {latest.annotations.length > 0 && (
             <MessageOutput version={latest} />
           )}
 
           {/* Paste next version */}
-          <PlanInput onSubmit={addVersion} isFirstVersion={false} />
-
-          {/* Compare with earlier version */}
-          {versions.length > 1 && (
-            <section
-              className="rounded-lg border"
-              style={{
-                borderColor: "var(--border)",
-                background: "var(--bg-surface)",
-              }}
-            >
-              <button
-                onClick={() => {
-                  setCompareOpen((o) => !o);
-                }}
-                className="flex w-full items-center gap-2 px-4 py-3 text-left font-[family-name:var(--font-mono)] text-xs transition-colors"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                <span
-                  className="inline-block text-[10px] transition-transform"
-                  style={{
-                    transform: compareOpen
-                      ? "rotate(90deg)"
-                      : "rotate(0deg)",
-                  }}
-                >
-                  ▶
-                </span>
-                Compare versions
-              </button>
-
-              {compareOpen && (
-                <div
-                  className="px-4 pb-4"
-                  style={{ borderTop: "1px solid var(--border)" }}
-                >
-                  <div className="mt-3 mb-3 flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      {versions.slice(0, -1).map((_, i) => (
-                        <button
-                          key={i}
-                          onClick={() => setCompareBase(i)}
-                          className="rounded-md border px-3 py-1 font-[family-name:var(--font-mono)] text-xs transition-colors"
-                          style={{
-                            borderColor:
-                              compareBase === i
-                                ? "var(--accent)"
-                                : "var(--border)",
-                            background:
-                              compareBase === i
-                                ? "var(--accent)"
-                                : "transparent",
-                            color:
-                              compareBase === i
-                                ? "var(--bg)"
-                                : "var(--text-tertiary)",
-                          }}
-                        >
-                          v{i + 1}
-                        </button>
-                      ))}
-                    </div>
-                    <span
-                      className="font-[family-name:var(--font-mono)] text-xs"
-                      style={{ color: "var(--text-tertiary)" }}
-                    >
-                      → v{latestIdx + 1} (current)
-                    </span>
-                  </div>
-
-                  <InteractiveDiff
-                    oldText={versions[compareBase].text}
-                    newText={latest.text}
-                  />
-                </div>
-              )}
-            </section>
-          )}
+          <PlanInput onSubmit={handleAddVersion} isFirstVersion={false} />
 
           {/* Previous versions */}
           {versions.length > 1 && (
@@ -232,15 +246,15 @@ export default function Home() {
                     .map((v, ri) => {
                       const i = versions.length - 2 - ri;
                       const isExpanded = expandedHistory === i;
+                      const isLast = ri === versions.length - 2;
 
                       return (
                         <div
                           key={v.id}
                           style={{
-                            borderBottom:
-                              ri < versions.length - 2
-                                ? "1px solid var(--border)"
-                                : undefined,
+                            borderBottom: isLast
+                              ? undefined
+                              : "1px solid var(--border)",
                           }}
                         >
                           <button
@@ -263,8 +277,11 @@ export default function Home() {
                             <span style={{ color: "var(--text-secondary)" }}>
                               v{i + 1}
                             </span>
-                            <span className="truncate" style={{ maxWidth: "60%" }}>
-                              {v.text.split("\n")[0].slice(0, 60)}
+                            <span
+                              className="truncate"
+                              style={{ maxWidth: "60%" }}
+                            >
+                              {v.text.split("\n")[0].slice(0, HISTORY_PREVIEW_LEN)}
                             </span>
                           </button>
 
@@ -283,9 +300,7 @@ export default function Home() {
                               {v.annotations.length > 0 && (
                                 <div
                                   className="mt-2 text-xs"
-                                  style={{
-                                    color: "var(--text-tertiary)",
-                                  }}
+                                  style={{ color: "var(--text-tertiary)" }}
                                 >
                                   {v.annotations.length} comment
                                   {v.annotations.length !== 1 ? "s" : ""} on

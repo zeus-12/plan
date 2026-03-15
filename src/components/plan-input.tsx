@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 
+const MAX_TEXTAREA_HEIGHT = 300;
+
 interface PlanInputProps {
   onSubmit: (text: string) => void;
   isFirstVersion: boolean;
@@ -15,7 +17,7 @@ export function PlanInput({ onSubmit, isFirstVersion }: PlanInputProps) {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 300) + "px";
+    el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT) + "px";
   }, []);
 
   useEffect(() => {
@@ -36,10 +38,8 @@ export function PlanInput({ onSubmit, isFirstVersion }: PlanInputProps) {
     }
   }
 
-  function handlePaste(e: React.ClipboardEvent) {
-    // Allow natural paste, just auto-resize after
+  function handlePaste() {
     setTimeout(autoResize, 0);
-    void e;
   }
 
   return (
@@ -65,7 +65,7 @@ export function PlanInput({ onSubmit, isFirstVersion }: PlanInputProps) {
       />
       <div className="mt-2 flex items-center justify-between">
         <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-          {text.trim() ? "⌘ Enter to submit" : isFirstVersion ? "" : ""}
+          {text.trim() ? "⌘ Enter to submit" : ""}
         </span>
         <button
           onClick={handleSubmit}

@@ -2,6 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 
+const SELECTED_TEXT_TRUNCATE_LEN = 80;
+const POPOVER_WIDTH = 360;
+const MIN_BOTTOM_CLEARANCE = 260;
+const CLICK_OUTSIDE_DELAY_MS = 100;
+
 interface CommentPopoverProps {
   position: { top: number; left: number };
   selectedText: string;
@@ -47,7 +52,7 @@ export function CommentPopover({
     }
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", handleClickOutside);
-    }, 100);
+    }, CLICK_OUTSIDE_DELAY_MS);
     document.addEventListener("keydown", handleEscape);
     return () => {
       clearTimeout(timer);
@@ -70,20 +75,21 @@ export function CommentPopover({
   }
 
   const truncated =
-    selectedText.length > 80
-      ? selectedText.slice(0, 80) + "..."
+    selectedText.length > SELECTED_TEXT_TRUNCATE_LEN
+      ? selectedText.slice(0, SELECTED_TEXT_TRUNCATE_LEN) + "..."
       : selectedText;
 
-  const top = Math.min(position.top, window.innerHeight - 260);
-  const left = Math.max(8, Math.min(position.left, window.innerWidth - 390));
+  const top = Math.min(position.top, window.innerHeight - MIN_BOTTOM_CLEARANCE);
+  const left = Math.max(8, Math.min(position.left, window.innerWidth - POPOVER_WIDTH - 30));
 
   return (
     <div
       ref={popoverRef}
-      className="fixed z-50 w-[360px] rounded-lg border shadow-xl"
+      className="fixed z-50 rounded-lg border shadow-xl"
       style={{
         top,
         left,
+        width: POPOVER_WIDTH,
         background: "var(--popover-bg)",
         borderColor: "var(--popover-border)",
       }}

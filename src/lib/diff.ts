@@ -66,8 +66,11 @@ export function filterUnchangedLines(
   dLines: DiffLine[],
   ctx: number = CONTEXT_LINES_AROUND_CHANGES
 ): FilteredItem[] {
+  if (dLines.length === 0) return [];
   const hasChanges = dLines.some((l) => l.type !== "context");
-  if (!hasChanges) return dLines;
+  if (!hasChanges) {
+    return [{ type: "separator", hiddenCount: dLines.length }];
+  }
 
   const visible = new Array(dLines.length).fill(false);
 

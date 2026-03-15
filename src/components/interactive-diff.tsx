@@ -1,6 +1,14 @@
 "use client";
 
-import { useRef, useState, useMemo, type ReactNode } from "react";
+import {
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  Fragment,
+  type ReactNode,
+} from "react";
 import type { Annotation } from "@/lib/store";
 import type { DiffSettings } from "@/lib/settings";
 import {
@@ -17,11 +25,14 @@ import { CommentPopover } from "./comment-popover";
 /* ── Constants ────────────────────────────────────────────── */
 
 const LINE_HEIGHT_PX = 22;
-const SEPARATOR_HEIGHT_PX = 28;
-const COMMENT_CARD_HEIGHT_PX = 58;
-const COMMENT_GAP_PX = 6;
+const SEPARATOR_HEIGHT_PX = 32;
 const COMMENT_TRUNCATE_LEN = 55;
+const INLINE_COMMENT_ROW_HEIGHT_PX = 32;
 const POPOVER_VIEWPORT_PAD = 380;
+const NUM_DIGIT_WIDTH = 8;
+const NUM_COL_PAD = 12;
+const BAR_WIDTH_PX = 3;
+const GUTTER_FONT_SIZE = 11;
 
 /* ── Types ────────────────────────────────────────────────── */
 
@@ -42,6 +53,7 @@ interface Props {
   newText: string;
   settings: DiffSettings;
   onSettingsChange?: (patch: Partial<DiffSettings>) => void;
+  isFirstVersion?: boolean;
   annotations?: Annotation[];
   onAddAnnotation?: (
     sel: string,
@@ -53,26 +65,7 @@ interface Props {
   onRemoveAnnotation?: (id: string) => void;
 }
 
-/* ── Helpers ──────────────────────────────────────────────── */
-
-function layoutComments(
-  anns: Annotation[],
-  dLines: DiffLine[]
-): Array<{ annotation: Annotation; top: number; index: number }> {
-  const items = anns.map((a, i) => ({
-    annotation: a,
-    idealTop: getDiffLineForOffset(a.startOffset, dLines) * LINE_HEIGHT_PX,
-    index: i,
-  }));
-  items.sort((a, b) => a.idealTop - b.idealTop);
-
-  let lastBottom = 0;
-  return items.map((item) => {
-    const top = Math.max(item.idealTop, lastBottom);
-    lastBottom = top + COMMENT_CARD_HEIGHT_PX + COMMENT_GAP_PX;
-    return { ...item, top };
-  });
-}
+/* ── Style helpers ────────────────────────────────────────── */
 
 function barColor(type: DiffLine["type"]) {
   if (type === "add") return "var(--diff-add-bar)";
@@ -99,6 +92,7 @@ export function InteractiveDiff({
   newText,
   settings,
   onSettingsChange,
+  isFirstVersion = false,
   annotations = [],
   onAddAnnotation,
   onUpdateAnnotation,
@@ -108,9 +102,18 @@ export function InteractiveDiff({
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingSel | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
+  const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
+    new Set()
+  );
 
   const interactive = !!onAddAnnotation;
-  const hasAnns = annotations.length > 0;
+  const effectiveViewMode = isFirstVersion ? "unified" : settings.viewMode;
+
+  useEffect(() => {
+    setExpandedSeparators(new Set());
+  }, [oldText, newText, settings.hideUnchanged]);
+
+  /* ── Diff computation ───────────────────────────────────── */
 
   const dLines = useMemo(
     () => buildDiffLines(oldText, newText),
@@ -122,26 +125,73 @@ export function InteractiveDiff({
     return filterUnchangedLines(dLines);
   }, [dLines, settings.hideUnchanged]);
 
+  const expandedFiltered: FilteredItem[] = useMemo(() => {
+    if (expandedSeparators.size === 0) return filtered;
+    const result: FilteredItem[] = [];
+    let sepIdx = 0;
+    let linesSoFar = 0;
+    for (const item of filtered) {
+      if (item.type === "separator") {
+        if (expandedSeparators.has(sepIdx)) {
+          for (let j = 0; j < item.hiddenCount; j++) {
+            result.push(dLines[linesSoFar + j]);
+          }
+        } else {
+          result.push(item);
+        }
+        linesSoFar += item.hiddenCount;
+        sepIdx++;
+      } else {
+        result.push(item);
+        linesSoFar++;
+      }
+    }
+    return result;
+  }, [filtered, expandedSeparators, dLines]);
+
   const splitRows: SplitRow[] = useMemo(
-    () => buildSplitRows(filtered),
-    [filtered]
+    () => buildSplitRows(expandedFiltered),
+    [expandedFiltered]
   );
 
-  const commentPositions = useMemo(
-    () => (hasAnns ? layoutComments(annotations, dLines) : []),
-    [annotations, dLines, hasAnns]
+  /* ── Inline comment positions (by end line) ─────────────── */
+
+  const annotationsByEndLine = useMemo(() => {
+    const map = new Map<number, { annotation: Annotation; index: number }[]>();
+    annotations.forEach((a, i) => {
+      const lineIdx = getDiffLineForOffset(
+        Math.max(0, a.endOffset - 1),
+        dLines
+      );
+      const existing = map.get(lineIdx) || [];
+      existing.push({ annotation: a, index: i });
+      map.set(lineIdx, existing);
+    });
+    return map;
+  }, [annotations, dLines]);
+
+  /* ── Line number column width ───────────────────────────── */
+
+  const maxLineNum = dLines.reduce(
+    (m, l) => Math.max(m, l.oldNum ?? 0, l.newNum ?? 0),
+    0
   );
+  const numDigits = Math.max(String(maxLineNum).length, 1);
+  const numColW = numDigits * NUM_DIGIT_WIDTH + NUM_COL_PAD;
 
-  const lastCmt = commentPositions.at(-1);
-  const railHeight = lastCmt
-    ? lastCmt.top + COMMENT_CARD_HEIGHT_PX + 16
-    : 0;
+  /* ── Separator toggle ───────────────────────────────────── */
 
-  // Digit width for line number columns
-  const maxOld = dLines.reduce((m, l) => Math.max(m, l.oldNum ?? 0), 0);
-  const maxNew = dLines.reduce((m, l) => Math.max(m, l.newNum ?? 0), 0);
-  const numDigits = Math.max(String(maxOld).length, String(maxNew).length, 1);
-  const numColW = numDigits * 8 + 12;
+  const toggleSeparator = useCallback((idx: number) => {
+    setExpandedSeparators((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  }, []);
 
   /* ── Offset calculation ─────────────────────────────────── */
 
@@ -172,6 +222,19 @@ export function InteractiveDiff({
     return line.flatOffset + within;
   }
 
+  /* ── Split-side validation ──────────────────────────────── */
+
+  function findSplitSide(node: Node): string | null {
+    let el: Element | null =
+      node instanceof Element ? node : node.parentElement;
+    while (el && el !== contentRef.current) {
+      const side = el.getAttribute("data-split-side");
+      if (side) return side;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
   /* ── Selection ──────────────────────────────────────────── */
 
   function handleMouseUp() {
@@ -181,6 +244,16 @@ export function InteractiveDiff({
       if (!sel || sel.isCollapsed || !contentRef.current) return;
       const range = sel.getRangeAt(0);
       if (!contentRef.current.contains(range.commonAncestorContainer)) return;
+
+      if (effectiveViewMode === "split") {
+        const startSide = findSplitSide(range.startContainer);
+        const endSide = findSplitSide(range.endContainer);
+        if (!startSide || !endSide || startSide !== endSide) {
+          sel.removeAllRanges();
+          return;
+        }
+      }
+
       const text = sel.toString();
       if (!text.trim()) return;
 
@@ -195,7 +268,10 @@ export function InteractiveDiff({
         endOffset: end,
         popoverPos: {
           top: rect.bottom + 8,
-          left: Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)),
+          left: Math.max(
+            8,
+            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+          ),
         },
       });
     });
@@ -224,7 +300,10 @@ export function InteractiveDiff({
       annotation: ann,
       pos: {
         top: rect.bottom + 8,
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)),
+        left: Math.max(
+          8,
+          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+        ),
       },
     });
   }
@@ -270,15 +349,19 @@ export function InteractiveDiff({
     let cur = 0;
 
     for (const hl of hls) {
-      if (hl.s > cur) {
-        parts.push(<span key={`t${cur}`}>{txt.slice(cur, hl.s)}</span>);
+      const s = Math.max(hl.s, cur);
+      if (s >= hl.e) continue;
+
+      if (s > cur) {
+        parts.push(<span key={`t${cur}`}>{txt.slice(cur, s)}</span>);
       }
+
       const isAnn = hl.kind === "ann";
       const hovered = isAnn && hoveredAnnId === hl.annId;
 
       parts.push(
         <span
-          key={`h${hl.s}${hl.kind}${hl.annId ?? ""}`}
+          key={`h${s}${hl.kind}${hl.annId ?? ""}`}
           className={isAnn ? "cursor-pointer" : ""}
           style={{
             background: hovered
@@ -286,7 +369,9 @@ export function InteractiveDiff({
               : isAnn
                 ? "var(--highlight-bg)"
                 : "var(--selection-bg)",
-            borderBottom: isAnn ? "1.5px solid var(--text-tertiary)" : undefined,
+            borderBottom: isAnn
+              ? "1.5px solid var(--text-tertiary)"
+              : undefined,
             borderRadius: "2px",
           }}
           onClick={
@@ -305,7 +390,7 @@ export function InteractiveDiff({
           onMouseEnter={isAnn ? () => setHoveredAnnId(hl.annId!) : undefined}
           onMouseLeave={isAnn ? () => setHoveredAnnId(null) : undefined}
         >
-          {txt.slice(hl.s, hl.e)}
+          {txt.slice(s, hl.e)}
         </span>
       );
       cur = hl.e;
@@ -317,39 +402,93 @@ export function InteractiveDiff({
     return <>{parts}</>;
   }
 
-  /* ── Shared line renderers ──────────────────────────────── */
+  /* ── Shared cell styles ─────────────────────────────────── */
 
-  const lineNumStyle = (type: DiffLine["type"], hide?: boolean) => ({
+  const numCellStyle = (
+    type: DiffLine["type"],
+    hide?: boolean
+  ): React.CSSProperties => ({
     height: LINE_HEIGHT_PX,
     lineHeight: `${LINE_HEIGHT_PX}px`,
     minWidth: numColW,
+    width: numColW,
     color: hide ? "transparent" : "var(--text-tertiary)",
     background: gutterBg(type),
-    fontSize: 10,
+    fontSize: GUTTER_FONT_SIZE,
+    padding: "0 8px",
+    textAlign: "right",
+    verticalAlign: "middle",
+    userSelect: "none",
+    whiteSpace: "nowrap",
   });
 
-  const lineContentStyle = (type: DiffLine["type"]) => ({
+  const contentCellStyle = (type: DiffLine["type"]): React.CSSProperties => ({
     height: LINE_HEIGHT_PX,
     lineHeight: `${LINE_HEIGHT_PX}px`,
-    color: "var(--text)" as const,
+    color: "var(--text)",
     background: lineBg(type),
+    whiteSpace: "pre",
+    paddingLeft: 12,
+    paddingRight: 16,
   });
 
-  function renderSeparator(count: number, key: string | number, colSpan?: boolean) {
+  const barCellStyle = (type: DiffLine["type"]): React.CSSProperties => ({
+    width: BAR_WIDTH_PX,
+    minWidth: BAR_WIDTH_PX,
+    maxWidth: BAR_WIDTH_PX,
+    height: LINE_HEIGHT_PX,
+    padding: 0,
+    background: barColor(type),
+  });
+
+  const separatorCellStyle: React.CSSProperties = {
+    height: SEPARATOR_HEIGHT_PX,
+    background: "var(--bg)",
+    color: "var(--text-tertiary)",
+    borderTop: "1px solid var(--border)",
+    borderBottom: "1px solid var(--border)",
+    textAlign: "center",
+    cursor: "pointer",
+    userSelect: "none",
+    fontSize: 11,
+  };
+
+  /* ── Inline comment card ─────────────────────────────────── */
+
+  function renderInlineComment(ann: Annotation, index: number) {
+    const hovered = hoveredAnnId === ann.id;
+    const trunc =
+      ann.comment.length > COMMENT_TRUNCATE_LEN
+        ? ann.comment.slice(0, COMMENT_TRUNCATE_LEN) + "..."
+        : ann.comment;
+
     return (
       <div
-        key={key}
-        className="flex select-none items-center justify-center font-[family-name:var(--font-mono)] text-[11px]"
+        className="flex cursor-pointer items-start gap-2 py-1.5 pl-4 pr-3"
         style={{
-          height: SEPARATOR_HEIGHT_PX,
-          background: "var(--bg)",
-          color: "var(--text-tertiary)",
-          borderTop: "1px solid var(--border)",
-          borderBottom: "1px solid var(--border)",
-          ...(colSpan ? {} : {}),
+          background: hovered ? "var(--bg-surface-hover)" : "var(--bg)",
         }}
+        onClick={(e) =>
+          openEdit(
+            ann,
+            (e.currentTarget as HTMLElement).getBoundingClientRect()
+          )
+        }
+        onMouseEnter={() => setHoveredAnnId(ann.id)}
+        onMouseLeave={() => setHoveredAnnId(null)}
       >
-        ⋯ {count} unchanged lines
+        <span
+          className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold"
+          style={{ background: "var(--accent)", color: "var(--bg)" }}
+        >
+          {index + 1}
+        </span>
+        <span
+          className="text-[11px] leading-snug"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {trunc}
+        </span>
       </div>
     );
   }
@@ -360,29 +499,33 @@ export function InteractiveDiff({
     if (!onSettingsChange) return null;
     return (
       <div className="mb-2 flex items-center justify-end gap-2">
-        <div
-          className="inline-flex rounded-md border font-[family-name:var(--font-mono)] text-[11px]"
-          style={{ borderColor: "var(--border)" }}
-        >
-          {(["split", "unified"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => onSettingsChange({ viewMode: mode })}
-              className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l"}`}
-              style={{
-                borderColor: "var(--border)",
-                background:
-                  settings.viewMode === mode ? "var(--accent)" : "transparent",
-                color:
-                  settings.viewMode === mode
-                    ? "var(--bg)"
-                    : "var(--text-tertiary)",
-              }}
-            >
-              {mode === "split" ? "Split" : "Unified"}
-            </button>
-          ))}
-        </div>
+        {!isFirstVersion && (
+          <div
+            className="inline-flex rounded-md border font-[family-name:var(--font-mono)] text-[11px]"
+            style={{ borderColor: "var(--border)" }}
+          >
+            {(["split", "unified"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => onSettingsChange({ viewMode: mode })}
+                className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l"}`}
+                style={{
+                  borderColor: "var(--border)",
+                  background:
+                    settings.viewMode === mode
+                      ? "var(--accent)"
+                      : "transparent",
+                  color:
+                    settings.viewMode === mode
+                      ? "var(--bg)"
+                      : "var(--text-tertiary)",
+                }}
+              >
+                {mode === "split" ? "Split" : "Unified"}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           onClick={() =>
             onSettingsChange({ hideUnchanged: !settings.hideUnchanged })
@@ -399,115 +542,116 @@ export function InteractiveDiff({
     );
   }
 
-  /* ── Unified view ───────────────────────────────────────── */
+  /* ── Unified view (table-based) ─────────────────────────── */
 
   function renderUnified() {
+    const sepIndices: number[] = [];
+    let si = 0;
+    for (const item of expandedFiltered) {
+      sepIndices.push(item.type === "separator" ? si++ : -1);
+    }
+
+    const colCount = isFirstVersion ? 3 : 4;
+
     return (
-      <div className="flex">
-        {/* Bar */}
-        <div className="shrink-0 pt-2 pb-2" style={{ width: 3 }}>
-          {filtered.map((item, i) =>
-            item.type === "separator" ? (
-              <div key={`b${i}`} style={{ height: SEPARATOR_HEIGHT_PX }} />
-            ) : (
-              <div
-                key={`b${i}`}
-                style={{ height: LINE_HEIGHT_PX, background: barColor(item.type) }}
-              />
-            )
-          )}
-        </div>
-
-        {/* Old nums */}
-        <div
-          className="shrink-0 select-none pt-2 pb-2"
-          style={{ borderRight: "1px solid var(--border)" }}
+      <div className="overflow-x-auto">
+        <table
+          className="font-[family-name:var(--font-mono)]"
+          style={{
+            minWidth: "100%",
+            borderCollapse: "separate",
+            borderSpacing: 0,
+          }}
         >
-          {filtered.map((item, i) =>
-            item.type === "separator" ? (
-              <div key={`on${i}`} style={{ height: SEPARATOR_HEIGHT_PX }} />
-            ) : (
-              <div
-                key={`on${i}`}
-                className="flex items-center justify-end px-2 font-[family-name:var(--font-mono)]"
-                style={lineNumStyle(item.type, item.type === "add")}
-              >
-                {item.oldNum ?? ""}
-              </div>
-            )
-          )}
-        </div>
+          <tbody>
+            {expandedFiltered.map((item, i) => {
+              if (item.type === "separator") {
+                return (
+                  <tr key={`us${i}`}>
+                    <td
+                      colSpan={colCount}
+                      onClick={() => toggleSeparator(sepIndices[i])}
+                      className="font-[family-name:var(--font-mono)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                      style={separatorCellStyle}
+                    >
+                      ▸ {item.hiddenCount} unchanged lines
+                    </td>
+                  </tr>
+                );
+              }
 
-        {/* New nums */}
-        <div
-          className="shrink-0 select-none pt-2 pb-2"
-          style={{ borderRight: "1px solid var(--border)" }}
-        >
-          {filtered.map((item, i) =>
-            item.type === "separator" ? (
-              <div key={`nn${i}`} style={{ height: SEPARATOR_HEIGHT_PX }} />
-            ) : (
-              <div
-                key={`nn${i}`}
-                className="flex items-center justify-end px-2 font-[family-name:var(--font-mono)]"
-                style={lineNumStyle(item.type, item.type === "remove")}
-              >
-                {item.newNum ?? ""}
-              </div>
-            )
-          )}
-        </div>
+              const lineAnns = annotationsByEndLine.get(item.idx);
 
-        {/* Content */}
-        <div className="min-w-0 flex-1 select-text overflow-x-auto pt-2 pb-2">
-          <div className="w-max min-w-full">
-            {filtered.map((item, i) =>
-              item.type === "separator" ? (
-                renderSeparator(item.hiddenCount, `s${i}`)
-              ) : (
-                <div
-                  key={`c${i}`}
-                  data-dline={item.idx}
-                  className="whitespace-pre pl-3 pr-4 font-[family-name:var(--font-mono)] text-[13px]"
-                  style={lineContentStyle(item.type)}
-                >
-                  {renderContent(item.idx)}
-                </div>
-              )
-            )}
-          </div>
-        </div>
+              return (
+                <Fragment key={`u${i}`}>
+                  <tr>
+                    <td style={barCellStyle(item.type)} />
+                    {!isFirstVersion && (
+                      <td style={numCellStyle(item.type, item.type === "add")}>
+                        {item.oldNum ?? ""}
+                      </td>
+                    )}
+                    <td
+                      style={{
+                        ...numCellStyle(item.type, item.type === "remove"),
+                        borderRight: "1px solid var(--border)",
+                      }}
+                    >
+                      {item.newNum ?? ""}
+                    </td>
+                    <td
+                      data-dline={item.idx}
+                      className="text-[13px]"
+                      style={contentCellStyle(item.type)}
+                    >
+                      {renderContent(item.idx)}
+                    </td>
+                  </tr>
+                  {lineAnns?.map(({ annotation: ann, index }) => (
+                    <tr key={`cmt-${ann.id}`}>
+                      <td
+                        colSpan={colCount}
+                        style={{
+                          padding: 0,
+                          borderTop: "1px solid var(--border)",
+                          borderBottom: "1px solid var(--border)",
+                        }}
+                      >
+                        {renderInlineComment(ann, index)}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   }
 
-  /* ── Split view ─────────────────────────────────────────── */
+  /* ── Split view (table-based, column-isolated) ──────────── */
 
-  function renderSplitHalf(
+  function renderSplitRow(
     line: DiffLine | undefined,
     side: "left" | "right",
     key: string
   ) {
     if (!line) {
       return (
-        <div
-          key={key}
-          className="flex min-w-0 flex-1"
-          style={{
-            height: LINE_HEIGHT_PX,
-            background: "var(--bg)",
-          }}
-        >
-          <div
-            className="shrink-0 select-none px-2 font-[family-name:var(--font-mono)]"
+        <tr key={key}>
+          <td
             style={{
-              ...lineNumStyle("context", true),
+              ...numCellStyle("context", true),
               background: "var(--bg)",
+              borderRight: "1px solid var(--border)",
             }}
           />
-          <div className="shrink-0" style={{ width: 3, background: "transparent" }} />
-          <div className="flex-1" />
-        </div>
+          <td
+            style={{ ...barCellStyle("context"), background: "var(--bg)" }}
+          />
+          <td style={{ height: LINE_HEIGHT_PX, background: "var(--bg)" }} />
+        </tr>
       );
     }
 
@@ -517,63 +661,136 @@ export function InteractiveDiff({
       (side === "right" && line.type === "remove");
 
     return (
-      <div key={key} className="flex min-w-0 flex-1">
-        <div
-          className="shrink-0 select-none px-2 font-[family-name:var(--font-mono)]"
+      <tr key={key}>
+        <td
           style={{
-            ...lineNumStyle(line.type, hideNum),
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
+            ...numCellStyle(line.type, hideNum),
+            borderRight: "1px solid var(--border)",
           }}
         >
           {hideNum ? "" : (num ?? "")}
-        </div>
-        <div
-          className="shrink-0"
-          style={{ width: 3, height: LINE_HEIGHT_PX, background: barColor(line.type) }}
-        />
-        <div
+        </td>
+        <td style={barCellStyle(line.type)} />
+        <td
           data-dline={line.idx}
-          className="min-w-0 flex-1 whitespace-pre pl-3 pr-4 font-[family-name:var(--font-mono)] text-[13px]"
-          style={lineContentStyle(line.type)}
+          className="text-[13px]"
+          style={contentCellStyle(line.type)}
         >
           {renderContent(line.idx)}
-        </div>
-      </div>
+        </td>
+      </tr>
     );
   }
 
   function renderSplit() {
-    return (
-      <div>
-        {splitRows.map((row, i) => {
-          if (row.type === "separator") {
-            return renderSeparator(row.hiddenCount, `sep${i}`);
+    const sepIndices: number[] = [];
+    let si = 0;
+    for (const row of splitRows) {
+      sepIndices.push(row.type === "separator" ? si++ : -1);
+    }
+
+    const splitRowComments = splitRows.map((row) => {
+      if (row.type === "separator") return [];
+      const seen = new Set<string>();
+      const result: { annotation: Annotation; index: number }[] = [];
+      for (const line of [row.right, row.left]) {
+        if (!line) continue;
+        const anns = annotationsByEndLine.get(line.idx);
+        if (!anns) continue;
+        for (const a of anns) {
+          if (!seen.has(a.annotation.id)) {
+            seen.add(a.annotation.id);
+            result.push(a);
           }
-          return (
-            <div
-              key={`row${i}`}
-              className="flex"
-              style={{
-                borderBottom:
-                  i < splitRows.length - 1
-                    ? undefined
-                    : undefined,
-              }}
-            >
-              <div
-                className="flex min-w-0 flex-1 select-text overflow-x-auto"
-                style={{ borderRight: "1px solid var(--border)" }}
-              >
-                {renderSplitHalf(row.left, "left", `l${i}`)}
-              </div>
-              <div className="flex min-w-0 flex-1 select-text overflow-x-auto">
-                {renderSplitHalf(row.right, "right", `r${i}`)}
-              </div>
-            </div>
-          );
-        })}
+        }
+      }
+      return result;
+    });
+
+    function renderColumn(side: "left" | "right") {
+      return (
+        <div
+          className="overflow-x-auto"
+          style={{ flex: "0 0 50%" }}
+          data-split-side={side}
+        >
+          <table
+            className="font-[family-name:var(--font-mono)]"
+            style={{
+              minWidth: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+            }}
+          >
+            <tbody>
+              {splitRows.map((row, i) => {
+                if (row.type === "separator") {
+                  return (
+                    <tr key={`s${side}${i}`}>
+                      <td
+                        colSpan={3}
+                        onClick={() => toggleSeparator(sepIndices[i])}
+                        className="font-[family-name:var(--font-mono)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                        style={separatorCellStyle}
+                      >
+                        ▸ {row.hiddenCount} unchanged lines
+                      </td>
+                    </tr>
+                  );
+                }
+
+                const line = side === "left" ? row.left : row.right;
+                const comments = splitRowComments[i];
+
+                return (
+                  <Fragment key={`${side}${i}`}>
+                    {renderSplitRow(line, side, `r${side}${i}`)}
+                    {comments.map(({ annotation: ann, index: idx }) => (
+                      <tr key={`cmt-${side}-${ann.id}`}>
+                        <td
+                          colSpan={3}
+                          style={{
+                            padding: 0,
+                            borderTop: "1px solid var(--border)",
+                            borderBottom: "1px solid var(--border)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: INLINE_COMMENT_ROW_HEIGHT_PX,
+                              overflow: "hidden",
+                            }}
+                          >
+                            {side === "right"
+                              ? renderInlineComment(ann, idx)
+                              : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex" style={{ overflow: "hidden" }}>
+        <div
+          style={{
+            flex: "0 0 50%",
+            overflow: "hidden",
+            borderRight: "1px solid var(--border)",
+          }}
+        >
+          {renderColumn("left")}
+        </div>
+        <div style={{ flex: "0 0 50%", overflow: "hidden" }}>
+          {renderColumn("right")}
+        </div>
       </div>
     );
   }
@@ -581,77 +798,21 @@ export function InteractiveDiff({
   /* ── Main render ────────────────────────────────────────── */
 
   return (
-    <div className="relative">
+    <div>
       {renderSettingsBar()}
 
-      <div className="flex gap-5">
-        {/* Diff block — centered */}
-        <div
-          ref={contentRef}
-          onMouseUp={handleMouseUp}
-          className="min-w-0 flex-1 overflow-hidden rounded-lg border"
-          style={{
-            background: "var(--bg-surface)",
-            borderColor: "var(--border)",
-          }}
-        >
-          {settings.viewMode === "unified" ? renderUnified() : renderSplit()}
-        </div>
-
-        {/* Comments rail — outside the diff box */}
-        {hasAnns && interactive && (
-          <div
-            className="relative w-52 shrink-0 pt-2"
-            style={{ minHeight: railHeight + 16 }}
-          >
-            {commentPositions.map(({ annotation: ann, top, index }) => {
-              const hovered = hoveredAnnId === ann.id;
-              const trunc =
-                ann.comment.length > COMMENT_TRUNCATE_LEN
-                  ? ann.comment.slice(0, COMMENT_TRUNCATE_LEN) + "..."
-                  : ann.comment;
-
-              return (
-                <div
-                  key={ann.id}
-                  className="absolute left-0 right-0 cursor-pointer rounded-lg border p-2.5 transition-all"
-                  style={{
-                    top: top + 8,
-                    borderColor: hovered ? "var(--border-strong)" : "var(--border)",
-                    background: hovered ? "var(--bg-surface-hover)" : "var(--bg-surface)",
-                    boxShadow: hovered ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
-                  }}
-                  onClick={(e) =>
-                    openEdit(
-                      ann,
-                      (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    )
-                  }
-                  onMouseEnter={() => setHoveredAnnId(ann.id)}
-                  onMouseLeave={() => setHoveredAnnId(null)}
-                >
-                  <div className="flex items-start gap-2">
-                    <span
-                      className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold"
-                      style={{ background: "var(--accent)", color: "var(--bg)" }}
-                    >
-                      {index + 1}
-                    </span>
-                    <span
-                      className="text-[11px] leading-snug"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {trunc}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+      <div
+        ref={contentRef}
+        onMouseUp={handleMouseUp}
+        className="overflow-hidden rounded-lg border"
+        style={{
+          background: "var(--bg-surface)",
+          borderColor: "var(--border)",
+        }}
+      >
+        {effectiveViewMode === "unified" ? renderUnified() : renderSplit()}
       </div>
 
-      {/* Popovers */}
       {pending && (
         <CommentPopover
           position={pending.popoverPos}

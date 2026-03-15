@@ -127,13 +127,15 @@ export function useStore() {
   };
 }
 
+const MESSAGE_TRUNCATE_LEN = 120;
+
 export function generateMessage(version: PlanVersion): string {
   if (version.annotations.length === 0) return "";
 
   const lines = version.annotations.map((a, i) => {
     const truncated =
-      a.selectedText.length > 120
-        ? a.selectedText.slice(0, 120) + "..."
+      a.selectedText.length > MESSAGE_TRUNCATE_LEN
+        ? a.selectedText.slice(0, MESSAGE_TRUNCATE_LEN) + "..."
         : a.selectedText;
     return `${i + 1}. Regarding: "${truncated}"\n   → ${a.comment}`;
   });

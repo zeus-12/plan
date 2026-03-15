@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-const STORAGE_KEY = "planwise-settings";
+const STORAGE_KEY = "plan-settings";
 
 export interface DiffSettings {
   viewMode: "split" | "unified";

@@ -14,7 +14,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Planwise",
+  title: "Plan",
   description: "Iterate on plans with precision",
 };
 
