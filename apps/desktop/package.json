@@ -10,7 +10,9 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:renderer": "tsc --noEmit -p tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:renderer",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pack": "electron-vite build && electron-builder --mac",
+    "pack:dmg": "electron-vite build && electron-builder --mac dmg"
   },
   "dependencies": {
     "@plan/shared": "workspace:*",
@@ -24,6 +26,7 @@
     "@vitejs/plugin-react": "^4",
     "autoprefixer": "^10",
     "electron": "^35",
+    "electron-builder": "^26.8.1",
     "electron-vite": "^3",
     "postcss": "^8",
     "react": "^19",
