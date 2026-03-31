@@ -1,0 +1,23 @@
+{
+  "name": "@plan/shared",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./components/*": "./components/*.tsx",
+    "./lib/*": "./lib/*.ts",
+    "./globals.css": "./globals.css"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "diff": "^8"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "react": "^19",
+    "react-dom": "^19",
+    "diff": "^8.0.3"
+  }
+}

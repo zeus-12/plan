@@ -115,6 +115,11 @@ export function useStore() {
     []
   );
 
+  const initVersions = useCallback((versions: PlanVersion[]) => {
+    store = { ...store, versions };
+    emitChange();
+  }, []);
+
   const reset = useCallback(() => {
     store = { versions: [] };
     emitChange();
@@ -126,6 +131,7 @@ export function useStore() {
     addAnnotation,
     updateAnnotation,
     removeAnnotation,
+    initVersions,
     reset,
   };
 }

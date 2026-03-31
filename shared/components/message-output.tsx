@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { PlanVersion } from "@/lib/store";
-import { generateMessage } from "@/lib/store";
+import type { PlanVersion } from "../lib/store";
+import { generateMessage } from "../lib/store";
 
 interface MessageOutputProps {
   version: PlanVersion;

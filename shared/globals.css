@@ -1,7 +1,3 @@
-@import "tailwindcss";
-
-@custom-variant dark (&:where(.dark, .dark *));
-
 :root {
   --bg: #fafafa;
   --bg-surface: #ffffff;
@@ -64,6 +60,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -72,4 +72,27 @@ body {
 
 ::selection {
   background: var(--selection-bg);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }

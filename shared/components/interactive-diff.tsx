@@ -9,8 +9,8 @@ import {
   Fragment,
   type ReactNode,
 } from "react";
-import type { Annotation } from "@/lib/store";
-import { type DiffSettings, FONT_SIZE_OPTIONS } from "@/lib/settings";
+import type { Annotation } from "../lib/store";
+import { type DiffSettings, FONT_SIZE_OPTIONS } from "../lib/settings";
 import {
   type DiffLine,
   type FilteredItem,
@@ -19,7 +19,7 @@ import {
   filterUnchangedLines,
   buildSplitRows,
   getDiffLineForOffset,
-} from "@/lib/diff";
+} from "../lib/diff";
 import { CommentPopover } from "./comment-popover";
 
 /* ── Constants ────────────────────────────────────────────── */

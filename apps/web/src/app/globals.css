@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@import "@plan/shared/globals.css";
+
+@source "../../../../shared";
+
+@custom-variant dark (&:where(.dark, .dark *));

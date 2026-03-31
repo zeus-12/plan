@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useStore } from "@/lib/store";
-import { useDiffSettings } from "@/lib/settings";
-import { useTheme } from "@/components/theme-provider";
-import { PlanInput } from "@/components/plan-input";
-import { InteractiveDiff } from "@/components/interactive-diff";
-import { MessageOutput } from "@/components/message-output";
+import { useStore } from "@plan/shared/lib/store";
+import { useDiffSettings } from "@plan/shared/lib/settings";
+import { useTheme } from "@plan/shared/components/theme-provider";
+import { PlanInput } from "@plan/shared/components/plan-input";
+import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
+import { MessageOutput } from "@plan/shared/components/message-output";
 
 const HISTORY_PREVIEW_LEN = 60;
 
@@ -161,7 +161,7 @@ export default function Home() {
                     backgroundPosition: "right 6px center",
                   }}
                 >
-                  {versions.slice(0, -1).map((_, i) => (
+                  {versions.slice(0, -1).map((_v, i) => (
                     <option key={i} value={i}>
                       v{i + 1}
                     </option>
