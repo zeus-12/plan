@@ -31,7 +31,7 @@ import {
   buildProjectTree,
   flattenTree,
   type VisibleItem,
-} from "../lib/projectTree";
+} from "../lib/project-tree";
 
 interface Props {
   projects: ProjectEntry[];

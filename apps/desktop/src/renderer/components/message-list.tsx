@@ -145,17 +145,21 @@ function CollapsibleBlock({
 function AnnotatedText({
   text,
   partAnnotations,
+  pendingRange,
   onClickAnnotation,
   onHover,
   hoveredId,
 }: {
   text: string;
   partAnnotations: ChatAnnotation[];
+  /** The in-progress selection (popover open) — kept visually highlighted
+   *  since the native selection clears once the popover textarea focuses. */
+  pendingRange: { start: number; end: number } | null;
   onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
   onHover: (id: string | null) => void;
   hoveredId: string | null;
 }) {
-  if (partAnnotations.length === 0) {
+  if (partAnnotations.length === 0 && !pendingRange) {
     return (
       <pre
         data-text-part="true"
@@ -172,6 +176,10 @@ function AnnotatedText({
     bounds.add(a.startOffset);
     bounds.add(a.endOffset);
   }
+  if (pendingRange) {
+    bounds.add(pendingRange.start);
+    bounds.add(pendingRange.end);
+  }
   const sorted = [...bounds]
     .filter((b) => b >= 0 && b <= text.length)
     .sort((a, b) => a - b);
@@ -184,13 +192,19 @@ function AnnotatedText({
     const ann = partAnnotations.find(
       (a) => a.startOffset <= s && s < a.endOffset
     );
+    const isPending =
+      !ann &&
+      pendingRange != null &&
+      pendingRange.start <= s &&
+      s < pendingRange.end;
     const hovered = ann && hoveredId === ann.id;
     parts.push(
       <span
         key={s}
         className={cn(
           ann &&
-            "cursor-pointer rounded-sm border-b-[1.5px] border-[var(--text-tertiary)]"
+            "cursor-pointer rounded-sm border-b-[1.5px] border-[var(--text-tertiary)]",
+          isPending && "rounded-sm"
         )}
         style={
           ann
@@ -199,7 +213,9 @@ function AnnotatedText({
                   ? "var(--highlight-bg-hover)"
                   : "var(--highlight-bg)",
               }
-            : undefined
+            : isPending
+              ? { background: "var(--selection-bg)" }
+              : undefined
         }
         onClick={
           ann
@@ -235,6 +251,7 @@ function MessagePartView({
   partIndex,
   message,
   annotations,
+  pendingRange,
   onClickAnnotation,
   hoveredId,
   onHover,
@@ -243,6 +260,7 @@ function MessagePartView({
   partIndex: number;
   message: ConversationMessage;
   annotations: ChatAnnotation[];
+  pendingRange: { start: number; end: number } | null;
   onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
   hoveredId: string | null;
   onHover: (id: string | null) => void;
@@ -257,6 +275,7 @@ function MessagePartView({
           <AnnotatedText
             text={part.text}
             partAnnotations={annotations}
+            pendingRange={pendingRange}
             onClickAnnotation={onClickAnnotation}
             hoveredId={hoveredId}
             onHover={onHover}
@@ -521,6 +540,16 @@ export function MessageList({
                         partIndex={i}
                         message={m}
                         annotations={partMap?.get(i) ?? []}
+                        pendingRange={
+                          pending &&
+                          pending.messageUuid === m.uuid &&
+                          pending.partIndex === i
+                            ? {
+                                start: pending.startOffset,
+                                end: pending.endOffset,
+                              }
+                            : null
+                        }
                         onClickAnnotation={(ann, rect) =>
                           setEditing({
                             annotation: ann,

@@ -12,10 +12,10 @@ import {
 } from "@plan/shared/components/ui/tabs";
 import { cn } from "@plan/shared/lib/utils";
 import type { Plan, DiscoveredRepo } from "../../shared-types";
-import { FileList, type RepoFileGroup } from "./fileList";
-import { SessionList, type SessionListItem } from "./sessionList";
-import { PlansList } from "./plansList";
-import { CommitPanel } from "./commitPanel";
+import { FileList, type RepoFileGroup } from "./file-list";
+import { SessionList, type SessionListItem } from "./session-list";
+import { PlansList } from "./plans-list";
+import { CommitPanel } from "./commit-panel";
 
 export type WorkTab = "diffs" | "chat" | "plans";
 

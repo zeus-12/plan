@@ -23,13 +23,13 @@ import type {
   GitFileStatus,
   DiscoveredRepo,
 } from "../../shared-types";
-import { MiddleSidebar, type WorkTab } from "./middleSidebar";
-import { FileDiffViewer } from "./fileDiffViewer";
-import { MessageList, type ChatAnnotation } from "./messageList";
-import { PlanViewer } from "./planViewer";
-import { useConfirm } from "./confirmDialog";
-import type { SessionListItem } from "./sessionList";
-import type { FileEntry, RepoFileGroup } from "./fileList";
+import { MiddleSidebar, type WorkTab } from "./middle-sidebar";
+import { FileDiffViewer } from "./file-diff-viewer";
+import { MessageList, type ChatAnnotation } from "./message-list";
+import { PlanViewer } from "./plan-viewer";
+import { useConfirm } from "./confirm-dialog";
+import type { SessionListItem } from "./session-list";
+import type { FileEntry, RepoFileGroup } from "./file-list";
 
 interface Props {
   project: ProjectEntry;

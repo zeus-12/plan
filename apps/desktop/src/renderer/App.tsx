@@ -5,8 +5,8 @@ import {
 } from "@plan/shared/components/ui/sidebar";
 import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
-import { ProjectSidebar } from "./components/projectSidebar";
-import { ProjectWorkspace } from "./components/projectWorkspace";
+import { ProjectSidebar } from "./components/project-sidebar";
+import { ProjectWorkspace } from "./components/project-workspace";
 
 function Shell() {
   const projectsSidebar = useSidebar();
