@@ -20,6 +20,15 @@ import {
   buildSplitRows,
   getDiffLineForOffset,
 } from "../lib/diff";
+import {
+  type Change,
+  applyChangeLeftToRight,
+  applyChangeRightToLeft,
+  buildLineToChangeMap,
+  computeChanges,
+} from "../lib/diff-merge";
+import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
+import { useShikiReady } from "../lib/shiki";
 import { CommentPopover } from "./comment-popover";
 
 /* ── Constants ────────────────────────────────────────────── */
@@ -55,6 +64,8 @@ interface Props {
   settings: DiffSettings;
   onSettingsChange?: (patch: Partial<DiffSettings>) => void;
   isFirstVersion?: boolean;
+  /** Language id (see LANGUAGES in shared/lib/highlight). "auto"/"plaintext" disables coloring. */
+  language?: string;
   annotations?: Annotation[];
   onAddAnnotation?: (
     sel: string,
@@ -65,6 +76,31 @@ interface Props {
   ) => void;
   onUpdateAnnotation?: (id: string, comment: string) => void;
   onRemoveAnnotation?: (id: string) => void;
+  /**
+   * Opt-in merge UI. When provided, each change becomes interactive: a small
+   * "merge" affordance appears in the gutter; clicking it lifts a floating
+   * card with two directional Merge buttons. The handler receives the next
+   * left/right text after the merge is applied.
+   */
+  onMergeChange?: (next: { left: string; right: string }) => void;
+  /**
+   * Opt-in VS Code-style per-hunk staging. When provided, hovering a change
+   * block reveals Stage/Revert (or Unstage) controls. Handlers receive the
+   * block's 1-based line range so the caller can match it to a git hunk.
+   */
+  hunkActions?: {
+    isStaged: boolean;
+    onStage: (range: HunkRange) => void;
+    onRevert: (range: HunkRange) => void;
+    onUnstage: (range: HunkRange) => void;
+  };
+}
+
+export interface HunkRange {
+  oldStart: number | null;
+  oldEnd: number | null;
+  newStart: number | null;
+  newEnd: number | null;
 }
 
 /* ── Style helpers ────────────────────────────────────────── */
@@ -91,6 +127,113 @@ function gutterBg(type: DiffLine["type"]) {
   return undefined;
 }
 
+/* ── Merge overlay (lifted card over a change) ────────────── */
+
+interface MergeOverlayProps {
+  top: number;
+  height: number;
+  currentIdx: number;
+  totalChanges: number;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onApplyLeftToRight: () => void;
+  onApplyRightToLeft: () => void;
+}
+
+/** Header/footer strip heights — kept narrow so the overlay barely intrudes. */
+const STRIP_H = 26;
+
+function MergeOverlay({
+  top,
+  height,
+  currentIdx,
+  totalChanges,
+  onClose,
+  onPrev,
+  onNext,
+  onApplyLeftToRight,
+  onApplyRightToLeft,
+}: MergeOverlayProps) {
+  // Total absolute slot: a thin strip ABOVE the change + the change rows
+  // themselves (transparent middle, the diff lines beneath show through) + a
+  // thin strip BELOW. Strips overlap whatever context row was immediately
+  // adjacent to the change.
+  return (
+    <div
+      data-merge-overlay
+      className="pointer-events-none absolute inset-x-0 z-20"
+      style={{ top: top - STRIP_H, height: height + STRIP_H * 2 }}
+    >
+      {/* Frame: just a ring around the whole slot, no background */}
+      <div className="pointer-events-none absolute inset-x-2 inset-y-0 rounded-md shadow-[0_6px_18px_rgba(0,0,0,0.18)] ring-2 ring-[var(--accent)]" />
+
+      {/* Header strip (above the change) */}
+      <div
+        className="pointer-events-auto absolute inset-x-2 top-0 flex items-center justify-between gap-2 rounded-t-md border-b border-[var(--accent)]/30 bg-[var(--bg-surface)] px-2"
+        style={{ height: STRIP_H }}
+      >
+        <div className="flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)]">
+          <span>
+            Change {currentIdx + 1}{" "}
+            <span className="text-[var(--text-tertiary)]">of {totalChanges}</span>
+          </span>
+          <button
+            onClick={onPrev}
+            className="ml-2 rounded px-1.5 py-0.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]"
+            aria-label="Previous change"
+            title="Previous change"
+          >
+            ↑
+          </button>
+          <button
+            onClick={onNext}
+            className="rounded px-1.5 py-0.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]"
+            aria-label="Next change"
+            title="Next change"
+          >
+            ↓
+          </button>
+        </div>
+        <button
+          onClick={onClose}
+          className="flex h-5 w-5 items-center justify-center rounded text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+          aria-label="Close"
+          title="Close (Esc)"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Footer strip (below the change). Each button sits on its own side and
+          its arrow points the way the change is copied: the left button takes
+          the LEFT version and applies it to the RIGHT (→); the right button
+          takes the RIGHT version and applies it to the LEFT (←). */}
+      <div
+        className="pointer-events-auto absolute inset-x-2 bottom-0 flex items-center justify-between gap-3 rounded-b-md border-t border-[var(--accent)]/30 bg-[var(--bg-surface)] px-2"
+        style={{ height: STRIP_H }}
+      >
+        <button
+          onClick={onApplyLeftToRight}
+          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--diff-add-bar)] px-2.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-white transition-opacity hover:opacity-90"
+          title="Copy the left side's version to the right"
+        >
+          <span>Merge</span>
+          <span aria-hidden>→</span>
+        </button>
+        <button
+          onClick={onApplyRightToLeft}
+          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--diff-remove-bar)] px-2.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-white transition-opacity hover:opacity-90"
+          title="Copy the right side's version to the left"
+        >
+          <span aria-hidden>←</span>
+          <span>Merge</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Component ────────────────────────────────────────────── */
 
 export function InteractiveDiff({
@@ -99,11 +242,16 @@ export function InteractiveDiff({
   settings,
   onSettingsChange,
   isFirstVersion = false,
+  language = "plaintext",
   annotations = [],
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
+  onMergeChange,
+  hunkActions,
 }: Props) {
+  const mergeEnabled = !!onMergeChange;
+  const hunkActionsEnabled = !!hunkActions;
   const contentRef = useRef<HTMLDivElement>(null);
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingSel | null>(null);
@@ -158,6 +306,183 @@ export function InteractiveDiff({
   const splitRows: SplitRow[] = useMemo(
     () => buildSplitRows(expandedFiltered),
     [expandedFiltered]
+  );
+
+  /* ── Syntax highlighting (per source line) ─────────────────── */
+
+  // Triggers re-render once shiki finishes loading so first-paint tokens
+  // (which were empty) get replaced with colored ones.
+  const shikiReady = useShikiReady();
+  const oldLineTokens = useMemo(
+    () => highlightPerLine(oldText, language),
+    // shikiReady is part of the deps so memo invalidates when the highlighter
+    // becomes ready.
+    [oldText, language, shikiReady]
+  );
+  const newLineTokens = useMemo(
+    () => highlightPerLine(newText, language),
+    [newText, language, shikiReady]
+  );
+
+  function tokensForDiffLine(line: DiffLine): SyntaxToken[] {
+    if (line.type === "remove") {
+      return oldLineTokens[(line.oldNum ?? 0) - 1] ?? [];
+    }
+    return newLineTokens[(line.newNum ?? 0) - 1] ?? [];
+  }
+
+  /* ── Change blocks (for the merge overlay) ─────────────── */
+
+  const blocksEnabled = mergeEnabled || hunkActionsEnabled;
+  const changes: Change[] = useMemo(
+    () => (blocksEnabled ? computeChanges(dLines) : []),
+    [dLines, blocksEnabled]
+  );
+  const lineToChange = useMemo(
+    () => (blocksEnabled ? buildLineToChangeMap(changes) : new Map<number, number>()),
+    [changes, blocksEnabled]
+  );
+
+  const [activeChangeIdx, setActiveChangeIdx] = useState<number | null>(null);
+  const [overlayPos, setOverlayPos] = useState<
+    { top: number; height: number } | null
+  >(null);
+
+  // Reset active change whenever the underlying texts change (their change
+  // indices are no longer valid).
+  useEffect(() => {
+    setActiveChangeIdx(null);
+    setOverlayPos(null);
+  }, [oldText, newText]);
+
+  // Compute overlay position when active change changes (or after a settings
+  // change that may have shifted rows around).
+  useEffect(() => {
+    if (activeChangeIdx === null || !contentRef.current) {
+      setOverlayPos(null);
+      return;
+    }
+    const change = changes[activeChangeIdx];
+    if (!change) return;
+    const root = contentRef.current;
+    const startEl = root.querySelector<HTMLElement>(
+      `[data-dline="${change.startLineIdx}"]`
+    );
+    const endEl = root.querySelector<HTMLElement>(
+      `[data-dline="${change.endLineIdx}"]`
+    );
+    if (!startEl || !endEl) return;
+    const rootRect = root.getBoundingClientRect();
+    const startRect = startEl.getBoundingClientRect();
+    const endRect = endEl.getBoundingClientRect();
+    setOverlayPos({
+      top: startRect.top - rootRect.top,
+      height: endRect.bottom - startRect.top,
+    });
+  }, [activeChangeIdx, changes, settings.viewMode, settings.hideUnchanged, expandedSeparators]);
+
+  // Close overlay on outside click or Escape.
+  useEffect(() => {
+    if (activeChangeIdx === null) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setActiveChangeIdx(null);
+      }
+    }
+    function onDown(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (!target) return;
+      // Click outside the overlay closes it. The overlay sets data attr.
+      const overlay = document.querySelector("[data-merge-overlay]");
+      if (overlay && overlay.contains(target)) return;
+      setActiveChangeIdx(null);
+    }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [activeChangeIdx]);
+
+  const applyMerge = useCallback(
+    (direction: "leftToRight" | "rightToLeft") => {
+      if (activeChangeIdx === null || !onMergeChange) return;
+      const change = changes[activeChangeIdx];
+      if (!change) return;
+      const next =
+        direction === "rightToLeft"
+          ? { left: applyChangeRightToLeft(oldText, change, dLines), right: newText }
+          : { left: oldText, right: applyChangeLeftToRight(newText, change, dLines) };
+      onMergeChange(next);
+      setActiveChangeIdx(null);
+    },
+    [activeChangeIdx, changes, dLines, oldText, newText, onMergeChange]
+  );
+
+  const goToChange = useCallback(
+    (delta: number) => {
+      if (changes.length === 0) return;
+      const cur = activeChangeIdx ?? -1;
+      const next = (cur + delta + changes.length) % changes.length;
+      setActiveChangeIdx(next);
+    },
+    [changes.length, activeChangeIdx]
+  );
+
+  /* ── Inline hunk-staging affordance ─────────────────────── */
+
+  const [hoverChangeIdx, setHoverChangeIdx] = useState<number | null>(null);
+  const [hunkCtrlTop, setHunkCtrlTop] = useState<number | null>(null);
+
+  useEffect(() => {
+    setHoverChangeIdx(null);
+  }, [oldText, newText]);
+
+  useEffect(() => {
+    if (
+      !hunkActionsEnabled ||
+      hoverChangeIdx === null ||
+      !contentRef.current
+    ) {
+      setHunkCtrlTop(null);
+      return;
+    }
+    const change = changes[hoverChangeIdx];
+    if (!change) return;
+    const root = contentRef.current;
+    const startEl = root.querySelector<HTMLElement>(
+      `[data-dline="${change.startLineIdx}"]`
+    );
+    if (!startEl) return;
+    const rootRect = root.getBoundingClientRect();
+    const startRect = startEl.getBoundingClientRect();
+    setHunkCtrlTop(startRect.top - rootRect.top);
+  }, [
+    hunkActionsEnabled,
+    hoverChangeIdx,
+    changes,
+    settings.viewMode,
+    settings.hideUnchanged,
+    expandedSeparators,
+  ]);
+
+  const changeRange = useCallback(
+    (change: Change): HunkRange => {
+      const olds = change.removed
+        .map((l) => l.oldNum)
+        .filter((n): n is number => typeof n === "number");
+      const news = change.added
+        .map((l) => l.newNum)
+        .filter((n): n is number => typeof n === "number");
+      return {
+        oldStart: olds.length ? Math.min(...olds) : null,
+        oldEnd: olds.length ? Math.max(...olds) : null,
+        newStart: news.length ? Math.min(...news) : null,
+        newEnd: news.length ? Math.max(...news) : null,
+      };
+    },
+    []
   );
 
   /* ── Inline comment positions (by end line) ─────────────── */
@@ -357,89 +682,141 @@ export function InteractiveDiff({
     return out.sort((a, b) => a.s - b.s);
   }
 
-  function renderWordSegments(line: DiffLine): ReactNode {
-    const segs = line.wordSegments!;
-    const wordBg =
-      line.type === "add"
-        ? "bg-[var(--diff-add-word)]"
-        : "bg-[var(--diff-remove-word)]";
-
-    return (
-      <>
-        {segs.map((seg, i) =>
-          seg.changed ? (
-            <span key={i} className={`${wordBg} rounded-sm`}>
-              {seg.text}
-            </span>
-          ) : (
-            <span key={i}>{seg.text}</span>
-          )
-        )}
-      </>
-    );
-  }
-
   function renderContent(lineIdx: number): ReactNode {
     const line = dLines[lineIdx];
     const txt = line.content;
-    const hls = hlsForLine(lineIdx);
+    if (!txt) return "\u00A0";
 
-    if (hls.length === 0) {
-      if (line.wordSegments && line.wordSegments.length > 0 && !line.whitespaceOnly) {
-        return renderWordSegments(line);
+    const hls = hlsForLine(lineIdx);
+    const syntax = tokensForDiffLine(line);
+    const wordSegments =
+      line.wordSegments && !line.whitespaceOnly ? line.wordSegments : null;
+    const wordBgVar =
+      line.type === "add"
+        ? "var(--diff-add-word)"
+        : line.type === "remove"
+          ? "var(--diff-remove-word)"
+          : null;
+
+    if (hls.length === 0 && syntax.length === 0 && !wordSegments) {
+      return txt;
+    }
+
+    // Build flat list of breakpoints (every range start/end), then walk segments
+    const bounds = new Set<number>([0, txt.length]);
+    for (const t of syntax) {
+      bounds.add(t.start);
+      bounds.add(t.end);
+    }
+    if (wordSegments) {
+      let off = 0;
+      for (const w of wordSegments) {
+        bounds.add(off);
+        off += w.text.length;
+        bounds.add(off);
       }
-      return txt || "\u00A0";
+    }
+    for (const h of hls) {
+      bounds.add(h.s);
+      bounds.add(h.e);
+    }
+    const sorted = [...bounds]
+      .filter((b) => b >= 0 && b <= txt.length)
+      .sort((a, b) => a - b);
+
+    // Pre-index word-segment offsets so we can look up per char
+    let wordOffsets: { start: number; end: number; changed: boolean }[] = [];
+    if (wordSegments) {
+      let off = 0;
+      for (const w of wordSegments) {
+        wordOffsets.push({
+          start: off,
+          end: off + w.text.length,
+          changed: w.changed,
+        });
+        off += w.text.length;
+      }
+    }
+
+    function findSyntax(pos: number) {
+      for (const t of syntax) if (t.start <= pos && pos < t.end) return t;
+      return null;
+    }
+    function findAnn(pos: number) {
+      for (const h of hls) if (h.s <= pos && pos < h.e) return h;
+      return null;
+    }
+    function findWord(pos: number) {
+      for (const w of wordOffsets) if (w.start <= pos && pos < w.end) return w;
+      return null;
     }
 
     const parts: ReactNode[] = [];
-    let cur = 0;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const s = sorted[i];
+      const e = sorted[i + 1];
+      if (s >= e) continue;
+      const slice = txt.slice(s, e);
 
-    for (const hl of hls) {
-      const s = Math.max(hl.s, cur);
-      if (s >= hl.e) continue;
+      const synTok = findSyntax(s);
+      const annHl = findAnn(s);
+      const wordSeg = findWord(s);
 
-      if (s > cur) {
-        parts.push(<span key={`t${cur}`}>{txt.slice(cur, s)}</span>);
-      }
+      const isAnn = annHl?.kind === "ann";
+      const isPending = annHl?.kind === "pending";
+      const hovered = isAnn && hoveredAnnId === annHl?.annId;
 
-      const isAnn = hl.kind === "ann";
-      const hovered = isAnn && hoveredAnnId === hl.annId;
+      const wantsBg = isAnn || isPending || (wordSeg && wordSeg.changed);
+      const background =
+        hovered
+          ? "var(--highlight-bg-hover)"
+          : isAnn
+            ? "var(--highlight-bg)"
+            : isPending
+              ? "var(--selection-bg)"
+              : wordSeg && wordSeg.changed && wordBgVar
+                ? wordBgVar
+                : undefined;
+
+      const classNames: string[] = [];
+      if (synTok?.className) classNames.push(synTok.className);
+      if (synTok?.lightColor || synTok?.darkColor) classNames.push("shiki-tok");
+      if (wantsBg) classNames.push("rounded-sm");
+      if (isAnn) classNames.push("cursor-pointer", "border-b-[1.5px]", "border-[var(--text-tertiary)]");
+
+      const style: React.CSSProperties & Record<string, string | undefined> = {};
+      if (background) style.background = background;
+      if (synTok?.lightColor) style["--shiki-light"] = synTok.lightColor;
+      if (synTok?.darkColor) style["--shiki-dark"] = synTok.darkColor;
+      if (synTok?.italic) style.fontStyle = "italic";
+      if (synTok?.bold) style.fontWeight = "600";
+
+      const annId = isAnn ? annHl?.annId : undefined;
 
       parts.push(
         <span
-          key={`h${s}${hl.kind}${hl.annId ?? ""}`}
-          className={`rounded-sm ${isAnn ? "cursor-pointer border-b-[1.5px] border-[var(--text-tertiary)]" : ""}`}
-          style={{
-            background: hovered
-              ? "var(--highlight-bg-hover)"
-              : isAnn
-                ? "var(--highlight-bg)"
-                : "var(--selection-bg)",
-          }}
+          key={`p${s}`}
+          className={classNames.join(" ") || undefined}
+          style={Object.keys(style).length > 0 ? style : undefined}
           onClick={
             isAnn
-              ? (e) => {
-                  e.stopPropagation();
-                  const ann = annotations.find((a) => a.id === hl.annId);
+              ? (event) => {
+                  event.stopPropagation();
+                  const ann = annotations.find((a) => a.id === annId);
                   if (ann)
                     openEdit(
                       ann,
-                      (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      (event.currentTarget as HTMLElement).getBoundingClientRect()
                     );
                 }
               : undefined
           }
-          onMouseEnter={isAnn ? () => setHoveredAnnId(hl.annId!) : undefined}
+          onMouseEnter={isAnn && annId ? () => setHoveredAnnId(annId) : undefined}
           onMouseLeave={isAnn ? () => setHoveredAnnId(null) : undefined}
         >
-          {txt.slice(s, hl.e)}
+          {slice}
         </span>
       );
-      cur = hl.e;
-    }
-
-    if (cur < txt.length) {
-      parts.push(<span key={`t${cur}`}>{txt.slice(cur)}</span>);
     }
     return <>{parts}</>;
   }
@@ -564,19 +941,34 @@ export function InteractiveDiff({
           ))}
         </select>
         <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
-          {([true, false] as const).map((hide) => (
-            <button
-              key={String(hide)}
-              onClick={() => onSettingsChange({ hideUnchanged: hide })}
-              className={`px-2.5 py-1 transition-colors ${hide ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
-                settings.hideUnchanged === hide
-                  ? "bg-[var(--accent)] text-[var(--bg)]"
-                  : "text-[var(--text-tertiary)]"
-              }`}
-            >
-              {hide ? "Changes only" : "All lines"}
-            </button>
-          ))}
+          {([true, false] as const).map((hide) => {
+            // When the user has manually expanded "N unchanged lines" sections
+            // we're in a mixed state — neither toggle reflects reality.
+            const isCustomized = expandedSeparators.size > 0;
+            const isActive =
+              !isCustomized && settings.hideUnchanged === hide;
+            return (
+              <button
+                key={String(hide)}
+                onClick={() => {
+                  if (hide && settings.hideUnchanged && isCustomized) {
+                    // Already in changes-only mode but with expansions —
+                    // collapse them back without re-firing hideUnchanged.
+                    setExpandedSeparators(new Set());
+                    return;
+                  }
+                  onSettingsChange({ hideUnchanged: hide });
+                }}
+                className={`px-2.5 py-1 transition-colors ${hide ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
+                  isActive
+                    ? "bg-[var(--accent)] text-[var(--bg)]"
+                    : "text-[var(--text-tertiary)]"
+                }`}
+              >
+                {hide ? "Changes only" : "All lines"}
+              </button>
+            );
+          })}
         </div>
         <button
           onClick={() =>
@@ -658,7 +1050,7 @@ export function InteractiveDiff({
 
               return (
                 <Fragment key={`u${i}`}>
-                  <tr>
+                  <tr data-dline={item.idx}>
                     <td style={barCellStyle(vt)} />
                     {!isFirstVersion && (
                       <td style={numCellStyle(vt, item.type === "add")}>
@@ -734,7 +1126,7 @@ export function InteractiveDiff({
     const vt = visualType(line);
 
     return (
-      <tr key={key}>
+      <tr key={key} data-dline={line.idx}>
         <td
           style={{
             ...numCellStyle(vt, hideNum),
@@ -846,9 +1238,110 @@ export function InteractiveDiff({
       <div
         ref={contentRef}
         onMouseUp={handleMouseUp}
-        className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]"
+        onClick={(e) => {
+          if (!mergeEnabled) return;
+          // Don't trigger on a drag-select.
+          const sel = window.getSelection();
+          if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return;
+          // Find which line we clicked.
+          let el: HTMLElement | null = e.target as HTMLElement | null;
+          while (el && !el.hasAttribute("data-dline")) {
+            if (el === contentRef.current) return;
+            el = el.parentElement;
+          }
+          if (!el) return;
+          const lineIdx = parseInt(el.getAttribute("data-dline")!);
+          const changeIdx = lineToChange.get(lineIdx);
+          if (changeIdx === undefined) return;
+          setActiveChangeIdx(changeIdx);
+        }}
+        onMouseMove={
+          hunkActionsEnabled
+            ? (e) => {
+                let el: HTMLElement | null = e.target as HTMLElement | null;
+                while (el && !el.hasAttribute("data-dline")) {
+                  if (el === contentRef.current) {
+                    setHoverChangeIdx(null);
+                    return;
+                  }
+                  el = el.parentElement;
+                }
+                if (!el) return;
+                const lineIdx = parseInt(el.getAttribute("data-dline")!);
+                const changeIdx = lineToChange.get(lineIdx);
+                setHoverChangeIdx(changeIdx ?? null);
+              }
+            : undefined
+        }
+        onMouseLeave={
+          hunkActionsEnabled ? () => setHoverChangeIdx(null) : undefined
+        }
+        // py-7 reserves vertical room at the top & bottom of the diff so the
+        // merge overlay's strips have somewhere to live for changes that sit
+        // right at the edges. Only allocated when merge is actually enabled.
+        className={
+          mergeEnabled
+            ? "relative select-text overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] py-7 [cursor:text]"
+            : "relative select-text overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] [cursor:text]"
+        }
       >
         {effectiveViewMode === "unified" ? renderUnified() : renderSplit()}
+        {mergeEnabled && activeChangeIdx !== null && overlayPos && (
+          <MergeOverlay
+            top={overlayPos.top}
+            height={overlayPos.height}
+            currentIdx={activeChangeIdx}
+            totalChanges={changes.length}
+            onClose={() => setActiveChangeIdx(null)}
+            onPrev={() => goToChange(-1)}
+            onNext={() => goToChange(1)}
+            onApplyLeftToRight={() => applyMerge("leftToRight")}
+            onApplyRightToLeft={() => applyMerge("rightToLeft")}
+          />
+        )}
+        {hunkActionsEnabled &&
+          hunkActions &&
+          hoverChangeIdx !== null &&
+          hunkCtrlTop !== null &&
+          changes[hoverChangeIdx] && (
+            <div
+              className="absolute right-3 z-20 flex items-center gap-1"
+              style={{ top: Math.max(0, hunkCtrlTop - 2) }}
+            >
+              {hunkActions.isStaged ? (
+                <button
+                  onClick={() =>
+                    hunkActions.onUnstage(changeRange(changes[hoverChangeIdx]))
+                  }
+                  title="Unstage this hunk"
+                  className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-[var(--bg-surface-hover)]"
+                >
+                  − Unstage hunk
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() =>
+                      hunkActions.onRevert(changeRange(changes[hoverChangeIdx]))
+                    }
+                    title="Revert this hunk"
+                    className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--removed-text)]"
+                  >
+                    ↺ Revert
+                  </button>
+                  <button
+                    onClick={() =>
+                      hunkActions.onStage(changeRange(changes[hoverChangeIdx]))
+                    }
+                    title="Stage this hunk"
+                    className="rounded bg-[var(--accent)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--bg)] shadow-sm transition-opacity hover:opacity-90"
+                  >
+                    + Stage hunk
+                  </button>
+                </>
+              )}
+            </div>
+          )}
       </div>
 
       {pending && (

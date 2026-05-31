@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
 import { ThemeProvider } from "@plan/shared/components/theme-provider";
 import "./globals.css";
+import "@plan/shared/highlight.css";
 
 const sans = Inter({
   variable: "--font-sans",

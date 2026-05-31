@@ -1,29 +1,36 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import type { PlanVersion } from "../lib/store";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import type { Annotation, MessageOptions } from "../lib/store";
 import { generateMessage } from "../lib/store";
 
 interface MessageOutputProps {
-  version: PlanVersion;
+  annotations: Annotation[];
+  options?: MessageOptions;
   onUpdateMessage?: (message: string) => void;
 }
 
-export function MessageOutput({ version, onUpdateMessage }: MessageOutputProps) {
+export function MessageOutput({
+  annotations,
+  options,
+  onUpdateMessage,
+}: MessageOutputProps) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [customMessage, setCustomMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const baseMessage = generateMessage(version);
+  const baseMessage = useMemo(
+    () => generateMessage(annotations, options),
+    [annotations, options]
+  );
   const message = customMessage ?? baseMessage;
 
-  // Reset custom message when annotations change
   useEffect(() => {
     setCustomMessage(null);
     setIsEditing(false);
-  }, [version.annotations.length]);
+  }, [annotations.length]);
 
   const startEditing = useCallback(() => {
     setEditText(message);
@@ -76,8 +83,8 @@ export function MessageOutput({ version, onUpdateMessage }: MessageOutputProps) 
           className="font-[family-name:var(--font-mono)] text-xs"
           style={{ color: "var(--text-tertiary)" }}
         >
-          {version.annotations.length} change
-          {version.annotations.length !== 1 ? "s" : ""}
+          {annotations.length} comment
+          {annotations.length !== 1 ? "s" : ""}
           {customMessage ? " (edited)" : ""}
           {" — ready to send"}
         </span>
@@ -146,7 +153,7 @@ export function MessageOutput({ version, onUpdateMessage }: MessageOutputProps) 
         </div>
       ) : (
         <pre
-          className="max-h-[300px] cursor-pointer overflow-y-auto whitespace-pre-wrap p-4 font-[family-name:var(--font-mono)] text-[13px] leading-relaxed transition-colors hover:bg-[var(--bg-surface-hover)]"
+          className="max-h-[300px] select-text cursor-pointer overflow-y-auto whitespace-pre-wrap p-4 font-[family-name:var(--font-mono)] text-[13px] leading-relaxed transition-colors hover:bg-[var(--bg-surface-hover)]"
           style={{ color: "var(--text)" }}
           onDoubleClick={startEditing}
           title="Double-click to edit"

@@ -1,20 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { useStore } from "@plan/shared/lib/store";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Annotation } from "@plan/shared/lib/store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
+import { useUndoable } from "@plan/shared/lib/undoable";
 import { useTheme } from "@plan/shared/components/theme-provider";
-import { PlanInput } from "@plan/shared/components/plan-input";
 import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
 import { MessageOutput } from "@plan/shared/components/message-output";
-
-const HISTORY_PREVIEW_LEN = 60;
+import { CodeEditor } from "@plan/shared/components/code-editor";
+import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
+import { Button } from "@plan/shared/components/ui/button";
+import { detectLanguage } from "@plan/shared/lib/highlight";
+import { canFormat, formatCode } from "@plan/shared/lib/format";
+import {
+  decodeState,
+  encodeState,
+  type SharedState,
+} from "@plan/shared/lib/share-url";
 
 function SunIcon() {
   return (
     <svg
-      width="16"
-      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -38,8 +44,6 @@ function SunIcon() {
 function MoonIcon() {
   return (
     <svg
-      width="16"
-      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -52,272 +56,263 @@ function MoonIcon() {
   );
 }
 
+const HASH_PREFIX = "#d=";
+
+function readHashState(): SharedState | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash;
+  if (!hash.startsWith(HASH_PREFIX)) return null;
+  return decodeState(hash.slice(HASH_PREFIX.length));
+}
+
 export default function Home() {
-  const {
-    versions,
-    addVersion,
-    addAnnotation,
-    updateAnnotation,
-    removeAnnotation,
-    reset,
-  } = useStore();
   const { theme, toggle } = useTheme();
   const [settings, updateSettings] = useDiffSettings();
-  const [compareBase, setCompareBase] = useState(0);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
+  const {
+    left: leftText,
+    right: rightText,
+    setLeft,
+    setRight,
+    setBoth,
+    reset,
+  } = useUndoable();
 
-  const latestIdx = versions.length - 1;
-  const latest = versions.length > 0 ? versions[latestIdx] : null;
-  const isFirstVersion = versions.length === 1;
+  const [language, setLanguage] = useState("auto");
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [commentingEnabled, setCommentingEnabled] = useState(false);
+  const [copiedShare, setCopiedShare] = useState(false);
 
-  // The left side of the diff: user picks which version to compare against
-  const leftVersion = versions[compareBase] ?? null;
-  const leftText = leftVersion?.text ?? "";
+  // Restore from URL hash on mount.
+  useEffect(() => {
+    const fromHash = readHashState();
+    if (fromHash) {
+      reset({ left: fromHash.left, right: fromHash.right });
+      if (fromHash.language) setLanguage(fromHash.language);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // For v1, diff against empty string so everything shows as additions
-  const diffOldText = isFirstVersion ? "" : leftText;
+  const handleLeftChange = useCallback(
+    (v: string) => {
+      setAnnotations([]);
+      setLeft(v);
+    },
+    [setLeft]
+  );
 
-  function handleAddVersion(text: string) {
-    setCompareBase(versions.length - 1);
-    addVersion(text);
-  }
+  const handleRightChange = useCallback(
+    (v: string) => {
+      setAnnotations([]);
+      setRight(v);
+    },
+    [setRight]
+  );
+
+  const detected = useMemo(() => {
+    const sample = rightText.length >= leftText.length ? rightText : leftText;
+    if (!sample.trim()) return null;
+    const lang = detectLanguage(sample);
+    return lang === "plaintext" ? null : lang;
+  }, [leftText, rightText]);
+
+  const effectiveLanguage =
+    language === "auto" ? detected ?? "plaintext" : language;
+
+  const addAnnotation = useCallback(
+    (
+      selectedText: string,
+      startOffset: number,
+      endOffset: number,
+      comment: string,
+      side: "left" | "right"
+    ) => {
+      setAnnotations((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          selectedText,
+          startOffset,
+          endOffset,
+          comment,
+          side,
+        },
+      ]);
+    },
+    []
+  );
+
+  const updateAnnotation = useCallback((id: string, comment: string) => {
+    setAnnotations((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, comment } : a))
+    );
+  }, []);
+
+  const removeAnnotation = useCallback((id: string) => {
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const handleFormat = useCallback(async () => {
+    if (!canFormat(effectiveLanguage)) return;
+    const [l, r] = await Promise.all([
+      leftText ? formatCode(leftText, effectiveLanguage) : Promise.resolve(null),
+      rightText ? formatCode(rightText, effectiveLanguage) : Promise.resolve(null),
+    ]);
+    const nextLeft = l?.ok ? l.value : leftText;
+    const nextRight = r?.ok ? r.value : rightText;
+    if (nextLeft !== leftText || nextRight !== rightText) {
+      setAnnotations([]);
+      setBoth({ left: nextLeft, right: nextRight });
+    }
+  }, [leftText, rightText, effectiveLanguage, setBoth]);
+
+  const handleMerge = useCallback(
+    (next: { left: string; right: string }) => {
+      setAnnotations([]);
+      setBoth(next);
+    },
+    [setBoth]
+  );
+
+  const handleShare = useCallback(async () => {
+    const encoded = encodeState({
+      left: leftText,
+      right: rightText,
+      language: language === "auto" ? undefined : language,
+    });
+    const newHash = HASH_PREFIX + encoded;
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", newHash);
+      const url = window.location.href;
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopiedShare(true);
+        setTimeout(() => setCopiedShare(false), 1800);
+      } catch {
+        // Clipboard may be blocked; URL is still updated for them to copy.
+      }
+    }
+  }, [leftText, rightText, language]);
+
+  const hasContent = leftText.length > 0 || rightText.length > 0;
 
   return (
     <div className="mx-auto min-h-screen max-w-[1800px] px-6 py-8">
-      {/* Header */}
-      <header className="mb-8 flex items-center justify-between">
-        <h1
-          className="font-[family-name:var(--font-mono)] text-base font-semibold tracking-tight"
-          style={{ color: "var(--text)" }}
-        >
+      <header className="mb-6 flex items-center justify-between">
+        <h1 className="font-[family-name:var(--font-mono)] text-base font-semibold tracking-tight text-[var(--text)]">
           plan
         </h1>
         <div className="flex items-center gap-2">
-          {versions.length > 0 && (
-            <button
-              onClick={() => {
-                reset();
-                setCompareBase(0);
-                setHistoryOpen(false);
-              }}
-              className="rounded-md px-3 py-1.5 text-xs transition-colors hover:opacity-70"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              Start over
-            </button>
-          )}
-          <button
-            onClick={toggle}
-            className="flex items-center justify-center rounded-md border p-2 transition-colors hover:bg-[var(--bg-surface-hover)]"
-            style={{
-              borderColor: "var(--border)",
-              color: "var(--text-secondary)",
-            }}
+          <LanguageToolbar
+            language={language}
+            onLanguageChange={setLanguage}
+            detectedLanguage={detected}
+            onFormat={handleFormat}
+            formatDisabled={!hasContent}
+          />
+          <Button
+            variant={commentingEnabled ? "default" : "outline"}
+            size="sm"
+            onClick={() => setCommentingEnabled((v) => !v)}
+            title={
+              commentingEnabled
+                ? "Selecting text in the diff opens a comment popover"
+                : "Selection-to-comment is off"
+            }
           >
+            Comments {commentingEnabled ? "on" : "off"}
+          </Button>
+          {hasContent && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleShare}
+              title="Copy a shareable URL containing both texts"
+            >
+              {copiedShare ? "Copied!" : "Share"}
+            </Button>
+          )}
+          {hasContent && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                reset({ left: "", right: "" });
+                setAnnotations([]);
+              }}
+            >
+              Clear
+            </Button>
+          )}
+          <Button variant="outline" size="icon" onClick={toggle}>
             {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-          </button>
+          </Button>
         </div>
       </header>
 
-      {/* Empty state */}
-      {!latest && (
-        <div className="mt-24 flex flex-col items-center">
-          <p
-            className="mb-1 font-[family-name:var(--font-mono)] text-sm"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            Paste a plan to start iterating.
-          </p>
-          <p
-            className="mb-6 text-xs"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            Select text, comment, copy the message, send it back, paste the new
-            version, repeat.
-          </p>
-          <div className="w-full max-w-2xl">
-            <PlanInput onSubmit={addVersion} isFirstVersion />
-          </div>
-        </div>
-      )}
-
-      {/* Active session */}
-      {latest && (
-        <div className="space-y-5">
-          {/* Version selector — only shown when >1 version */}
-          {versions.length > 1 && (
-            <div className="flex items-center gap-3 font-[family-name:var(--font-mono)] text-xs">
-              <div className="flex items-center gap-2">
-                <select
-                  value={compareBase}
-                  onChange={(e) => setCompareBase(parseInt(e.target.value))}
-                  className="cursor-pointer appearance-none rounded-md border bg-transparent px-2.5 py-1.5 pr-6 font-[family-name:var(--font-mono)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
-                  style={{
-                    borderColor: "var(--border)",
-                    color: "var(--text)",
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "right 6px center",
-                  }}
-                >
-                  {versions.slice(0, -1).map((_v, i) => (
-                    <option key={i} value={i}>
-                      v{i + 1}
-                    </option>
-                  ))}
-                </select>
-
-                <span style={{ color: "var(--text-tertiary)" }}>→</span>
-
-                <span
-                  className="rounded-md border px-2.5 py-1.5"
-                  style={{
-                    borderColor: "var(--border)",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  v{latestIdx + 1}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Interactive diff */}
+      {hasContent && (
+        <div className="mb-5 space-y-5">
           <InteractiveDiff
-            oldText={diffOldText}
-            newText={latest.text}
+            oldText={leftText}
+            newText={rightText}
             settings={settings}
             onSettingsChange={updateSettings}
-            isFirstVersion={isFirstVersion}
-            annotations={latest.annotations}
-            onAddAnnotation={(sel, s, e, c, side) =>
-              addAnnotation(latestIdx, sel, s, e, c, side)
-            }
-            onUpdateAnnotation={(id, c) =>
-              updateAnnotation(latestIdx, id, c)
-            }
-            onRemoveAnnotation={(id) => removeAnnotation(latestIdx, id)}
+            language={effectiveLanguage}
+            annotations={annotations}
+            onAddAnnotation={commentingEnabled ? addAnnotation : undefined}
+            onUpdateAnnotation={commentingEnabled ? updateAnnotation : undefined}
+            onRemoveAnnotation={commentingEnabled ? removeAnnotation : undefined}
+            onMergeChange={handleMerge}
           />
 
-          {/* Generated message */}
-          {latest.annotations.length > 0 && (
-            <MessageOutput version={latest} />
-          )}
-
-          {/* Paste next version */}
-          <PlanInput onSubmit={handleAddVersion} isFirstVersion={false} />
-
-          {/* Previous versions */}
-          {versions.length > 1 && (
-            <section
-              className="rounded-lg border"
-              style={{
-                borderColor: "var(--border)",
-                background: "var(--bg-surface)",
+          {annotations.length > 0 && (
+            <MessageOutput
+              annotations={annotations}
+              options={{
+                intro: "",
+                leftLabel: "the original",
+                rightLabel: "the changed version",
               }}
-            >
-              <button
-                onClick={() => {
-                  setHistoryOpen((o) => !o);
-                  if (historyOpen) setExpandedHistory(null);
-                }}
-                className="flex w-full items-center gap-2 px-4 py-3 text-left font-[family-name:var(--font-mono)] text-xs transition-colors"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                <span
-                  className="inline-block text-[10px] transition-transform"
-                  style={{
-                    transform: historyOpen
-                      ? "rotate(90deg)"
-                      : "rotate(0deg)",
-                  }}
-                >
-                  ▶
-                </span>
-                Previous versions ({versions.length - 1})
-              </button>
-
-              {historyOpen && (
-                <div style={{ borderTop: "1px solid var(--border)" }}>
-                  {versions
-                    .slice(0, -1)
-                    .reverse()
-                    .map((v, ri) => {
-                      const i = versions.length - 2 - ri;
-                      const isExpanded = expandedHistory === i;
-                      const isLast = ri === versions.length - 2;
-
-                      return (
-                        <div
-                          key={v.id}
-                          style={{
-                            borderBottom: isLast
-                              ? undefined
-                              : "1px solid var(--border)",
-                          }}
-                        >
-                          <button
-                            onClick={() =>
-                              setExpandedHistory(isExpanded ? null : i)
-                            }
-                            className="flex w-full items-center gap-2 px-4 py-2.5 text-left font-[family-name:var(--font-mono)] text-xs transition-colors"
-                            style={{ color: "var(--text-tertiary)" }}
-                          >
-                            <span
-                              className="inline-block text-[10px] transition-transform"
-                              style={{
-                                transform: isExpanded
-                                  ? "rotate(90deg)"
-                                  : "rotate(0deg)",
-                              }}
-                            >
-                              ▶
-                            </span>
-                            <span style={{ color: "var(--text-secondary)" }}>
-                              v{i + 1}
-                            </span>
-                            <span
-                              className="truncate"
-                              style={{ maxWidth: "60%" }}
-                            >
-                              {v.text.split("\n")[0].slice(0, HISTORY_PREVIEW_LEN)}
-                            </span>
-                          </button>
-
-                          {isExpanded && (
-                            <div className="px-4 pb-3">
-                              <pre
-                                className="max-h-[400px] overflow-auto whitespace-pre rounded-md border p-3 font-[family-name:var(--font-mono)] text-[13px] leading-relaxed"
-                                style={{
-                                  background: "var(--bg)",
-                                  borderColor: "var(--border)",
-                                  color: "var(--text)",
-                                }}
-                              >
-                                {v.text}
-                              </pre>
-                              {v.annotations.length > 0 && (
-                                <div
-                                  className="mt-2 text-xs"
-                                  style={{ color: "var(--text-tertiary)" }}
-                                >
-                                  {v.annotations.length} comment
-                                  {v.annotations.length !== 1 ? "s" : ""} on
-                                  this version
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-            </section>
+            />
           )}
         </div>
       )}
+
+      {/* Clear separator between the diff above and the editable inputs below. */}
+      {hasContent && (
+        <div className="mb-4 mt-2 flex items-center gap-3">
+          <div className="h-px flex-1 bg-[var(--border)]" />
+          <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+            Inputs
+          </span>
+          <div className="h-px flex-1 bg-[var(--border)]" />
+        </div>
+      )}
+
+      <div className="flex gap-4">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="mb-1.5 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text-secondary)]">
+            Original
+          </div>
+          <CodeEditor
+            value={leftText}
+            onChange={handleLeftChange}
+            language={effectiveLanguage}
+            placeholder="Paste or type here…"
+            maxHeight={420}
+          />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="mb-1.5 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text-secondary)]">
+            Changed
+          </div>
+          <CodeEditor
+            value={rightText}
+            onChange={handleRightChange}
+            language={effectiveLanguage}
+            placeholder="Paste or type here…"
+            maxHeight={420}
+          />
+        </div>
+      </div>
     </div>
   );
 }

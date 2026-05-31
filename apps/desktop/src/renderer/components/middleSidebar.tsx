@@ -1,0 +1,207 @@
+import { useEffect } from "react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+} from "@plan/shared/components/ui/sidebar";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@plan/shared/components/ui/tabs";
+import { cn } from "@plan/shared/lib/utils";
+import type { Plan, DiscoveredRepo } from "../../shared-types";
+import { FileList, type RepoFileGroup } from "./fileList";
+import { SessionList, type SessionListItem } from "./sessionList";
+import { PlansList } from "./plansList";
+import { CommitPanel } from "./commitPanel";
+
+export type WorkTab = "diffs" | "chat" | "plans";
+
+interface Props {
+  tab: WorkTab;
+  onTabChange: (t: WorkTab) => void;
+
+  repos: DiscoveredRepo[];
+  repoGroups: RepoFileGroup[];
+  selectedFile: { subPath: string; path: string } | null;
+  onSelectFile: (subPath: string, path: string) => void;
+  onStageFile: (path: string, subPath: string) => void;
+  onUnstageFile: (path: string, subPath: string) => void;
+  onDiscardFile: (path: string, subPath: string) => void;
+  onStageAll: (subPath: string) => void;
+  onUnstageAll: (subPath: string) => void;
+  onCommit: (
+    message: string,
+    subPath: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  filesLoading: boolean;
+  diffAvailable: boolean;
+
+  sessions: SessionListItem[];
+  selectedSession: string | null;
+  onSelectSession: (id: string) => void;
+  sessionsLoading: boolean;
+
+  plans: Plan[];
+  selectedPlan: string | null;
+  onSelectPlan: (filePath: string) => void;
+
+  projectsSidebarOpen: boolean;
+}
+
+function totalUnread(plans: Plan[]): number {
+  return plans.reduce((s, p) => s + p.unread, 0);
+}
+
+export function MiddleSidebar({
+  tab,
+  onTabChange,
+  repos,
+  repoGroups,
+  selectedFile,
+  onSelectFile,
+  onStageFile,
+  onUnstageFile,
+  onDiscardFile,
+  onStageAll,
+  onUnstageAll,
+  onCommit,
+  filesLoading,
+  diffAvailable,
+  sessions,
+  selectedSession,
+  onSelectSession,
+  sessionsLoading,
+  plans,
+  selectedPlan,
+  onSelectPlan,
+  projectsSidebarOpen,
+}: Props) {
+  // ⌘1 / ⌘2 / ⌘3 → swap tabs
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "1") {
+        e.preventDefault();
+        onTabChange("diffs");
+      } else if (e.key === "2") {
+        e.preventDefault();
+        onTabChange("chat");
+      } else if (e.key === "3") {
+        e.preventDefault();
+        onTabChange("plans");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onTabChange]);
+
+  const plansBadge = totalUnread(plans);
+  const stagedGroups = repoGroups.filter((g) => g.staged.length > 0);
+  const multiRepo = repos.length > 1;
+
+  return (
+    <Sidebar className="w-[280px]">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => onTabChange(v as WorkTab)}
+        className="flex h-full min-h-0 flex-col"
+      >
+        <SidebarHeader
+          className={cn(
+            "h-[52px] justify-center pr-3 pt-9 pb-2 [-webkit-app-region:drag]",
+            projectsSidebarOpen ? "pl-3" : "pl-20"
+          )}
+        >
+          <div className="[-webkit-app-region:no-drag]">
+            <TabsList>
+              <TabsTrigger value="diffs">Diffs</TabsTrigger>
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="plans" className="relative">
+                Plans
+                {plansBadge > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[9px] font-semibold text-[var(--bg)]">
+                    {plansBadge}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </div>
+        </SidebarHeader>
+
+        <SidebarContent>
+          <TabsContent
+            value="diffs"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            {!diffAvailable ? (
+              <div className="flex flex-1 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                Not a git repo
+              </div>
+            ) : filesLoading ? (
+              <div className="flex flex-1 items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                Loading…
+              </div>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
+                {/* Commit message lives at the TOP, VS Code style. */}
+                {stagedGroups.map((g) => {
+                  const repo = repos.find((r) => r.subPath === g.subPath);
+                  return (
+                    <CommitPanel
+                      key={g.subPath || "/"}
+                      stagedCount={g.staged.length}
+                      branch={repo?.branch ?? null}
+                      repoLabel={multiRepo ? g.repoName : null}
+                      onCommit={(msg) => onCommit(msg, g.subPath)}
+                    />
+                  );
+                })}
+                <div className="min-h-0 flex-1">
+                  <FileList
+                    groups={repoGroups}
+                    selected={selectedFile}
+                    onSelect={onSelectFile}
+                    onStage={onStageFile}
+                    onUnstage={onUnstageFile}
+                    onDiscard={onDiscardFile}
+                    onStageAll={onStageAll}
+                    onUnstageAll={onUnstageAll}
+                  />
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="chat"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            <SessionList
+              sessions={sessions}
+              selected={selectedSession}
+              onSelect={onSelectSession}
+              loading={sessionsLoading}
+            />
+          </TabsContent>
+
+          <TabsContent
+            value="plans"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            <PlansList
+              plans={plans}
+              selected={selectedPlan}
+              onSelect={onSelectPlan}
+            />
+          </TabsContent>
+        </SidebarContent>
+      </Tabs>
+    </Sidebar>
+  );
+}

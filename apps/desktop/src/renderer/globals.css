@@ -1,6 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "@plan/shared/globals.css";
+@import "@plan/shared/highlight.css";
 
 @source "../../../../shared";
 
@@ -9,4 +10,25 @@
 :root {
   --font-sans: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
+}
+
+/*
+ * Native-app feel: no UI chrome text is selectable by default. Content that
+ * the user needs to select (diff text, message bodies, the copy-message
+ * pre, etc.) opts back in via the `select-text` Tailwind utility (which maps
+ * to `user-select: text`).
+ */
+html,
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* Re-enable native I-beam + selection for inputs and textareas. */
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }

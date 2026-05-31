@@ -1,0 +1,133 @@
+/*
+ * Shiki tokens: each span carries its own `--shiki-light` / `--shiki-dark`
+ * CSS variables as inline style. We pick which one applies based on the
+ * theme class on the root element.
+ */
+.shiki-tok {
+  color: var(--shiki-light, currentColor);
+}
+.dark .shiki-tok {
+  color: var(--shiki-dark, currentColor);
+}
+
+/* Theme-aware syntax-highlight token colors. Mirrors highlight.js class names. */
+
+:root {
+  --hl-comment: #6a737d;
+  --hl-keyword: #d73a49;
+  --hl-string: #032f62;
+  --hl-number: #005cc5;
+  --hl-literal: #005cc5;
+  --hl-built-in: #005cc5;
+  --hl-symbol: #6f42c1;
+  --hl-title: #6f42c1;
+  --hl-name: #22863a;
+  --hl-attr: #005cc5;
+  --hl-meta: #6a737d;
+  --hl-type: #b08800;
+  --hl-tag: #22863a;
+  --hl-section: #005cc5;
+  --hl-doctag: #d73a49;
+  --hl-deletion: #b31d28;
+  --hl-addition: #22863a;
+  --hl-emphasis: italic;
+  --hl-strong: bold;
+}
+
+.dark {
+  --hl-comment: #8b949e;
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-number: #79c0ff;
+  --hl-literal: #79c0ff;
+  --hl-built-in: #ffa657;
+  --hl-symbol: #d2a8ff;
+  --hl-title: #d2a8ff;
+  --hl-name: #7ee787;
+  --hl-attr: #79c0ff;
+  --hl-meta: #8b949e;
+  --hl-type: #ffa657;
+  --hl-tag: #7ee787;
+  --hl-section: #79c0ff;
+  --hl-doctag: #ff7b72;
+  --hl-deletion: #ffa198;
+  --hl-addition: #7ee787;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag {
+  color: var(--hl-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-template-string {
+  color: var(--hl-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-variable.constant_,
+.hljs-symbol,
+.hljs-link {
+  color: var(--hl-number);
+}
+
+.hljs-built_in,
+.hljs-builtin-name {
+  color: var(--hl-built-in);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-class .hljs-title,
+.hljs-function .hljs-title {
+  color: var(--hl-title);
+}
+
+.hljs-name,
+.hljs-tag {
+  color: var(--hl-name);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable.language_ {
+  color: var(--hl-attr);
+}
+
+.hljs-type,
+.hljs-params {
+  color: var(--hl-type);
+}
+
+.hljs-meta {
+  color: var(--hl-meta);
+}
+
+.hljs-section {
+  color: var(--hl-section);
+  font-weight: bold;
+}
+
+.hljs-deletion {
+  color: var(--hl-deletion);
+}
+.hljs-addition {
+  color: var(--hl-addition);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: bold;
+}
