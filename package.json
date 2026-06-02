@@ -9,5 +9,8 @@
     "build:desktop": "pnpm --filter @plan/desktop build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm --filter @plan/web lint"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["node-pty"]
   }
 }

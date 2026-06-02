@@ -4,7 +4,6 @@ import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { MessageOutput } from "@plan/shared/components/message-output";
 import {
   SidebarProvider,
-  SidebarTrigger,
   useSidebar,
 } from "@plan/shared/components/ui/sidebar";
 import { Button } from "@plan/shared/components/ui/button";
@@ -28,6 +27,7 @@ import { FileDiffViewer } from "./file-diff-viewer";
 import { MessageList, type ChatAnnotation } from "./message-list";
 import { PlanViewer } from "./plan-viewer";
 import { useConfirm } from "./confirm-dialog";
+import { TerminalPanel } from "./terminal-panel";
 import type { SessionListItem } from "./session-list";
 import type { FileEntry, RepoFileGroup } from "./file-list";
 
@@ -136,7 +136,14 @@ function WorkspaceHeader({
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
         <Tooltip>
           <TooltipTrigger asChild>
-            <SidebarTrigger />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={middle.toggle}
+              aria-label="Toggle files & chat sidebar"
+            >
+              <PanelRightIcon />
+            </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="flex items-center gap-1.5">
             <span>{middle.open ? "Hide" : "Show"} files & chat</span>
@@ -158,6 +165,7 @@ function WorkspaceHeader({
   );
 }
 
+/** Panel-left glyph — the projects (1st) sidebar lives on the left. */
 function ToggleIcon() {
   return (
     <svg
@@ -172,6 +180,25 @@ function ToggleIcon() {
     >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="9" y1="3" x2="9" y2="21" />
+    </svg>
+  );
+}
+
+/** Panel-right glyph — the files/chat (2nd) sidebar; distinct from the left one. */
+function PanelRightIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="15" y1="3" x2="15" y2="21" />
     </svg>
   );
 }
@@ -192,6 +219,8 @@ export function ProjectWorkspace({
     files: FileDiff[];
     status: GitFileStatus[];
     diffAvailable: boolean;
+    ahead: number;
+    hasUpstream: boolean;
   }
   const [filesByRepo, setFilesByRepo] = useState<Map<string, RepoFiles>>(
     new Map()
@@ -209,6 +238,8 @@ export function ProjectWorkspace({
   const [annotationsByFile, setAnnotationsByFile] = useState<
     Record<string, Annotation[]>
   >({});
+  /** subPath currently being pushed (for the sync-bar spinner). */
+  const [pushingRepo, setPushingRepo] = useState<string | null>(null);
 
   const refreshDiff = useCallback(async () => {
     if (repos.length === 0) {
@@ -231,6 +262,8 @@ export function ProjectWorkspace({
               files: diff.available ? parseUnifiedDiff(diff.diff) : [],
               status: status.files,
               diffAvailable: diff.available,
+              ahead: status.ahead,
+              hasUpstream: status.hasUpstream,
             },
           ] as const;
         })
@@ -308,6 +341,26 @@ export function ProjectWorkspace({
     });
   }, [repos, filesByRepo, project.cwd]);
 
+  // Per-repo push targets for the sync bar (only repos with an upstream or
+  // unpushed commits are worth showing).
+  const syncTargets = useMemo(
+    () =>
+      repos
+        .map((repo) => {
+          const state = filesByRepo.get(repo.subPath);
+          return {
+            subPath: repo.subPath,
+            repoName: repoDisplayName(repo, project.cwd),
+            branch: repo.branch,
+            ahead: state?.ahead ?? 0,
+            hasUpstream: state?.hasUpstream ?? false,
+            pushing: pushingRepo === repo.subPath,
+          };
+        })
+        .filter((t) => t.hasUpstream || t.ahead > 0),
+    [repos, filesByRepo, project.cwd, pushingRepo]
+  );
+
   // For diff-annotation aggregation (kept global so the copy box at the
   // bottom shows everything regardless of which file is selected).
   const aggregatedDiffAnnotations = useMemo(
@@ -376,6 +429,45 @@ export function ProjectWorkspace({
       const res = await window.electronAPI.unstageAll(project.encoded, subPath);
       if (!res.ok) console.warn("unstage all failed:", res.error);
       refreshDiff();
+    },
+    [project.encoded, refreshDiff]
+  );
+
+  const handleDiscardAll = useCallback(
+    async (subPath: string) => {
+      const ok = await confirm({
+        title: "Discard all changes?",
+        description:
+          "This permanently discards every unstaged change and removes untracked files in this repo. It cannot be undone.",
+        confirmLabel: "Discard all",
+      });
+      if (!ok) return;
+      const res = await window.electronAPI.discardAll(project.encoded, subPath);
+      if (!res.ok) console.warn("discard all failed:", res.error);
+      refreshDiff();
+    },
+    [project.encoded, refreshDiff, confirm]
+  );
+
+  const handleStashAll = useCallback(
+    async (subPath: string) => {
+      const res = await window.electronAPI.stashAll(project.encoded, subPath);
+      if (!res.ok) console.warn("stash all failed:", res.error);
+      refreshDiff();
+    },
+    [project.encoded, refreshDiff]
+  );
+
+  const handlePush = useCallback(
+    async (subPath: string) => {
+      setPushingRepo(subPath);
+      try {
+        const res = await window.electronAPI.push(project.encoded, subPath);
+        if (!res.ok) console.warn("push failed:", res.error);
+        await refreshDiff();
+      } finally {
+        setPushingRepo(null);
+      }
     },
     [project.encoded, refreshDiff]
   );
@@ -599,6 +691,53 @@ export function ProjectWorkspace({
     setSelectedFile({ subPath, path });
   }, []);
 
+  // ── Terminal (⌘J) ────────────────────────────────────────────
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  // Keep the xterm mounted once opened (hidden when closed) so scrollback and
+  // the live view survive ⌘J toggles within this project.
+  const [terminalMounted, setTerminalMounted] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(300);
+
+  const startTerminalResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = terminalHeight;
+      const onMove = (ev: PointerEvent) => {
+        // Drag up (negative dy) grows the terminal.
+        const next = Math.min(
+          Math.max(startH - (ev.clientY - startY), 120),
+          window.innerHeight - 160
+        );
+        setTerminalHeight(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [terminalHeight]
+  );
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setTerminalOpen((v) => {
+          const next = !v;
+          if (next) setTerminalMounted(true);
+          return next;
+        });
+      } else if (e.key === "Escape" && terminalOpen) {
+        setTerminalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [terminalOpen]);
+
   return (
     <SidebarProvider
       defaultOpen={true}
@@ -619,6 +758,10 @@ export function ProjectWorkspace({
           onDiscardFile={handleDiscardFile}
           onStageAll={handleStageAll}
           onUnstageAll={handleUnstageAll}
+          onDiscardAll={handleDiscardAll}
+          onStashAll={handleStashAll}
+          syncTargets={syncTargets}
+          onPush={handlePush}
           onCommit={handleCommit}
           filesLoading={filesLoading}
           diffAvailable={repos.length > 0}
@@ -639,6 +782,7 @@ export function ProjectWorkspace({
             branch={branch}
           />
           <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col">
             {tab === "diffs" && (
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="min-h-0 flex-1">
@@ -746,6 +890,32 @@ export function ProjectWorkspace({
                       : "Select a plan"}
                   </div>
                 )}
+              </div>
+            )}
+
+            </div>
+
+            {/* Resizable docked terminal (⌘J). Kept mounted once opened so
+                scrollback survives toggles; hidden (height 0) when closed. */}
+            {terminalMounted && (
+              <div
+                className={cn(
+                  "flex shrink-0 flex-col border-t border-[var(--border)]",
+                  !terminalOpen && "hidden"
+                )}
+                style={{ height: terminalOpen ? terminalHeight : 0 }}
+              >
+                <div
+                  onPointerDown={startTerminalResize}
+                  className="h-1.5 shrink-0 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
+                />
+                <div className="min-h-0 flex-1">
+                  <TerminalPanel
+                    encoded={project.encoded}
+                    visible={terminalOpen}
+                    onClose={() => setTerminalOpen(false)}
+                  />
+                </div>
               </div>
             )}
           </div>
