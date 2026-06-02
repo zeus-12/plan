@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "@plan/shared/lib/diff-parser";
-import type { FileContents } from "../../shared-types";
+import type { FileView } from "../../shared-types";
 import type { Annotation } from "@plan/shared/lib/store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff, type HunkRange } from "@plan/shared/components/interactive-diff";
@@ -36,7 +36,8 @@ interface Props {
   setAnnotationsByFile: React.Dispatch<
     React.SetStateAction<Record<string, Annotation[]>>
   >;
-  isStaged: boolean;
+  /** Which stage's diff to show: "staged" (HEAD↔index) or "unstaged" (index↔worktree). */
+  mode: "staged" | "unstaged";
   onStage: () => void;
   onUnstage: () => void;
   onDiscard: () => void;
@@ -63,18 +64,28 @@ export function FileDiffViewer({
   file,
   annotationsByFile,
   setAnnotationsByFile,
-  isStaged,
+  mode,
   onStage,
   onUnstage,
   onDiscard,
   onChanged,
   confirm,
 }: Props) {
+  const isStaged = mode === "staged";
   const [settings, updateSettings] = useDiffSettings();
-  const [contents, setContents] = useState<FileContents | null>(null);
+  const [contents, setContents] = useState<FileView | null>(null);
 
-  // Hunks parsed from this file's git diff body — used for per-hunk staging.
-  const parsedHunks = useMemo(() => parseFileDiff(file.body), [file.body]);
+  // Hunks parsed from the diff for *this stage* (staged vs unstaged) so a
+  // partially-staged file shows only the relevant hunks in each section.
+  const parsedHunks = useMemo(
+    () => parseFileDiff(contents?.diffBody ?? ""),
+    [contents?.diffBody]
+  );
+
+  // Undo stack of per-hunk ops applied in this view (⌘Z reverses them).
+  const undoStack = useRef<{ action: "stage" | "unstage" | "discard"; patch: string }[]>(
+    []
+  );
 
   /**
    * Match an InteractiveDiff change block (given as a line range) to one of
@@ -123,11 +134,55 @@ export function FileDiffViewer({
         mode,
         subPath
       );
-      if (!res.ok) console.warn(`${mode} hunk failed:`, res.error);
+      if (!res.ok) {
+        console.warn(`${mode} hunk failed:`, res.error);
+        return;
+      }
+      undoStack.current.push({ action: mode, patch });
       onChanged();
     },
     [findHunkIndex, parsedHunks, encoded, subPath, onChanged, confirm]
   );
+
+  // ⌘Z reverses the last per-hunk op:
+  //   stage  → unstage,  unstage → stage,  discard → re-apply (forward).
+  const undoLastHunk = useCallback(async () => {
+    const op = undoStack.current.pop();
+    if (!op) return;
+    const inverse =
+      op.action === "stage"
+        ? "unstage"
+        : op.action === "unstage"
+          ? "stage"
+          : "apply"; // undo a discard = forward-apply the hunk to the worktree
+    const res = await window.electronAPI.applyPatch(
+      encoded,
+      op.patch,
+      inverse,
+      subPath
+    );
+    if (!res.ok) console.warn("undo hunk failed:", res.error);
+    onChanged();
+  }, [encoded, subPath, onChanged]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== "z")
+        return;
+      // Don't hijack undo inside text inputs / the terminal.
+      const el = document.activeElement;
+      if (
+        el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA")
+      )
+        return;
+      if (undoStack.current.length === 0) return;
+      e.preventDefault();
+      void undoLastHunk();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undoLastHunk]);
 
   const [language, setLanguage] = useState("auto");
 
@@ -144,14 +199,14 @@ export function FileDiffViewer({
     setFormatActive(false);
     setFormatError(null);
     window.electronAPI
-      .getFileContents(encoded, file.oldPath, file.newPath, subPath)
+      .getFileView(encoded, file.path, mode, subPath)
       .then((c) => {
         if (!cancelled) setContents(c);
       });
     return () => {
       cancelled = true;
     };
-  }, [encoded, file.oldPath, file.newPath, subPath]);
+  }, [encoded, file.path, mode, subPath]);
 
   const annotations = annotationsByFile[file.path] ?? [];
 
@@ -395,7 +450,7 @@ export function FileDiffViewer({
             newText={viewNewText}
             settings={settings}
             onSettingsChange={updateSettings}
-            isFirstVersion={file.status === "added"}
+            isFirstVersion={!contents.oldText}
             language={effectiveLanguage}
             annotations={annotations}
             onAddAnnotation={addAnnotation}

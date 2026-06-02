@@ -52,6 +52,13 @@ export interface FileContents {
   binary: boolean;
 }
 
+export interface FileView {
+  oldText: string;
+  newText: string;
+  diffBody: string;
+  binary: boolean;
+}
+
 export interface ProjectEntry {
   encoded: string;
   cwd: string;

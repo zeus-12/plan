@@ -22,7 +22,7 @@ import {
 } from "./session-watcher";
 import { readSessionFile, type ParsedSession } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
-import { getFileContents } from "./file-contents";
+import { getFileContents, getFileView } from "./file-contents";
 import { readdir } from "fs/promises";
 import { startPlansWatcher, stopPlansWatcher } from "./plans-watcher";
 import {
@@ -272,6 +272,16 @@ function registerIpc() {
       subPath: string = ""
     ) => getFileContents(encoded, oldPath, newPath, subPath)
   );
+  ipcMain.handle(
+    "project:fileView",
+    async (
+      _e,
+      encoded: string,
+      path: string,
+      mode: "staged" | "unstaged",
+      subPath: string = ""
+    ) => getFileView(encoded, path, mode, subPath)
+  );
 
   ipcMain.handle("repos:list", async (_e, encoded: string) =>
     discoverRepos(encoded)
@@ -337,7 +347,7 @@ function registerIpc() {
       _e,
       encoded: string,
       patch: string,
-      mode: "stage" | "unstage" | "discard",
+      mode: "stage" | "unstage" | "discard" | "apply",
       subPath: string = ""
     ) => applyPatch(encoded, patch, { mode }, subPath)
   );

@@ -455,9 +455,14 @@ export function InteractiveDiff({
       `[data-dline="${change.startLineIdx}"]`
     );
     if (!startEl) return;
+    const endEl =
+      root.querySelector<HTMLElement>(`[data-dline="${change.endLineIdx}"]`) ??
+      startEl;
     const rootRect = root.getBoundingClientRect();
     const startRect = startEl.getBoundingClientRect();
-    setHunkCtrlTop(startRect.top - rootRect.top);
+    const endRect = endEl.getBoundingClientRect();
+    // Center the control vertically on the hunk (VS Code-style).
+    setHunkCtrlTop((startRect.top + endRect.bottom) / 2 - rootRect.top);
   }, [
     hunkActionsEnabled,
     hoverChangeIdx,
@@ -1260,6 +1265,11 @@ export function InteractiveDiff({
             ? (e) => {
                 let el: HTMLElement | null = e.target as HTMLElement | null;
                 while (el && !el.hasAttribute("data-dline")) {
+                  // Moving onto the floating control itself must NOT clear the
+                  // hover — otherwise the control unmounts the instant the
+                  // cursor reaches it, and re-mounts when it falls back onto the
+                  // line underneath, producing a blink loop.
+                  if (el.hasAttribute("data-hunk-control")) return;
                   if (el === contentRef.current) {
                     setHoverChangeIdx(null);
                     return;
@@ -1305,8 +1315,9 @@ export function InteractiveDiff({
           hunkCtrlTop !== null &&
           changes[hoverChangeIdx] && (
             <div
-              className="absolute right-3 z-20 flex items-center gap-1"
-              style={{ top: Math.max(0, hunkCtrlTop - 2) }}
+              data-hunk-control
+              className="absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1"
+              style={{ top: Math.max(10, hunkCtrlTop) }}
             >
               {hunkActions.isStaged ? (
                 <button

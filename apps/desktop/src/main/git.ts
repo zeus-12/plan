@@ -352,8 +352,12 @@ export async function commit(
 }
 
 export interface ApplyHunkOptions {
-  /** "stage" → --cached; "discard" → --reverse (against the working tree). */
-  mode: "stage" | "unstage" | "discard";
+  /**
+   * "stage" → --cached; "unstage" → --cached --reverse;
+   * "discard" → --reverse (working tree); "apply" → forward apply (working
+   * tree, used to undo a discard).
+   */
+  mode: "stage" | "unstage" | "discard" | "apply";
 }
 
 /** Apply (or reverse) a patch via stdin. Returns true on success. */
@@ -371,6 +375,7 @@ export async function applyPatch(
   } else if (opts.mode === "discard") {
     args.push("--reverse");
   }
+  // "apply" → no extra flags (forward apply to the working tree).
   args.push("-");
   const r = await run(cwd, args, patch);
   if (r.code !== 0) {

@@ -5,6 +5,7 @@ import type {
   SessionListEntry,
   SessionEvent,
   FileContents,
+  FileView,
   Plan,
   PlansEvent,
   GitStatusResult,
@@ -27,6 +28,12 @@ interface ElectronAPI {
     subPath?: string
   ) => Promise<FileContents>;
   listRepos: (encoded: string) => Promise<DiscoveredRepo[]>;
+  getFileView: (
+    encoded: string,
+    path: string,
+    mode: "staged" | "unstaged",
+    subPath?: string
+  ) => Promise<FileView>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;
   setProjectArchived: (
@@ -81,7 +88,7 @@ interface ElectronAPI {
   applyPatch: (
     encoded: string,
     patch: string,
-    mode: "stage" | "unstage" | "discard",
+    mode: "stage" | "unstage" | "discard" | "apply",
     subPath?: string
   ) => Promise<GitOpResult>;
 }

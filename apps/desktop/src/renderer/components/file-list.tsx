@@ -30,8 +30,8 @@ export interface RepoFileGroup {
 
 interface Props {
   groups: RepoFileGroup[];
-  selected: { subPath: string; path: string } | null;
-  onSelect: (subPath: string, path: string) => void;
+  selected: { subPath: string; path: string; staged: boolean } | null;
+  onSelect: (subPath: string, path: string, staged: boolean) => void;
   onStage: (path: string, subPath: string) => void;
   onUnstage: (path: string, subPath: string) => void;
   onDiscard: (path: string, subPath: string) => void;
@@ -381,7 +381,9 @@ export function FileList({
 
           const file = row.file;
           const isSelected =
-            selected?.subPath === file.subPath && selected?.path === file.path;
+            selected?.subPath === file.subPath &&
+            selected?.path === file.path &&
+            selected?.staged === file.staged;
           const basename = file.path.split("/").pop() ?? file.path;
           const dirname = file.path.includes("/")
             ? file.path.slice(0, file.path.lastIndexOf("/"))
@@ -398,7 +400,7 @@ export function FileList({
               )}
             >
               <button
-                onClick={() => onSelect(file.subPath, file.path)}
+                onClick={() => onSelect(file.subPath, file.path, file.staged)}
                 title={file.subPath ? `${file.subPath}/${file.path}` : file.path}
                 className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 pr-2 text-left"
               >

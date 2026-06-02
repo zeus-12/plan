@@ -366,6 +366,9 @@ export function MessageList({
     estimateSize: () => 140,
     overscan: 8,
     measureElement: (el) => el.getBoundingClientRect().height,
+    // Breathing room above the first and below the last message.
+    paddingStart: 12,
+    paddingEnd: 20,
   });
 
   /**

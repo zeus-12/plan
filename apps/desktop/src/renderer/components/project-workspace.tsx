@@ -35,7 +35,6 @@ interface Props {
   project: ProjectEntry;
   repos: DiscoveredRepo[];
   projectsSidebarOpen: boolean;
-  onToggleProjectSidebar: () => void;
 }
 
 const MAX_SESSIONS = 5;
@@ -81,12 +80,10 @@ function MoonIcon() {
 function WorkspaceHeader({
   project,
   projectsSidebarOpen,
-  onToggleProjectSidebar,
   branch,
 }: {
   project: ProjectEntry;
   projectsSidebarOpen: boolean;
-  onToggleProjectSidebar: () => void;
   branch: string | null;
 }) {
   const { theme, toggle: toggleTheme } = useTheme();
@@ -108,15 +105,15 @@ function WorkspaceHeader({
             <Button
               variant="ghost"
               size="icon"
-              onClick={onToggleProjectSidebar}
-              aria-label="Toggle projects sidebar"
+              onClick={middle.toggle}
+              aria-label="Toggle files & chat sidebar"
             >
-              <ToggleIcon />
+              <PanelRightIcon />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="flex items-center gap-1.5">
-            <span>Projects</span>
-            <Kbd keys={["⌘", "B"]} />
+            <span>{middle.open ? "Hide" : "Show"} files & chat</span>
+            <Kbd keys={["⌘", "E"]} />
           </TooltipContent>
         </Tooltip>
       </div>
@@ -136,22 +133,6 @@ function WorkspaceHeader({
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={middle.toggle}
-              aria-label="Toggle files & chat sidebar"
-            >
-              <PanelRightIcon />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="flex items-center gap-1.5">
-            <span>{middle.open ? "Hide" : "Show"} files & chat</span>
-            <Kbd keys={["⌘", "E"]} />
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" onClick={toggleTheme}>
               {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </Button>
@@ -165,26 +146,7 @@ function WorkspaceHeader({
   );
 }
 
-/** Panel-left glyph — the projects (1st) sidebar lives on the left. */
-function ToggleIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <line x1="9" y1="3" x2="9" y2="21" />
-    </svg>
-  );
-}
-
-/** Panel-right glyph — the files/chat (2nd) sidebar; distinct from the left one. */
+/** Panel-right glyph — the files/chat (2nd) sidebar toggle. */
 function PanelRightIcon() {
   return (
     <svg
@@ -207,7 +169,6 @@ export function ProjectWorkspace({
   project,
   repos,
   projectsSidebarOpen,
-  onToggleProjectSidebar,
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
@@ -230,9 +191,13 @@ export function ProjectWorkspace({
   // stage/discard/etc.) update in place WITHOUT flipping back to the loading
   // placeholder — that swap unmounts the list and resets its scroll.
   const loadedRef = useRef(false);
-  /** Selected file is identified by both its repo (subPath) and its path. */
+  /**
+   * Selected file — identified by repo (subPath), path, and which stage we're
+   * viewing (staged vs unstaged), since a partially-staged file appears in both
+   * sections and each shows a different diff.
+   */
   const [selectedFile, setSelectedFile] = useState<
-    { subPath: string; path: string } | null
+    { subPath: string; path: string; staged: boolean } | null
   >(null);
   /** Annotations keyed by "subPath::path" so they don't collide across repos. */
   const [annotationsByFile, setAnnotationsByFile] = useState<
@@ -271,23 +236,26 @@ export function ProjectWorkspace({
       const next = new Map(entries);
       setFilesByRepo(next);
       setSelectedFile((current) => {
-        // Keep the current selection if it still exists.
+        // Keep the current selection if that same stage still has the file.
         if (current) {
           const repo = next.get(current.subPath);
-          if (
-            repo &&
-            (repo.files.some((f) => f.path === current.path) ||
-              repo.status.some((s) => s.path === current.path))
-          ) {
-            return current;
-          }
+          const stillThere = repo?.status.some(
+            (s) =>
+              s.path === current.path &&
+              (current.staged ? s.staged : s.unstaged)
+          );
+          if (stillThere) return current;
         }
-        // Otherwise pick the first available file from any repo.
+        // Otherwise pick the first available file (prefer unstaged changes).
         for (const r of repos) {
           const repo = next.get(r.subPath);
           if (!repo) continue;
-          const first = repo.files[0]?.path ?? repo.status[0]?.path ?? null;
-          if (first) return { subPath: r.subPath, path: first };
+          const unstaged = repo.status.find((s) => s.unstaged);
+          if (unstaged)
+            return { subPath: r.subPath, path: unstaged.path, staged: false };
+          const staged = repo.status.find((s) => s.staged);
+          if (staged)
+            return { subPath: r.subPath, path: staged.path, staged: true };
         }
         return null;
       });
@@ -687,9 +655,12 @@ export function ProjectWorkspace({
     };
   }, [selectedFile, filesByRepo]);
 
-  const handleSelectFile = useCallback((subPath: string, path: string) => {
-    setSelectedFile({ subPath, path });
-  }, []);
+  const handleSelectFile = useCallback(
+    (subPath: string, path: string, staged: boolean) => {
+      setSelectedFile({ subPath, path, staged });
+    },
+    []
+  );
 
   // ── Terminal (⌘J) ────────────────────────────────────────────
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -778,7 +749,6 @@ export function ProjectWorkspace({
           <WorkspaceHeader
             project={project}
             projectsSidebarOpen={projectsSidebarOpen}
-            onToggleProjectSidebar={onToggleProjectSidebar}
             branch={branch}
           />
           <div className="flex min-h-0 flex-1 flex-col">
@@ -788,17 +758,13 @@ export function ProjectWorkspace({
                 <div className="min-h-0 flex-1">
                   {selectedFile && selectedFileDiff ? (
                     <FileDiffViewer
-                      key={`${selectedFile.subPath}::${selectedFile.path}`}
+                      key={`${selectedFile.subPath}::${selectedFile.path}::${selectedFile.staged ? "s" : "u"}`}
                       encoded={project.encoded}
                       subPath={selectedFile.subPath}
                       file={selectedFileDiff}
+                      mode={selectedFile.staged ? "staged" : "unstaged"}
                       annotationsByFile={annotationsByFile}
                       setAnnotationsByFile={setAnnotationsByFile}
-                      isStaged={(
-                        repoGroups.find(
-                          (g) => g.subPath === selectedFile.subPath
-                        )?.staged ?? []
-                      ).some((s) => s.path === selectedFile.path)}
                       onStage={() =>
                         handleStageFile(
                           selectedFile.path,

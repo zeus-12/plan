@@ -46,7 +46,15 @@ export function useConfirm() {
         if (!open) settle(false);
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        onKeyDown={(e) => {
+          // Enter confirms (Radix defaults focus to Cancel, so we force it).
+          if (e.key === "Enter") {
+            e.preventDefault();
+            settle(true);
+          }
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{opts?.title}</AlertDialogTitle>
           {opts?.description && (

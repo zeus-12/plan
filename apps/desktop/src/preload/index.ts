@@ -24,6 +24,12 @@ const electronAPI = {
       subPath
     ),
   listRepos: (encoded: string) => ipcRenderer.invoke("repos:list", encoded),
+  getFileView: (
+    encoded: string,
+    path: string,
+    mode: "staged" | "unstaged",
+    subPath: string = ""
+  ) => ipcRenderer.invoke("project:fileView", encoded, path, mode, subPath),
 
   onWatcherEvent: (cb: (e: SessionEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, e: SessionEvent) =>
@@ -97,7 +103,7 @@ const electronAPI = {
   applyPatch: (
     encoded: string,
     patch: string,
-    mode: "stage" | "unstage" | "discard",
+    mode: "stage" | "unstage" | "discard" | "apply",
     subPath: string = ""
   ) => ipcRenderer.invoke("git:applyPatch", encoded, patch, mode, subPath),
 };

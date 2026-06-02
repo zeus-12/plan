@@ -25,8 +25,8 @@ interface Props {
 
   repos: DiscoveredRepo[];
   repoGroups: RepoFileGroup[];
-  selectedFile: { subPath: string; path: string } | null;
-  onSelectFile: (subPath: string, path: string) => void;
+  selectedFile: { subPath: string; path: string; staged: boolean } | null;
+  onSelectFile: (subPath: string, path: string, staged: boolean) => void;
   onStageFile: (path: string, subPath: string) => void;
   onUnstageFile: (path: string, subPath: string) => void;
   onDiscardFile: (path: string, subPath: string) => void;
