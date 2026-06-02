@@ -62,6 +62,36 @@ const electronAPI = {
     ipcRenderer.invoke("git:stageAll", encoded, subPath),
   unstageAll: (encoded: string, subPath: string = "") =>
     ipcRenderer.invoke("git:unstageAll", encoded, subPath),
+  discardAll: (encoded: string, subPath: string = "") =>
+    ipcRenderer.invoke("git:discardAll", encoded, subPath),
+  stashAll: (encoded: string, subPath: string = "") =>
+    ipcRenderer.invoke("git:stashAll", encoded, subPath),
+  push: (encoded: string, subPath: string = "") =>
+    ipcRenderer.invoke("git:push", encoded, subPath),
+
+  // Terminal
+  terminalOpen: (encoded: string, cols: number, rows: number) =>
+    ipcRenderer.invoke("terminal:open", encoded, cols, rows),
+  terminalInput: (encoded: string, data: string) =>
+    ipcRenderer.send("terminal:input", encoded, data),
+  terminalResize: (encoded: string, cols: number, rows: number) =>
+    ipcRenderer.send("terminal:resize", encoded, cols, rows),
+  terminalKill: (encoded: string) =>
+    ipcRenderer.send("terminal:kill", encoded),
+  onTerminalData: (cb: (chunk: { encoded: string; data: string }) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      chunk: { encoded: string; data: string }
+    ) => cb(chunk);
+    ipcRenderer.on("terminal:data", handler);
+    return () => ipcRenderer.removeListener("terminal:data", handler);
+  },
+  onTerminalExit: (cb: (encoded: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, encoded: string) =>
+      cb(encoded);
+    ipcRenderer.on("terminal:exit", handler);
+    return () => ipcRenderer.removeListener("terminal:exit", handler);
+  },
   commit: (encoded: string, message: string, subPath: string = "") =>
     ipcRenderer.invoke("git:commit", encoded, message, subPath),
   applyPatch: (

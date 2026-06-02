@@ -35,14 +35,26 @@ import {
   removePlan,
 } from "./plans-store";
 import {
+  setTerminalCallbacks,
+  openTerminal,
+  writeTerminal,
+  resizeTerminal,
+  killTerminal,
+  killAllTerminals,
+  type TerminalChunk,
+} from "./terminal";
+import {
   applyPatch,
   commit as gitCommit,
+  discardAll,
   discardFile,
   discoverRepos,
   getBranch,
   getStatus,
+  push as gitPush,
   stageAll,
   stageFile,
+  stashAll,
   unstageAll,
   unstageFile,
 } from "./git";
@@ -302,6 +314,19 @@ function registerIpc() {
       unstageAll(encoded, subPath)
   );
   ipcMain.handle(
+    "git:discardAll",
+    async (_e, encoded: string, subPath: string = "") =>
+      discardAll(encoded, subPath)
+  );
+  ipcMain.handle(
+    "git:stashAll",
+    async (_e, encoded: string, subPath: string = "") =>
+      stashAll(encoded, subPath)
+  );
+  ipcMain.handle("git:push", async (_e, encoded: string, subPath: string = "") =>
+    gitPush(encoded, subPath)
+  );
+  ipcMain.handle(
     "git:commit",
     async (_e, encoded: string, message: string, subPath: string = "") =>
       gitCommit(encoded, message, subPath)
@@ -316,6 +341,22 @@ function registerIpc() {
       subPath: string = ""
     ) => applyPatch(encoded, patch, { mode }, subPath)
   );
+
+  // Terminal (per-project pty)
+  ipcMain.handle(
+    "terminal:open",
+    async (_e, encoded: string, cols: number, rows: number) =>
+      openTerminal(encoded, cols, rows)
+  );
+  ipcMain.on("terminal:input", (_e, encoded: string, data: string) =>
+    writeTerminal(encoded, data)
+  );
+  ipcMain.on(
+    "terminal:resize",
+    (_e, encoded: string, cols: number, rows: number) =>
+      resizeTerminal(encoded, cols, rows)
+  );
+  ipcMain.on("terminal:kill", (_e, encoded: string) => killTerminal(encoded));
 }
 
 // ── Watcher → renderer bridge ──────────────────────────────────────
@@ -325,6 +366,19 @@ function bridgeWatcher() {
     onEvent(e) {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       mainWindow.webContents.send("watcher:event", e);
+    },
+  });
+}
+
+function bridgeTerminal() {
+  setTerminalCallbacks({
+    onData(chunk: TerminalChunk) {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send("terminal:data", chunk);
+    },
+    onExit(encoded: string) {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send("terminal:exit", encoded);
     },
   });
 }
@@ -358,6 +412,7 @@ app.whenReady().then(async () => {
   buildMenu();
   registerIpc();
   bridgeWatcher();
+  bridgeTerminal();
 
   createMainWindow();
 
@@ -384,6 +439,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async () => {
   stopAll();
+  killAllTerminals();
   await stopPlansWatcher();
   await flushPlansWrites();
 });

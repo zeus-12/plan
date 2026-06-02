@@ -105,6 +105,10 @@ export interface GitStatusResult {
   available: boolean;
   branch: string | null;
   files: GitFileStatus[];
+  /** Commits ahead of upstream (0 when none / no upstream). */
+  ahead: number;
+  /** Whether the branch has an upstream configured. */
+  hasUpstream: boolean;
 }
 
 export interface GitOpResult {

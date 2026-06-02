@@ -32,6 +32,17 @@ interface Props {
   onDiscardFile: (path: string, subPath: string) => void;
   onStageAll: (subPath: string) => void;
   onUnstageAll: (subPath: string) => void;
+  onDiscardAll: (subPath: string) => void;
+  onStashAll: (subPath: string) => void;
+  syncTargets: {
+    subPath: string;
+    repoName: string;
+    branch: string | null;
+    ahead: number;
+    hasUpstream: boolean;
+    pushing: boolean;
+  }[];
+  onPush: (subPath: string) => void;
   onCommit: (
     message: string,
     subPath: string
@@ -55,6 +66,26 @@ function totalUnread(plans: Plan[]): number {
   return plans.reduce((s, p) => s + p.unread, 0);
 }
 
+function UploadIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
 export function MiddleSidebar({
   tab,
   onTabChange,
@@ -67,6 +98,10 @@ export function MiddleSidebar({
   onDiscardFile,
   onStageAll,
   onUnstageAll,
+  onDiscardAll,
+  onStashAll,
+  syncTargets,
+  onPush,
   onCommit,
   filesLoading,
   diffAvailable,
@@ -170,8 +205,35 @@ export function MiddleSidebar({
                     onDiscard={onDiscardFile}
                     onStageAll={onStageAll}
                     onUnstageAll={onUnstageAll}
+                    onDiscardAll={onDiscardAll}
+                    onStashAll={onStashAll}
                   />
                 </div>
+                {/* Push / sync bar pinned at the bottom. */}
+                {syncTargets.map((t) => (
+                  <button
+                    key={t.subPath || "/"}
+                    onClick={() => onPush(t.subPath)}
+                    disabled={t.pushing || (t.hasUpstream && t.ahead === 0)}
+                    className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-surface)]"
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <UploadIcon />
+                      <span className="truncate">
+                        {t.pushing
+                          ? "Pushing…"
+                          : !t.hasUpstream
+                            ? "Publish branch"
+                            : t.ahead > 0
+                              ? `Push ${t.ahead}`
+                              : "Up to date"}
+                      </span>
+                    </span>
+                    <span className="shrink-0 truncate text-[10px] text-[var(--text-tertiary)]">
+                      {multiRepo ? t.repoName : t.branch ?? ""}
+                    </span>
+                  </button>
+                ))}
               </div>
             )}
           </TabsContent>

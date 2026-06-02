@@ -1,6 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@plan/shared/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@plan/shared/components/ui/tooltip";
 
 export interface FileEntry {
   path: string;
@@ -33,6 +38,9 @@ interface Props {
   /** Stage / unstage an entire section at once. */
   onStageAll: (subPath: string) => void;
   onUnstageAll: (subPath: string) => void;
+  /** Repo-wide bulk actions on the Changes group. */
+  onDiscardAll: (subPath: string) => void;
+  onStashAll: (subPath: string) => void;
 }
 
 const REPO_H = 34;
@@ -75,6 +83,93 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+/* ── Section-action icons (14px, currentColor) ──────────────── */
+
+function svgProps() {
+  return {
+    width: 14,
+    height: 14,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+}
+function PlusIcon() {
+  return (
+    <svg {...svgProps()}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+function MinusIcon() {
+  return (
+    <svg {...svgProps()}>
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+function DiscardIcon() {
+  // rotate-ccw
+  return (
+    <svg {...svgProps()}>
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+function StashIcon() {
+  // archive box
+  return (
+    <svg {...svgProps()}>
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+/** Icon-only section action with a tooltip. */
+function SectionIconButton({
+  icon,
+  tooltip,
+  onClick,
+  danger,
+  accent,
+}: {
+  icon: React.ReactNode;
+  tooltip: string;
+  onClick: () => void;
+  danger?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+          }}
+          aria-label={tooltip}
+          className={cn(
+            "flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
+            danger && "hover:text-[var(--removed-text)]",
+            accent && "hover:text-[var(--text)]",
+            !danger && !accent && "hover:text-[var(--text-secondary)]"
+          )}
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Small icon button for per-row stage/unstage/discard. */
 function ActionButton({
   label,
@@ -94,11 +189,10 @@ function ActionButton({
       onClick={onClick}
       title={title}
       className={cn(
-        "flex h-7 w-7 items-center justify-center rounded-md border font-[family-name:var(--font-mono)] text-[16px] leading-none transition-colors",
-        "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]",
-        danger && "hover:border-[var(--removed-text)] hover:text-[var(--removed-text)]",
-        accent && "hover:border-[var(--accent)] hover:text-[var(--text)]",
-        !danger && !accent && "hover:text-[var(--text)]"
+        "flex h-6 w-6 items-center justify-center rounded-md font-[family-name:var(--font-mono)] text-[15px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
+        danger && "hover:text-[var(--removed-text)]",
+        accent && "hover:text-[var(--text)]",
+        !danger && !accent && "hover:text-[var(--text-secondary)]"
       )}
     >
       {label}
@@ -115,6 +209,8 @@ export function FileList({
   onDiscard,
   onStageAll,
   onUnstageAll,
+  onDiscardAll,
+  onStashAll,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   // Collapse state lives here so the whole list can be flattened + virtualized.
@@ -250,18 +346,35 @@ export function FileList({
                   </span>
                   <span>{files.length}</span>
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isStaged) onUnstageAll(row.group.subPath);
-                    else onStageAll(row.group.subPath);
-                  }}
-                  title={isStaged ? "Unstage all" : "Stage all"}
-                  className="flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-2 font-[family-name:var(--font-mono)] text-[11px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-                >
-                  <span className="text-[14px]">{isStaged ? "−" : "+"}</span>
-                  <span>{isStaged ? "Unstage all" : "Stage all"}</span>
-                </button>
+                <div className="flex shrink-0 items-center gap-1.5 pl-2">
+                  {isStaged ? (
+                    <SectionIconButton
+                      icon={<MinusIcon />}
+                      tooltip="Unstage all"
+                      onClick={() => onUnstageAll(row.group.subPath)}
+                    />
+                  ) : (
+                    <>
+                      <SectionIconButton
+                        icon={<StashIcon />}
+                        tooltip="Stash all changes"
+                        onClick={() => onStashAll(row.group.subPath)}
+                      />
+                      <SectionIconButton
+                        icon={<DiscardIcon />}
+                        tooltip="Discard all changes"
+                        danger
+                        onClick={() => onDiscardAll(row.group.subPath)}
+                      />
+                      <SectionIconButton
+                        icon={<PlusIcon />}
+                        tooltip="Stage all"
+                        accent
+                        onClick={() => onStageAll(row.group.subPath)}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
             );
           }
@@ -306,7 +419,7 @@ export function FileList({
                   </span>
                 )}
               </button>
-              <div className="flex items-center gap-1 pr-2 opacity-70 transition-opacity group-hover:opacity-100">
+              <div className="flex items-center gap-1.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
                 {file.staged ? (
                   <ActionButton
                     label="−"

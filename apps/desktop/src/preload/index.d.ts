@@ -57,6 +57,22 @@ interface ElectronAPI {
   ) => Promise<GitOpResult>;
   stageAll: (encoded: string, subPath?: string) => Promise<GitOpResult>;
   unstageAll: (encoded: string, subPath?: string) => Promise<GitOpResult>;
+  discardAll: (encoded: string, subPath?: string) => Promise<GitOpResult>;
+  stashAll: (encoded: string, subPath?: string) => Promise<GitOpResult>;
+  push: (encoded: string, subPath?: string) => Promise<GitOpResult>;
+
+  terminalOpen: (
+    encoded: string,
+    cols: number,
+    rows: number
+  ) => Promise<{ cwd: string }>;
+  terminalInput: (encoded: string, data: string) => void;
+  terminalResize: (encoded: string, cols: number, rows: number) => void;
+  terminalKill: (encoded: string) => void;
+  onTerminalData: (
+    cb: (chunk: { encoded: string; data: string }) => void
+  ) => () => void;
+  onTerminalExit: (cb: (encoded: string) => void) => () => void;
   commit: (
     encoded: string,
     message: string,

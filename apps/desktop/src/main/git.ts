@@ -59,6 +59,8 @@ export interface GitStatusResult {
   available: boolean;
   branch: string | null;
   files: GitFileStatus[];
+  ahead: number;
+  hasUpstream: boolean;
 }
 
 async function cwdFromEncoded(
@@ -189,7 +191,7 @@ export async function getStatus(
 ): Promise<GitStatusResult> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   if (!(await isGitRepo(cwd))) {
-    return { available: false, branch: null, files: [] };
+    return { available: false, branch: null, files: [], ahead: 0, hasUpstream: false };
   }
   const [branchRes, statusRes] = await Promise.all([
     run(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -199,6 +201,15 @@ export async function getStatus(
   ]);
   const branchRaw = branchRes.stdout.trim();
   const branch = !branchRaw || branchRaw === "HEAD" ? null : branchRaw;
+
+  // Commits ahead of the upstream (for the push button). No upstream → 0.
+  let ahead = 0;
+  let hasUpstream = false;
+  const up = await run(cwd, ["rev-list", "--count", "@{upstream}..HEAD"]);
+  if (up.code === 0) {
+    hasUpstream = true;
+    ahead = parseInt(up.stdout.trim() || "0", 10) || 0;
+  }
 
   const files: GitFileStatus[] = [];
   for (const line of statusRes.stdout.split("\n")) {
@@ -211,7 +222,25 @@ export async function getStatus(
     files.push({ path, staged, unstaged, code: `${x}${y}` });
   }
 
-  return { available: true, branch, files };
+  return { available: true, branch, files, ahead, hasUpstream };
+}
+
+export async function push(
+  encoded: string,
+  subPath: string = ""
+): Promise<{ ok: boolean; error?: string }> {
+  const cwd = await cwdFromEncoded(encoded, subPath);
+  const r = await run(cwd, ["push"]);
+  if (r.code === 0) return { ok: true };
+  // No upstream configured → set it on first push.
+  if (/upstream|set[- ]upstream/i.test(r.stderr)) {
+    const branch = await branchAt(cwd);
+    if (!branch) return { ok: false, error: r.stderr };
+    const r2 = await run(cwd, ["push", "--set-upstream", "origin", branch]);
+    if (r2.code !== 0) return { ok: false, error: r2.stderr || "git push failed" };
+    return { ok: true };
+  }
+  return { ok: false, error: r.stderr || "git push failed" };
 }
 
 export async function stageFile(
@@ -272,6 +301,41 @@ export async function unstageAll(
   if (r.code !== 0) {
     const r2 = await run(cwd, ["reset", "HEAD"]);
     if (r2.code !== 0) return { ok: false, error: r2.stderr || r.stderr };
+  }
+  return { ok: true };
+}
+
+/**
+ * Discard every unstaged change in the working tree: restore tracked files to
+ * the index version and remove untracked files/dirs. Staged changes are left
+ * intact. Destructive — callers should confirm.
+ */
+export async function discardAll(
+  encoded: string,
+  subPath: string = ""
+): Promise<{ ok: boolean; error?: string }> {
+  const cwd = await cwdFromEncoded(encoded, subPath);
+  const restore = await run(cwd, ["restore", "--worktree", "."]);
+  const clean = await run(cwd, ["clean", "-fd"]);
+  if (restore.code !== 0 && clean.code !== 0) {
+    return { ok: false, error: restore.stderr || clean.stderr || "discard failed" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Stash all local changes (staged, unstaged, and untracked), reverting the
+ * working tree to HEAD. Recoverable via `git stash pop`.
+ */
+export async function stashAll(
+  encoded: string,
+  subPath: string = ""
+): Promise<{ ok: boolean; error?: string }> {
+  const cwd = await cwdFromEncoded(encoded, subPath);
+  const r = await run(cwd, ["stash", "push", "--include-untracked"]);
+  if (r.code !== 0) return { ok: false, error: r.stderr || "git stash failed" };
+  if (/No local changes to save/i.test(r.stdout)) {
+    return { ok: false, error: "No local changes to stash" };
   }
   return { ok: true };
 }
