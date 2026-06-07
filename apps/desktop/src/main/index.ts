@@ -1,6 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
 import { join } from "path";
-import { stat } from "fs/promises";
+import { tmpdir } from "os";
+import { randomUUID } from "crypto";
+import { stat, writeFile } from "fs/promises";
 import {
   listProjects,
   resolveProjectCwd,
@@ -12,6 +14,10 @@ import {
   encodeCwd,
   getArchivedEncoded,
   setArchived,
+  getArchivedSessions,
+  setSessionArchived,
+  getSessionNames,
+  setSessionName,
 } from "./manual-projects";
 import type { ProjectEntry } from "../shared-types";
 import {
@@ -38,6 +44,9 @@ import {
   setTerminalCallbacks,
   openTerminal,
   writeTerminal,
+  submitToTerminal,
+  sendKeys,
+  terminalStatus,
   resizeTerminal,
   killTerminal,
   killAllTerminals,
@@ -129,7 +138,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#09090b" : "#fafafa",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -145,6 +154,13 @@ function createMainWindow(): BrowserWindow {
 
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
+  });
+
+  // Markdown links (target=_blank) open in the user's real browser, not a
+  // blank Electron window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
   });
 
   mainWindow = win;
@@ -164,22 +180,73 @@ interface SessionListEntry {
   sessionId: string;
   filePath: string;
   mtimeMs: number;
+  archived: boolean;
+  title: string | null;
+  messageCount: number;
+  updatedAt: number | string | null;
+}
+
+/**
+ * Display metadata per session file, cached by mtime. The renderer must NEVER
+ * fetch full transcripts just to label the list — that shipped megabytes over
+ * IPC on every watcher tick and froze the renderer. Only files whose mtime
+ * changed (i.e. the actively-streaming session) are re-parsed, in main.
+ */
+const sessionMetaCache = new Map<
+  string,
+  {
+    mtimeMs: number;
+    title: string | null;
+    messageCount: number;
+    updatedAt: number | string | null;
+  }
+>();
+
+async function sessionMeta(filePath: string, mtimeMs: number) {
+  const cached = sessionMetaCache.get(filePath);
+  if (cached && cached.mtimeMs === mtimeMs) return cached;
+  let meta;
+  try {
+    const parsed = await readSessionFile(filePath);
+    meta = {
+      mtimeMs,
+      title: parsed.meta.title ?? null,
+      messageCount: parsed.meta.messageCount ?? 0,
+      updatedAt: parsed.meta.updatedAt ?? mtimeMs,
+    };
+  } catch {
+    meta = { mtimeMs, title: null, messageCount: 0, updatedAt: mtimeMs };
+  }
+  sessionMetaCache.set(filePath, meta);
+  return meta;
 }
 
 async function listSessionsForProject(encoded: string): Promise<SessionListEntry[]> {
   const dir = join(CLAUDE_PROJECTS_DIR, encoded);
   try {
     const entries = await readdir(dir, { withFileTypes: true });
+    const [archivedIds, names] = await Promise.all([
+      getArchivedSessions(),
+      getSessionNames(),
+    ]);
+    const archived = new Set(archivedIds);
     const out: SessionListEntry[] = [];
     for (const e of entries) {
       if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
       const filePath = join(dir, e.name);
       try {
         const s = await stat(filePath);
+        const sessionId = e.name.replace(/\.jsonl$/, "");
+        const meta = await sessionMeta(filePath, s.mtimeMs);
         out.push({
-          sessionId: e.name.replace(/\.jsonl$/, ""),
+          sessionId,
           filePath,
           mtimeMs: s.mtimeMs,
+          archived: archived.has(sessionId),
+          // A user-assigned name wins over the derived title.
+          title: names[sessionId] ?? meta.title,
+          messageCount: meta.messageCount,
+          updatedAt: meta.updatedAt,
         });
       } catch {
         // skip
@@ -194,24 +261,48 @@ async function listSessionsForProject(encoded: string): Promise<SessionListEntry
 
 // ── IPC ─────────────────────────────────────────────────────────────
 
+/** Most recent session-file mtime for a project (for activity sorting). */
+async function latestActivity(encoded: string): Promise<number> {
+  const dir = join(CLAUDE_PROJECTS_DIR, encoded);
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    let max = 0;
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
+      try {
+        const s = await stat(join(dir, e.name));
+        if (s.mtimeMs > max) max = s.mtimeMs;
+      } catch {
+        // skip
+      }
+    }
+    return max;
+  } catch {
+    return 0;
+  }
+}
+
+// Only manually-added projects are shown (persisted in plan-desktop.json), so
+// the sidebar starts empty and the user curates it via "Add project". Sessions
+// for each still come from ~/.claude/projects/<encoded>. `mtimeMs` is the
+// latest session activity so the sidebar can sort most-recent-first.
 async function listAllProjects(): Promise<ProjectEntry[]> {
-  const [auto, manualCwds, archivedEncoded] = await Promise.all([
-    listProjects(),
+  const [manualCwds, archivedEncoded] = await Promise.all([
     getManualCwds(),
     getArchivedEncoded(),
   ]);
   const archived = new Set(archivedEncoded);
-  const seen = new Set(auto.map((p) => p.encoded));
-  const out: ProjectEntry[] = auto.map((p) => ({
-    ...p,
-    archived: archived.has(p.encoded),
-  }));
-  for (const cwd of manualCwds) {
-    const enc = encodeCwd(cwd);
-    if (seen.has(enc)) continue;
-    out.push({ encoded: enc, cwd, mtimeMs: 0, archived: archived.has(enc) });
-  }
-  return out;
+  return Promise.all(
+    manualCwds.map(async (cwd) => {
+      const encoded = encodeCwd(cwd);
+      return {
+        encoded,
+        cwd,
+        mtimeMs: await latestActivity(encoded),
+        archived: archived.has(encoded),
+      };
+    })
+  );
 }
 
 function registerIpc() {
@@ -239,6 +330,22 @@ function registerIpc() {
 
   ipcMain.handle("projects:listSessions", async (_e, encoded: string) =>
     listSessionsForProject(encoded)
+  );
+
+  ipcMain.handle(
+    "sessions:setArchived",
+    async (_e, sessionId: string, archived: boolean) => {
+      await setSessionArchived(sessionId, archived);
+      return { ok: true };
+    }
+  );
+
+  ipcMain.handle(
+    "sessions:rename",
+    async (_e, sessionId: string, name: string) => {
+      await setSessionName(sessionId, name);
+      return { ok: true };
+    }
   );
 
   ipcMain.handle(
@@ -352,21 +459,53 @@ function registerIpc() {
     ) => applyPatch(encoded, patch, { mode }, subPath)
   );
 
-  // Terminal (per-project pty)
+  // Terminal ptys (keyed by terminal id; cwd resolved from encoded)
   ipcMain.handle(
     "terminal:open",
-    async (_e, encoded: string, cols: number, rows: number) =>
-      openTerminal(encoded, cols, rows)
+    async (
+      _e,
+      id: string,
+      encoded: string,
+      cols: number,
+      rows: number,
+      initialCommand?: string
+    ) => openTerminal(id, encoded, cols, rows, initialCommand)
   );
-  ipcMain.on("terminal:input", (_e, encoded: string, data: string) =>
-    writeTerminal(encoded, data)
+  ipcMain.on("terminal:input", (_e, id: string, data: string) =>
+    writeTerminal(id, data)
   );
+  ipcMain.on("terminal:submit", (_e, id: string, text: string) =>
+    submitToTerminal(id, text)
+  );
+  ipcMain.on("terminal:sendKeys", (_e, id: string, keys: string[]) =>
+    sendKeys(id, keys)
+  );
+  ipcMain.handle("terminal:status", (_e, id: string) => terminalStatus(id));
   ipcMain.on(
     "terminal:resize",
-    (_e, encoded: string, cols: number, rows: number) =>
-      resizeTerminal(encoded, cols, rows)
+    (_e, id: string, cols: number, rows: number) =>
+      resizeTerminal(id, cols, rows)
   );
-  ipcMain.on("terminal:kill", (_e, encoded: string) => killTerminal(encoded));
+  ipcMain.on("terminal:kill", (_e, id: string) => killTerminal(id));
+
+  // Write a pasted image to a temp file; the renderer types the path into the
+  // terminal (Claude Code reads image paths as attachments).
+  ipcMain.handle(
+    "terminal:saveTempImage",
+    async (_e, data: Uint8Array, ext: string) => {
+      try {
+        const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext : "png";
+        const file = join(
+          tmpdir(),
+          `plan-paste-${randomUUID()}.${safeExt}`
+        );
+        await writeFile(file, Buffer.from(data));
+        return file;
+      } catch {
+        return null;
+      }
+    }
+  );
 }
 
 // ── Watcher → renderer bridge ──────────────────────────────────────
@@ -386,9 +525,9 @@ function bridgeTerminal() {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       mainWindow.webContents.send("terminal:data", chunk);
     },
-    onExit(encoded: string) {
+    onExit(id: string) {
       if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send("terminal:exit", encoded);
+      mainWindow.webContents.send("terminal:exit", id);
     },
   });
 }

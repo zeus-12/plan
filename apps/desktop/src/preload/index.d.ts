@@ -40,6 +40,11 @@ interface ElectronAPI {
     encoded: string,
     archived: boolean
   ) => Promise<{ ok: true }>;
+  setSessionArchived: (
+    sessionId: string,
+    archived: boolean
+  ) => Promise<{ ok: true }>;
+  renameSession: (sessionId: string, name: string) => Promise<{ ok: true }>;
 
   listPlans: () => Promise<Plan[]>;
   markPlanRead: (filePath: string) => Promise<{ ok: true }>;
@@ -69,17 +74,25 @@ interface ElectronAPI {
   push: (encoded: string, subPath?: string) => Promise<GitOpResult>;
 
   terminalOpen: (
+    id: string,
     encoded: string,
     cols: number,
-    rows: number
-  ) => Promise<{ cwd: string }>;
-  terminalInput: (encoded: string, data: string) => void;
-  terminalResize: (encoded: string, cols: number, rows: number) => void;
-  terminalKill: (encoded: string) => void;
+    rows: number,
+    initialCommand?: string
+  ) => Promise<{ cwd: string; error?: string }>;
+  terminalInput: (id: string, data: string) => void;
+  terminalSubmit: (id: string, text: string) => void;
+  terminalSendKeys: (id: string, keys: string[]) => void;
+  terminalStatus: (
+    id: string
+  ) => Promise<{ running: boolean; process: string | null }>;
+  terminalResize: (id: string, cols: number, rows: number) => void;
+  terminalKill: (id: string) => void;
+  saveTempImage: (data: Uint8Array, ext: string) => Promise<string | null>;
   onTerminalData: (
-    cb: (chunk: { encoded: string; data: string }) => void
+    cb: (chunk: { id: string; data: string }) => void
   ) => () => void;
-  onTerminalExit: (cb: (encoded: string) => void) => () => void;
+  onTerminalExit: (cb: (id: string) => void) => () => void;
   commit: (
     encoded: string,
     message: string,

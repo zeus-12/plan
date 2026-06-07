@@ -50,9 +50,7 @@ interface Props {
 
 const LEAF_HEIGHT = 50;
 const GROUP_HEIGHT = 36;
-const SECTION_HEADER_HEIGHT = 32;
 const EXPANDED_STORAGE = "plan.projectSidebar.expandedGroups";
-const ARCHIVED_OPEN_STORAGE = "plan.projectSidebar.archivedOpen";
 
 function loadExpanded(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -75,9 +73,7 @@ function persistExpanded(s: Set<string>) {
   }
 }
 
-type Row =
-  | VisibleItem
-  | { kind: "section-divider"; label: string; count: number; open: boolean };
+type Row = VisibleItem;
 
 /** Panel-left glyph — toggles the projects (1st) sidebar. */
 function PanelLeftIcon() {
@@ -94,6 +90,41 @@ function PanelLeftIcon() {
     >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="9" y1="3" x2="9" y2="21" />
+    </svg>
+  );
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>
   );
 }
@@ -118,10 +149,8 @@ export function ProjectSidebar({
   }, [reposByProject]);
   const parentRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
-  const [archivedOpen, setArchivedOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(ARCHIVED_OPEN_STORAGE) === "true";
-  });
+  // When true the sidebar transforms into an archived-only view.
+  const [archivedView, setArchivedView] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<
     | { kind: "archive"; project: ProjectEntry }
     | { kind: "unarchive"; project: ProjectEntry }
@@ -135,6 +164,8 @@ export function ProjectSidebar({
       if (p.archived) ar.push(p);
       else a.push(p);
     }
+    // Most recently active project first (new message bumps it to the top).
+    a.sort((x, y) => y.mtimeMs - x.mtimeMs);
     return { active: a, archived: ar };
   }, [projects]);
 
@@ -160,35 +191,17 @@ export function ProjectSidebar({
     }
   }, [selected, tree, expanded]);
 
-  const toggleArchivedOpen = useCallback(() => {
-    setArchivedOpen((v) => {
-      const next = !v;
-      try {
-        window.localStorage.setItem(ARCHIVED_OPEN_STORAGE, String(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, []);
+  // Leave the archived view automatically once it's empty (e.g. last unarchive).
+  useEffect(() => {
+    if (archivedView && archived.length === 0) setArchivedView(false);
+  }, [archivedView, archived.length]);
 
   const rows: Row[] = useMemo(() => {
-    const list: Row[] = flattenTree(tree, expanded);
-    if (archived.length > 0) {
-      list.push({
-        kind: "section-divider",
-        label: "Archived",
-        count: archived.length,
-        open: archivedOpen,
-      });
-      if (archivedOpen) {
-        for (const p of archived) {
-          list.push({ kind: "leaf", project: p, depth: 0 });
-        }
-      }
+    if (archivedView) {
+      return archived.map((p) => ({ kind: "leaf", project: p, depth: 0 }));
     }
-    return list;
-  }, [tree, expanded, archived, archivedOpen]);
+    return flattenTree(tree, expanded);
+  }, [archivedView, archived, tree, expanded]);
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
@@ -207,7 +220,6 @@ export function ProjectSidebar({
       const r = rows[i];
       if (!r) return LEAF_HEIGHT;
       if (r.kind === "group-header") return GROUP_HEIGHT;
-      if (r.kind === "section-divider") return SECTION_HEADER_HEIGHT;
       return LEAF_HEIGHT;
     },
     overscan: 8,
@@ -235,7 +247,7 @@ export function ProjectSidebar({
 
   return (
     <Sidebar className="w-[260px]">
-      <SidebarHeader className="h-[52px] justify-between pl-20 pr-3 pt-9 pb-2 [-webkit-app-region:drag]">
+      <SidebarHeader className="h-[44px] justify-between pl-20 pr-3 pt-2 pb-2 [-webkit-app-region:drag]">
         <span className="font-[family-name:var(--font-mono)] text-sm font-semibold tracking-tight text-[var(--text)]">
           plan
         </span>
@@ -259,6 +271,19 @@ export function ProjectSidebar({
         </div>
       </SidebarHeader>
       <SidebarContent>
+        {archivedView && (
+          <button
+            onClick={() => setArchivedView(false)}
+            className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+            title="Back to projects"
+          >
+            <ChevronLeftIcon />
+            <span>Archived projects</span>
+            <span className="text-[var(--text-tertiary)]">
+              {archived.length}
+            </span>
+          </button>
+        )}
         {projects.length === 0 ? (
           <div className="flex flex-1 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
             No projects yet
@@ -272,31 +297,6 @@ export function ProjectSidebar({
               {virtualizer.getVirtualItems().map((vi) => {
                 const row = rows[vi.index];
                 const transform = `translateY(${vi.start}px)`;
-
-                if (row.kind === "section-divider") {
-                  return (
-                    <button
-                      key="archived-divider"
-                      onClick={toggleArchivedOpen}
-                      className="absolute left-0 top-0 flex w-full items-center gap-2 border-t border-[var(--border)] px-3 text-left font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
-                      style={{
-                        transform,
-                        height: SECTION_HEADER_HEIGHT,
-                      }}
-                    >
-                      <span
-                        className={cn(
-                          "inline-block text-[9px] transition-transform",
-                          row.open && "rotate-90"
-                        )}
-                      >
-                        ▶
-                      </span>
-                      <span className="flex-1">{row.label}</span>
-                      <span>{row.count}</span>
-                    </button>
-                  );
-                }
 
                 if (row.kind === "group-header") {
                   return (
@@ -401,11 +401,34 @@ export function ProjectSidebar({
         <Button
           variant="outline"
           size="sm"
-          className="w-full justify-center"
+          className="h-10 w-full justify-center"
           onClick={onAddProject}
         >
           + Add project
         </Button>
+        {archived.length > 0 && (
+          <div className="mt-2 flex justify-end">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Archived projects"
+                  onClick={() => setArchivedView((v) => !v)}
+                  className={cn(
+                    archivedView &&
+                      "border-[var(--accent)] text-[var(--accent)]"
+                  )}
+                >
+                  <TrashIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {archivedView ? "Back to projects" : "Archived projects"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
       </SidebarFooter>
 
       <AlertDialog

@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -6,9 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@plan/shared/lib/utils";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
+import { Markdown } from "@plan/shared/components/markdown";
+import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import type {
   ConversationMessage,
   MessagePart,
@@ -20,17 +22,6 @@ function classify(m: ConversationMessage): MessageCategory {
   if (m.role === "assistant") return "assistant";
   const hasNonToolResult = m.parts.some((p) => p.kind !== "tool_result");
   return hasNonToolResult ? "user-real" : "tool";
-}
-
-function categoryHeader(cat: MessageCategory): string | null {
-  switch (cat) {
-    case "user-real":
-      return "user";
-    case "assistant":
-      return "assistant";
-    case "tool":
-      return null;
-  }
 }
 
 export interface ChatAnnotation {
@@ -56,6 +47,12 @@ interface Props {
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
+  /** False while the pane is hidden (kept mounted); re-anchors on show. */
+  visible?: boolean;
+  /** Whether the chat's terminal is live (enables answering questions). */
+  terminalReady?: boolean;
+  /** Send raw keystrokes to the chat's terminal (drives TUI selectors). */
+  onSendKeys?: (keys: string[]) => void;
 }
 
 interface PendingSel {
@@ -98,14 +95,18 @@ function previewInput(input: unknown): string {
   }
 }
 
+/**
+ * Disclosure block whose body animates open/closed via a grid-rows transition —
+ * smooth, with no layout shift and no max-height guessing.
+ */
 function CollapsibleBlock({
   label,
   preview,
-  full,
+  children,
 }: {
   label: string;
   preview: string;
-  full: string;
+  children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -116,7 +117,7 @@ function CollapsibleBlock({
       >
         <span
           className={cn(
-            "inline-block text-[9px] transition-transform",
+            "inline-block text-[9px] transition-transform duration-200",
             open && "rotate-90"
           )}
         >
@@ -129,204 +130,342 @@ function CollapsibleBlock({
           </span>
         )}
       </button>
-      {open && (
-        <pre className="max-h-[400px] select-text overflow-auto whitespace-pre-wrap break-all px-3 pb-3 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--text-secondary)] [cursor:text]">
-          {full}
-        </pre>
-      )}
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      >
+        <div className="overflow-hidden">{children}</div>
+      </div>
     </div>
   );
 }
 
-/**
- * Render a text part with per-character annotation overlays so existing
- * annotations stay visible when their host message scrolls back into view.
- */
-function AnnotatedText({
+/** Monospace, scrollable code body used inside disclosure blocks. */
+function CodeBody({
   text,
-  partAnnotations,
-  pendingRange,
-  onClickAnnotation,
-  onHover,
-  hoveredId,
+  className,
 }: {
   text: string;
-  partAnnotations: ChatAnnotation[];
-  /** The in-progress selection (popover open) — kept visually highlighted
-   *  since the native selection clears once the popover textarea focuses. */
-  pendingRange: { start: number; end: number } | null;
-  onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
-  onHover: (id: string | null) => void;
-  hoveredId: string | null;
+  className?: string;
 }) {
-  if (partAnnotations.length === 0 && !pendingRange) {
-    return (
-      <pre
-        data-text-part="true"
-        className="select-text whitespace-pre-wrap break-words font-[family-name:var(--font-mono)] text-[12px] leading-relaxed text-[var(--text)] [cursor:text]"
-      >
-        {text}
-      </pre>
-    );
-  }
-
-  // Build flat boundaries and emit spans
-  const bounds = new Set<number>([0, text.length]);
-  for (const a of partAnnotations) {
-    bounds.add(a.startOffset);
-    bounds.add(a.endOffset);
-  }
-  if (pendingRange) {
-    bounds.add(pendingRange.start);
-    bounds.add(pendingRange.end);
-  }
-  const sorted = [...bounds]
-    .filter((b) => b >= 0 && b <= text.length)
-    .sort((a, b) => a - b);
-
-  const parts: React.ReactNode[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const s = sorted[i];
-    const e = sorted[i + 1];
-    if (s >= e) continue;
-    const ann = partAnnotations.find(
-      (a) => a.startOffset <= s && s < a.endOffset
-    );
-    const isPending =
-      !ann &&
-      pendingRange != null &&
-      pendingRange.start <= s &&
-      s < pendingRange.end;
-    const hovered = ann && hoveredId === ann.id;
-    parts.push(
-      <span
-        key={s}
-        className={cn(
-          ann &&
-            "cursor-pointer rounded-sm border-b-[1.5px] border-[var(--text-tertiary)]",
-          isPending && "rounded-sm"
-        )}
-        style={
-          ann
-            ? {
-                background: hovered
-                  ? "var(--highlight-bg-hover)"
-                  : "var(--highlight-bg)",
-              }
-            : isPending
-              ? { background: "var(--selection-bg)" }
-              : undefined
-        }
-        onClick={
-          ann
-            ? (event) => {
-                event.stopPropagation();
-                onClickAnnotation(
-                  ann,
-                  (event.currentTarget as HTMLElement).getBoundingClientRect()
-                );
-              }
-            : undefined
-        }
-        onMouseEnter={ann ? () => onHover(ann.id) : undefined}
-        onMouseLeave={ann ? () => onHover(null) : undefined}
-      >
-        {text.slice(s, e)}
-      </span>
-    );
-  }
-
   return (
     <pre
-      data-text-part="true"
-      className="select-text whitespace-pre-wrap break-words font-[family-name:var(--font-mono)] text-[12px] leading-relaxed text-[var(--text)] [cursor:text]"
+      className={cn(
+        "max-h-[400px] select-text overflow-auto whitespace-pre-wrap break-all font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--text-secondary)] [cursor:text]",
+        className
+      )}
     >
-      {parts}
+      {text}
     </pre>
   );
 }
 
-function MessagePartView({
-  part,
+// ── Annotation highlights via the CSS Custom Highlight API ──────────
+// Highlights are painted over the rendered markdown without splitting its DOM,
+// so they survive rich formatting. The registry is global (per the API).
+
+let annHighlight: Highlight | null = null;
+let pendingHighlight: Highlight | null = null;
+
+function getHighlights(): { ann: Highlight; pending: Highlight } | null {
+  if (typeof Highlight === "undefined" || !("highlights" in CSS)) return null;
+  if (!annHighlight) {
+    annHighlight = new Highlight();
+    pendingHighlight = new Highlight();
+    CSS.highlights.set("chat-annotation", annHighlight);
+    CSS.highlights.set("chat-annotation-pending", pendingHighlight);
+  }
+  return { ann: annHighlight, pending: pendingHighlight! };
+}
+
+/** Build a DOM Range for [start, end) character offsets into `root`'s text. */
+function rangeForOffsets(
+  root: HTMLElement,
+  start: number,
+  end: number
+): Range | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let acc = 0;
+  let startNode: Node | null = null;
+  let startNodeOff = 0;
+  let endNode: Node | null = null;
+  let endNodeOff = 0;
+  let n = walker.nextNode();
+  while (n) {
+    const len = n.textContent?.length ?? 0;
+    if (startNode === null && acc + len > start) {
+      startNode = n;
+      startNodeOff = start - acc;
+    }
+    if (acc + len >= end) {
+      endNode = n;
+      endNodeOff = end - acc;
+      break;
+    }
+    acc += len;
+    n = walker.nextNode();
+  }
+  if (!startNode || !endNode) return null;
+  const range = document.createRange();
+  try {
+    range.setStart(startNode, startNodeOff);
+    range.setEnd(endNode, endNodeOff);
+  } catch {
+    return null;
+  }
+  return range;
+}
+
+/**
+ * A markdown-rendered message text part. Existing annotations and the in-flight
+ * selection are painted as custom highlights; clicking a highlighted span opens
+ * its editor (hit-tested against the click point).
+ */
+function MarkdownText({
+  text,
+  messageUuid,
   partIndex,
-  message,
-  annotations,
+  partAnnotations,
   pendingRange,
   onClickAnnotation,
-  hoveredId,
-  onHover,
 }: {
+  text: string;
+  messageUuid: string;
+  partIndex: number;
+  partAnnotations: ChatAnnotation[];
+  pendingRange: { start: number; end: number } | null;
+  onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const root = ref.current;
+    const hl = getHighlights();
+    if (!root || !hl) return;
+    const added: Array<{ set: Highlight; range: Range }> = [];
+    for (const a of partAnnotations) {
+      const r = rangeForOffsets(root, a.startOffset, a.endOffset);
+      if (r) {
+        hl.ann.add(r);
+        added.push({ set: hl.ann, range: r });
+      }
+    }
+    if (pendingRange) {
+      const r = rangeForOffsets(root, pendingRange.start, pendingRange.end);
+      if (r) {
+        hl.pending.add(r);
+        added.push({ set: hl.pending, range: r });
+      }
+    }
+    return () => {
+      for (const a of added) a.set.delete(a.range);
+    };
+  }, [text, partAnnotations, pendingRange]);
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (partAnnotations.length === 0) return;
+      const root = ref.current;
+      if (!root) return;
+      const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (!caret) return;
+      const off = offsetWithin(root, caret.startContainer, caret.startOffset);
+      if (off === -1) return;
+      const ann = partAnnotations.find(
+        (a) => a.startOffset <= off && off < a.endOffset
+      );
+      if (!ann) return;
+      e.stopPropagation();
+      const r = rangeForOffsets(root, ann.startOffset, ann.endOffset);
+      const rect = r?.getBoundingClientRect() ?? root.getBoundingClientRect();
+      onClickAnnotation(ann, rect);
+    },
+    [partAnnotations, onClickAnnotation]
+  );
+
+  return (
+    <div
+      ref={ref}
+      data-message-uuid={messageUuid}
+      data-part-index={partIndex}
+      data-text-part="true"
+      onClick={handleClick}
+      className="select-text [cursor:text]"
+    >
+      <Markdown content={text} />
+    </div>
+  );
+}
+
+interface ToolResult {
+  output: string;
+  isError?: boolean;
+}
+
+interface MessagePartViewProps {
   part: MessagePart;
   partIndex: number;
   message: ConversationMessage;
   annotations: ChatAnnotation[];
   pendingRange: { start: number; end: number } | null;
   onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
-  hoveredId: string | null;
-  onHover: (id: string | null) => void;
-}) {
+  /** The tool_result paired with this tool_use part (rendered inline). */
+  result?: ToolResult;
+  /** Whether the chat's terminal is live (enables answering questions). */
+  terminalReady: boolean;
+  /** Send raw keystrokes to the chat's terminal (drives TUI selectors). */
+  onSendKeys?: (keys: string[]) => void;
+}
+
+/** Memoized: a keystroke elsewhere must not re-render every markdown block. */
+const MessagePartView = memo(function MessagePartView({
+  part,
+  partIndex,
+  message,
+  annotations,
+  pendingRange,
+  onClickAnnotation,
+  result,
+  terminalReady,
+  onSendKeys,
+}: MessagePartViewProps) {
   switch (part.kind) {
     case "text":
       return (
-        <div
-          data-message-uuid={message.uuid}
-          data-part-index={partIndex}
-        >
-          <AnnotatedText
-            text={part.text}
-            partAnnotations={annotations}
-            pendingRange={pendingRange}
-            onClickAnnotation={onClickAnnotation}
-            hoveredId={hoveredId}
-            onHover={onHover}
-          />
-        </div>
+        <MarkdownText
+          text={part.text}
+          messageUuid={message.uuid}
+          partIndex={partIndex}
+          partAnnotations={annotations}
+          pendingRange={pendingRange}
+          onClickAnnotation={onClickAnnotation}
+        />
       );
     case "thinking":
       return (
-        <CollapsibleBlock
-          label="thinking"
-          preview={truncate(part.text, 120)}
-          full={part.text}
-        />
+        <CollapsibleBlock label="💭 Thinking" preview={truncate(part.text, 120)}>
+          <CodeBody text={part.text} className="px-3 pb-3" />
+        </CollapsibleBlock>
       );
-    case "tool_use":
+    case "tool_use": {
+      // AskUserQuestion gets a rich card: question + options, clickable while
+      // pending (drives the TUI selector via keystrokes).
+      if (part.tool === "AskUserQuestion") {
+        const questions = parseAskInput(part.input);
+        if (questions) {
+          return (
+            <AskQuestionCard
+              questions={questions}
+              resultText={result?.output}
+              canAnswer={terminalReady && !!onSendKeys}
+              onPick={(index) =>
+                // Selector starts on option 1: ↓ × index, then Enter.
+                onSendKeys?.([
+                  ...Array.from({ length: index }, () => "\x1b[B"),
+                  "\r",
+                ])
+              }
+            />
+          );
+        }
+      }
+      let inputJson: string;
+      try {
+        inputJson = JSON.stringify(part.input, null, 2);
+      } catch {
+        inputJson = String(part.input);
+      }
       return (
         <CollapsibleBlock
-          label={`tool: ${part.tool}`}
+          label={`🔧 ${part.tool}`}
           preview={previewInput(part.input)}
-          full={(() => {
-            try {
-              return JSON.stringify(part.input, null, 2);
-            } catch {
-              return String(part.input);
-            }
-          })()}
-        />
+        >
+          <div className="px-3 pb-3 pt-1">
+            <CodeBody text={inputJson} />
+            {result && (
+              <div className="mt-2 border-t border-[var(--border)] pt-2">
+                <div className="mb-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+                  {result.isError ? "result (error)" : "result"}
+                </div>
+                <CodeBody text={result.output} />
+              </div>
+            )}
+          </div>
+        </CollapsibleBlock>
       );
+    }
     case "tool_result":
-      return (
-        <CollapsibleBlock
-          label={part.isError ? "tool result (error)" : "tool result"}
-          preview={truncate(part.output.split("\n")[0] ?? "", 120)}
-          full={part.output}
-        />
-      );
+      // Rendered inline within its tool_use block (see `result`); skip here.
+      return null;
   }
+},
+// Message/part objects keep their identity across session refreshes (see
+// mergeSession), so reference checks suffice — except the paired tool result,
+// which is rebuilt each parse and is compared by content.
+(prev, next) =>
+  prev.part === next.part &&
+  prev.partIndex === next.partIndex &&
+  prev.message === next.message &&
+  prev.annotations === next.annotations &&
+  prev.onClickAnnotation === next.onClickAnnotation &&
+  prev.terminalReady === next.terminalReady &&
+  prev.onSendKeys === next.onSendKeys &&
+  sameRange(prev.pendingRange, next.pendingRange) &&
+  sameResult(prev.result, next.result));
+
+function sameRange(
+  a: { start: number; end: number } | null,
+  b: { start: number; end: number } | null
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.start === b.start && a.end === b.end;
 }
 
-export function MessageList({
+function sameResult(a?: ToolResult, b?: ToolResult): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.output === b.output && a.isError === b.isError;
+}
+
+const EMPTY_ANNOTATIONS: ChatAnnotation[] = [];
+
+/**
+ * Memoized: the composer's state lives in the workspace, so without this every
+ * keystroke would re-render the entire (non-virtualized) transcript.
+ */
+export const MessageList = memo(function MessageList({
   messages,
   annotations,
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
+  visible = true,
+  terminalReady = false,
+  onSendKeys,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
-  const items = useMemo(() => messages, [messages]);
+
+  // Pair tool_result → tool_use (by id) so results render inside their tool
+  // block, and drop the now-empty result-only messages from the timeline.
+  const resultByToolUseId = useMemo(() => {
+    const map = new Map<string, ToolResult>();
+    for (const m of messages) {
+      for (const p of m.parts) {
+        if (p.kind === "tool_result") {
+          map.set(p.toolUseId, { output: p.output, isError: p.isError });
+        }
+      }
+    }
+    return map;
+  }, [messages]);
+
+  const items = useMemo(
+    () => messages.filter((m) => !m.parts.every((p) => p.kind === "tool_result")),
+    [messages]
+  );
   const [pending, setPending] = useState<PendingSel | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const annotationsByMessage = useMemo(() => {
     const map = new Map<string, Map<number, ChatAnnotation[]>>();
@@ -360,51 +499,33 @@ export function MessageList({
     return out;
   }, [items]);
 
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 140,
-    overscan: 8,
-    measureElement: (el) => el.getBoundingClientRect().height,
-    // Breathing room above the first and below the last message.
-    paddingStart: 12,
-    paddingEnd: 20,
-  });
-
-  /**
-   * Stick-to-bottom in one shot: synchronously, before paint, on every render
-   * the user is "following the bottom". Re-runs each time `totalSize` changes
-   * (every row measurement) so the user never sees an intermediate scrolled-
-   * to-top state — first paint already shows the bottom.
-   *
-   * Whether we're "following the bottom" is derived purely from the scroll
-   * element's actual position (distance < 20px = following). No
-   * "programmatic vs user" flag — the natural invariant tracks both cases.
-   */
+  // Not virtualized: chat sessions are bounded, and virtualization with
+  // dynamic (markdown) heights re-measures rows above the viewport, which
+  // shifts the scroll position — the "jumps as you scroll up" glitch. Natural
+  // flow keeps the scroll perfectly stable.
   const sessionAnchorKey = items[0]?.uuid ?? `len-${items.length}`;
   const sessionKeyRef = useRef<string | null>(null);
   const followingBottomRef = useRef(true);
-  const totalSize = virtualizer.getTotalSize();
 
   useLayoutEffect(() => {
-    if (items.length === 0) {
-      sessionKeyRef.current = null;
-      followingBottomRef.current = true;
-      return;
-    }
     const el = parentRef.current;
     if (!el) return;
-
-    // Reset on session change so we always anchor a freshly-opened chat.
+    // Reset to "following" on session change so a freshly-opened chat anchors
+    // to the latest message.
     if (sessionKeyRef.current !== sessionAnchorKey) {
       sessionKeyRef.current = sessionAnchorKey;
       followingBottomRef.current = true;
     }
+    if (followingBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [sessionAnchorKey, items.length, messages]);
 
-    if (followingBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [sessionAnchorKey, items.length, totalSize]);
+  // Becoming visible again (pane was display:none): layout was skipped while
+  // hidden, so re-anchor to the bottom if we were following it.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const el = parentRef.current;
+    if (el && followingBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [visible]);
 
   useEffect(() => {
     const el = parentRef.current;
@@ -487,6 +608,22 @@ export function MessageList({
     [editing, onUpdateAnnotation]
   );
 
+  // Stable identities so the memoized part views skip re-rendering.
+  const handleClickAnnotation = useCallback(
+    (ann: ChatAnnotation, rect: DOMRect) =>
+      setEditing({
+        annotation: ann,
+        pos: {
+          top: rect.bottom + 8,
+          left: Math.max(
+            8,
+            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+          ),
+        },
+      }),
+    []
+  );
+
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -500,84 +637,65 @@ export function MessageList({
       <div
         ref={parentRef}
         onMouseUp={handleMouseUp}
-        className="h-full overflow-auto"
+        className="h-full overflow-auto py-3"
       >
-        <div
-          className="relative w-full"
-          style={{ height: virtualizer.getTotalSize() }}
-        >
-          {virtualizer.getVirtualItems().map((vi) => {
-            const m = items[vi.index];
-            const partMap = annotationsByMessage.get(m.uuid);
-            const showHeader = showHeaderForRow[vi.index];
-            const headerLabel = showHeader ? categoryHeader(classify(m)) : null;
-            return (
+        {items.map((m, idx) => {
+          const partMap = annotationsByMessage.get(m.uuid);
+          const showHeader = showHeaderForRow[idx];
+          // iMessage-style: user turns are a right-aligned bubble capped in
+          // width; assistant turns run full-width with no bubble.
+          const isUser = classify(m) === "user-real";
+          return (
+            <div
+              key={m.uuid || idx}
+              className={cn(
+                // content-visibility lets the browser skip layout/paint of
+                // off-screen rows — width changes (sidebar toggles) would
+                // otherwise reflow the entire transcript.
+                "flex px-4 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
+                isUser ? "justify-end" : "justify-start"
+              )}
+            >
               <div
-                key={m.uuid || `${vi.index}`}
-                data-index={vi.index}
-                ref={virtualizer.measureElement}
                 className={cn(
-                  "absolute left-0 top-0 w-full px-4",
-                  showHeader ? "pt-4 pb-2" : "pt-1 pb-2"
+                  "flex flex-col gap-1.5",
+                  isUser
+                    ? "max-w-[80%] rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2"
+                    : "w-full"
                 )}
-                style={{ transform: `translateY(${vi.start}px)` }}
               >
-                <div className="flex flex-col gap-1.5">
-                  {headerLabel && (
-                    <span
-                      className={cn(
-                        "font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider",
-                        headerLabel === "user"
-                          ? "text-[var(--accent)]"
-                          : "text-[var(--text-tertiary)]"
-                      )}
-                    >
-                      {headerLabel}
-                    </span>
-                  )}
-                  <div className="flex flex-col gap-1.5">
-                    {m.parts.map((p, i) => (
-                      <MessagePartView
-                        key={i}
-                        part={p}
-                        partIndex={i}
-                        message={m}
-                        annotations={partMap?.get(i) ?? []}
-                        pendingRange={
-                          pending &&
-                          pending.messageUuid === m.uuid &&
-                          pending.partIndex === i
-                            ? {
-                                start: pending.startOffset,
-                                end: pending.endOffset,
-                              }
-                            : null
-                        }
-                        onClickAnnotation={(ann, rect) =>
-                          setEditing({
-                            annotation: ann,
-                            pos: {
-                              top: rect.bottom + 8,
-                              left: Math.max(
-                                8,
-                                Math.min(
-                                  rect.left,
-                                  window.innerWidth - POPOVER_VIEWPORT_PAD
-                                )
-                              ),
-                            },
-                          })
-                        }
-                        hoveredId={hoveredId}
-                        onHover={setHoveredId}
-                      />
-                    ))}
-                  </div>
-                </div>
+                {m.parts.map((p, i) => (
+                  <MessagePartView
+                    key={i}
+                    part={p}
+                    partIndex={i}
+                    message={m}
+                    annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
+                    pendingRange={
+                      pending &&
+                      pending.messageUuid === m.uuid &&
+                      pending.partIndex === i
+                        ? {
+                            start: pending.startOffset,
+                            end: pending.endOffset,
+                          }
+                        : null
+                    }
+                    onClickAnnotation={handleClickAnnotation}
+                    result={
+                      p.kind === "tool_use"
+                        ? resultByToolUseId.get(p.id)
+                        : undefined
+                    }
+                    terminalReady={terminalReady}
+                    onSendKeys={onSendKeys}
+                  />
+                ))}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
 
       {pending && (
@@ -607,7 +725,7 @@ export function MessageList({
       )}
     </>
   );
-}
+});
 
 function ancestorWithAttr(node: Node, attr: string): HTMLElement | null {
   let el: HTMLElement | null =

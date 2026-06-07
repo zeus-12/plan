@@ -97,18 +97,21 @@ function svgProps() {
     strokeLinejoin: "round" as const,
   };
 }
+// Plus/minus span a wider extent (3→21) than a stock Lucide plus (5→19) so
+// they read at the same optical size as the fuller archive/revert glyphs
+// sitting next to them — otherwise the thin little +/- look undersized.
 function PlusIcon() {
   return (
     <svg {...svgProps()}>
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
+      <line x1="12" y1="3" x2="12" y2="21" />
+      <line x1="3" y1="12" x2="21" y2="12" />
     </svg>
   );
 }
 function MinusIcon() {
   return (
     <svg {...svgProps()}>
-      <line x1="5" y1="12" x2="19" y2="12" />
+      <line x1="3" y1="12" x2="21" y2="12" />
     </svg>
   );
 }

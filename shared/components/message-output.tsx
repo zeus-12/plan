@@ -8,29 +8,48 @@ interface MessageOutputProps {
   annotations: Annotation[];
   options?: MessageOptions;
   onUpdateMessage?: (message: string) => void;
+  /**
+   * Prebuilt message text. When provided, it overrides the message generated
+   * from `annotations` — used when the buffer is assembled from several sources
+   * (e.g. diff annotations + chat annotations combined).
+   */
+  message?: string;
+  /** Comment count for the header (defaults to `annotations.length`). */
+  count?: number;
+  /** When provided, renders a "Send" button that passes the current message. */
+  onSend?: (message: string) => void;
+  sendLabel?: string;
 }
 
 export function MessageOutput({
   annotations,
   options,
   onUpdateMessage,
+  message: prebuilt,
+  count,
+  onSend,
+  sendLabel = "Send to terminal",
 }: MessageOutputProps) {
   const [copied, setCopied] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [customMessage, setCustomMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const baseMessage = useMemo(
-    () => generateMessage(annotations, options),
-    [annotations, options]
+    () => prebuilt ?? generateMessage(annotations, options),
+    [prebuilt, annotations, options]
   );
   const message = customMessage ?? baseMessage;
+  const commentCount = count ?? annotations.length;
 
+  // Drop a stale manual edit when the underlying buffer changes.
   useEffect(() => {
     setCustomMessage(null);
     setIsEditing(false);
-  }, [annotations.length]);
+  }, [baseMessage]);
 
   const startEditing = useCallback(() => {
     setEditText(message);
@@ -65,6 +84,13 @@ export function MessageOutput({
     setTimeout(() => setCopied(false), 2000);
   }
 
+  function handleSend() {
+    if (!onSend) return;
+    onSend(message);
+    setSent(true);
+    setTimeout(() => setSent(false), 2000);
+  }
+
   if (!baseMessage && !customMessage) return null;
 
   return (
@@ -77,17 +103,29 @@ export function MessageOutput({
     >
       <div
         className="flex items-center justify-between px-4 py-2.5"
-        style={{ borderBottom: "1px solid var(--border)" }}
+        style={{
+          borderBottom: collapsed ? "none" : "1px solid var(--border)",
+        }}
       >
-        <span
-          className="font-[family-name:var(--font-mono)] text-xs"
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-2 font-[family-name:var(--font-mono)] text-xs transition-opacity hover:opacity-70"
           style={{ color: "var(--text-tertiary)" }}
+          title={collapsed ? "Show comments" : "Hide comments"}
         >
-          {annotations.length} comment
-          {annotations.length !== 1 ? "s" : ""}
-          {customMessage ? " (edited)" : ""}
-          {" — ready to send"}
-        </span>
+          <span
+            className="inline-block text-[9px] transition-transform"
+            style={{ transform: collapsed ? "rotate(-90deg)" : "none" }}
+          >
+            ▼
+          </span>
+          <span>
+            {commentCount} comment
+            {commentCount !== 1 ? "s" : ""}
+            {customMessage ? " (edited)" : ""}
+            {collapsed ? "" : " — ready to send"}
+          </span>
+        </button>
         <div className="flex items-center gap-2">
           {!isEditing && (
             <button
@@ -100,18 +138,30 @@ export function MessageOutput({
           )}
           <button
             onClick={handleCopy}
-            className="rounded-md px-4 py-1.5 font-[family-name:var(--font-mono)] text-xs font-medium transition-all"
+            className="rounded-md px-3 py-1.5 font-[family-name:var(--font-mono)] text-xs font-medium transition-all"
             style={{
-              background: copied ? "var(--diff-add-bar)" : "var(--accent)",
-              color: copied ? "#fff" : "var(--bg)",
+              background: copied ? "var(--diff-add-bar)" : "var(--bg-surface-hover)",
+              color: copied ? "#fff" : "var(--text)",
             }}
           >
             {copied ? "Copied!" : "Copy"}
           </button>
+          {onSend && (
+            <button
+              onClick={handleSend}
+              className="rounded-md px-4 py-1.5 font-[family-name:var(--font-mono)] text-xs font-medium transition-all"
+              style={{
+                background: sent ? "var(--diff-add-bar)" : "var(--accent)",
+                color: sent ? "#fff" : "var(--bg)",
+              }}
+            >
+              {sent ? "Sent ✓" : sendLabel}
+            </button>
+          )}
         </div>
       </div>
 
-      {isEditing ? (
+      {collapsed ? null : isEditing ? (
         <div className="p-3">
           <textarea
             ref={textareaRef}

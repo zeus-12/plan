@@ -8,10 +8,17 @@ import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
 
+const SELECTED_PROJECT_KEY = "plan.selectedProject";
+
 function Shell() {
   const projectsSidebar = useSidebar();
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [selectedEncoded, setSelectedEncoded] = useState<string | null>(null);
+  // Selected project persists across restarts so focus stays put.
+  const [selectedEncoded, setSelectedEncoded] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem(SELECTED_PROJECT_KEY)
+  );
   const [reposByProject, setReposByProject] = useState<
     Map<string, DiscoveredRepo[]>
   >(new Map());
@@ -40,9 +47,11 @@ function Shell() {
     const list = await window.electronAPI.listProjects();
     setProjects(list);
     setSelectedEncoded((current) => {
+      // Keep the current selection; only fall back when it's gone (or unset).
       if (current && list.some((p) => p.encoded === current)) return current;
-      const firstActive = list.find((p) => !p.archived);
-      return firstActive?.encoded ?? list[0]?.encoded ?? null;
+      const stored = window.localStorage.getItem(SELECTED_PROJECT_KEY);
+      if (stored && list.some((p) => p.encoded === stored)) return stored;
+      return list.find((p) => !p.archived)?.encoded ?? list[0]?.encoded ?? null;
     });
     void refreshRepos(list);
   }, [refreshRepos]);
@@ -51,13 +60,28 @@ function Shell() {
     refreshProjects();
   }, [refreshProjects]);
 
+  // Persist the selected project.
   useEffect(() => {
-    return window.electronAPI.onWatcherEvent((e) => {
-      refreshProjects();
-      if (e.kind === "new-session") {
-        setSelectedEncoded(e.encoded);
-      }
+    if (selectedEncoded)
+      window.localStorage.setItem(SELECTED_PROJECT_KEY, selectedEncoded);
+  }, [selectedEncoded]);
+
+  useEffect(() => {
+    // Re-pull the project/repo list on activity (debounced — events stream
+    // continuously while a session runs), but never change which project is
+    // focused — switching out from under the user is jarring.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = window.electronAPI.onWatcherEvent(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        refreshProjects();
+      }, 500);
     });
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
   }, [refreshProjects]);
 
   const handleAddProject = useCallback(async () => {

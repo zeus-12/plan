@@ -7,6 +7,10 @@ const PATH = join(homedir(), ".claude", "plan-desktop.json");
 interface Stored {
   manualCwds: string[];
   archivedEncoded: string[];
+  /** Archived chat session ids (UUIDs are globally unique, so no project scope). */
+  archivedSessions: string[];
+  /** User-assigned display names per session id (overrides the derived title). */
+  sessionNames: Record<string, string>;
 }
 
 let cache: Stored | null = null;
@@ -25,9 +29,27 @@ async function load(): Promise<Stored> {
             (x): x is string => typeof x === "string"
           )
         : [],
+      archivedSessions: Array.isArray(parsed.archivedSessions)
+        ? parsed.archivedSessions.filter(
+            (x): x is string => typeof x === "string"
+          )
+        : [],
+      sessionNames:
+        parsed.sessionNames && typeof parsed.sessionNames === "object"
+          ? Object.fromEntries(
+              Object.entries(parsed.sessionNames).filter(
+                ([, v]) => typeof v === "string"
+              )
+            )
+          : {},
     };
   } catch {
-    cache = { manualCwds: [], archivedEncoded: [] };
+    cache = {
+      manualCwds: [],
+      archivedEncoded: [],
+      archivedSessions: [],
+      sessionNames: {},
+    };
   }
   return cache;
 }
@@ -84,6 +106,47 @@ export async function setArchived(encoded: string, archived: boolean) {
     data.archivedEncoded = data.archivedEncoded.filter((e) => e !== encoded);
     scheduleWrite();
   }
+}
+
+export async function getArchivedSessions(): Promise<string[]> {
+  const data = await load();
+  return [...data.archivedSessions];
+}
+
+export async function setSessionArchived(
+  sessionId: string,
+  archived: boolean
+) {
+  const data = await load();
+  const has = data.archivedSessions.includes(sessionId);
+  if (archived && !has) {
+    data.archivedSessions.push(sessionId);
+    scheduleWrite();
+  } else if (!archived && has) {
+    data.archivedSessions = data.archivedSessions.filter(
+      (s) => s !== sessionId
+    );
+    scheduleWrite();
+  }
+}
+
+export async function getSessionNames(): Promise<Record<string, string>> {
+  const data = await load();
+  return { ...data.sessionNames };
+}
+
+/** Set a custom display name; an empty name clears it (back to derived title). */
+export async function setSessionName(sessionId: string, name: string) {
+  const data = await load();
+  const trimmed = name.trim();
+  if (trimmed) {
+    if (data.sessionNames[sessionId] === trimmed) return;
+    data.sessionNames[sessionId] = trimmed;
+  } else {
+    if (!(sessionId in data.sessionNames)) return;
+    delete data.sessionNames[sessionId];
+  }
+  scheduleWrite();
 }
 
 /** Claude's encoding: replace path separators with hyphens. */

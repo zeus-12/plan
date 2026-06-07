@@ -38,6 +38,8 @@ interface Props {
   >;
   /** Which stage's diff to show: "staged" (HEAD↔index) or "unstaged" (index↔worktree). */
   mode: "staged" | "unstaged";
+  /** False while the diffs pane is hidden — disables the global ⌘Z handler. */
+  active: boolean;
   onStage: () => void;
   onUnstage: () => void;
   onDiscard: () => void;
@@ -65,6 +67,7 @@ export function FileDiffViewer({
   annotationsByFile,
   setAnnotationsByFile,
   mode,
+  active,
   onStage,
   onUnstage,
   onDiscard,
@@ -74,6 +77,9 @@ export function FileDiffViewer({
   const isStaged = mode === "staged";
   const [settings, updateSettings] = useDiffSettings();
   const [contents, setContents] = useState<FileView | null>(null);
+  // Bumped after a per-hunk op to re-fetch this file's view in place (so the
+  // staged hunk leaves "Changes" immediately) without remounting the viewer.
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Hunks parsed from the diff for *this stage* (staged vs unstaged) so a
   // partially-staged file shows only the relevant hunks in each section.
@@ -139,6 +145,7 @@ export function FileDiffViewer({
         return;
       }
       undoStack.current.push({ action: mode, patch });
+      setReloadKey((k) => k + 1);
       onChanged();
     },
     [findHunkIndex, parsedHunks, encoded, subPath, onChanged, confirm]
@@ -162,10 +169,12 @@ export function FileDiffViewer({
       subPath
     );
     if (!res.ok) console.warn("undo hunk failed:", res.error);
+    setReloadKey((k) => k + 1);
     onChanged();
   }, [encoded, subPath, onChanged]);
 
   useEffect(() => {
+    if (!active) return;
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== "z")
         return;
@@ -182,7 +191,7 @@ export function FileDiffViewer({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undoLastHunk]);
+  }, [active, undoLastHunk]);
 
   const [language, setLanguage] = useState("auto");
 
@@ -192,12 +201,17 @@ export function FileDiffViewer({
   const [formatPending, setFormatPending] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
 
+  // Clear stale content only when the file/stage actually changes — NOT on a
+  // hunk-op reload, so re-fetching after "stage hunk" doesn't flash "Loading".
   useEffect(() => {
-    let cancelled = false;
     setContents(null);
     setFormatted(null);
     setFormatActive(false);
     setFormatError(null);
+  }, [encoded, file.path, mode, subPath]);
+
+  useEffect(() => {
+    let cancelled = false;
     window.electronAPI
       .getFileView(encoded, file.path, mode, subPath)
       .then((c) => {
@@ -206,7 +220,7 @@ export function FileDiffViewer({
     return () => {
       cancelled = true;
     };
-  }, [encoded, file.path, mode, subPath]);
+  }, [encoded, file.path, mode, subPath, reloadKey]);
 
   const annotations = annotationsByFile[file.path] ?? [];
 

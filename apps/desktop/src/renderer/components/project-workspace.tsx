@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
+import { generateMessage, type Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { MessageOutput } from "@plan/shared/components/message-output";
 import {
@@ -27,7 +27,21 @@ import { FileDiffViewer } from "./file-diff-viewer";
 import { MessageList, type ChatAnnotation } from "./message-list";
 import { PlanViewer } from "./plan-viewer";
 import { useConfirm } from "./confirm-dialog";
-import { TerminalPanel } from "./terminal-panel";
+import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
+import { useProjectAnnotations } from "../lib/annotation-store";
+import { useProjectTerminals } from "../lib/terminal-store";
+import { ChatInput, type ChatInputHandle } from "./chat-input";
+import { RenameSessionDialog } from "./rename-session-dialog";
+import { Toasts } from "./toasts";
+import { mergeSession } from "../lib/merge-session";
+import { osNotify, pushToast } from "../lib/toast-store";
+
+/**
+ * Sessions created from the UI this run (via `claude --session-id <uuid>`).
+ * Their JSONL doesn't exist until the first exchange, so selection and the
+ * first terminal spawn need to treat them specially.
+ */
+const NEW_SESSION_IDS = new Set<string>();
 import type { SessionListItem } from "./session-list";
 import type { FileEntry, RepoFileGroup } from "./file-list";
 
@@ -94,7 +108,7 @@ function WorkspaceHeader({
   return (
     <header
       className={cn(
-        "flex h-[52px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] pr-3 pt-9 pb-2 [-webkit-app-region:drag]",
+        "flex h-[44px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] pr-3 pt-2 pb-2 [-webkit-app-region:drag]",
         // Pad past macOS traffic-light area when this header is the leftmost pane.
         projectsSidebarOpen ? "pl-3" : "pl-20"
       )}
@@ -117,18 +131,19 @@ function WorkspaceHeader({
           </TooltipContent>
         </Tooltip>
       </div>
-      <div className="flex min-w-0 flex-1 items-baseline justify-center gap-2 px-3">
-        <span className="truncate font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text)]">
+      {/* Project name (bold) · path (muted) · branch as a labelled pill. */}
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-3">
+        <span className="shrink-0 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text)]">
           {shortName}
         </span>
-        {branch && (
-          <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-secondary)]">
-            ⎇ {branch}
-          </span>
-        )}
-        <span className="hidden truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] sm:inline">
+        <span className="hidden min-w-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] sm:inline">
           {project.cwd}
         </span>
+        {branch && (
+          <span className="shrink-0 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] leading-none text-[var(--text-secondary)]">
+            {branch}
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
         <Tooltip>
@@ -199,10 +214,15 @@ export function ProjectWorkspace({
   const [selectedFile, setSelectedFile] = useState<
     { subPath: string; path: string; staged: boolean } | null
   >(null);
-  /** Annotations keyed by "subPath::path" so they don't collide across repos. */
-  const [annotationsByFile, setAnnotationsByFile] = useState<
-    Record<string, Annotation[]>
-  >({});
+  // Comments persist per-project across first-sidebar switches (the workspace
+  // is keyed by `encoded` and remounts on switch). Both the diff annotations
+  // (keyed by "subPath::path") and the chat annotations come from this store.
+  const {
+    annotationsByFile,
+    setAnnotationsByFile,
+    chatAnnotations,
+    setChatAnnotations,
+  } = useProjectAnnotations(project.encoded);
   /** subPath currently being pushed (for the sync-bar spinner). */
   const [pushingRepo, setPushingRepo] = useState<string | null>(null);
 
@@ -455,7 +475,8 @@ export function ProjectWorkspace({
   );
 
   useEffect(() => {
-    setAnnotationsByFile({});
+    // Comments are intentionally NOT cleared here — they persist per project
+    // (see useProjectAnnotations) so switching projects doesn't lose them.
     setSelectedFile(null);
     refreshDiff();
   }, [refreshDiff]);
@@ -463,39 +484,69 @@ export function ProjectWorkspace({
   // ── Sessions state ───────────────────────────────────────────
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    () =>
+      typeof window === "undefined"
+        ? null
+        : window.localStorage.getItem(`plan.session.${project.encoded}`)
+  );
   const [session, setSession] = useState<ParsedSession | null>(null);
-  const [chatAnnotations, setChatAnnotations] = useState<ChatAnnotation[]>([]);
+  // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
+  // itself lives inside ChatInput so keystrokes don't re-render the workspace.
+  const chatInputRef = useRef<ChatInputHandle>(null);
+
+  // Persist the selected session per project.
+  useEffect(() => {
+    if (selectedSessionId)
+      window.localStorage.setItem(
+        `plan.session.${project.encoded}`,
+        selectedSessionId
+      );
+  }, [project.encoded, selectedSessionId]);
 
   const refreshSessions = useCallback(async () => {
     setSessionsLoading(true);
     try {
+      // List metadata comes straight from main's mtime cache — never fetch
+      // full transcripts here (that froze the renderer on every watcher tick).
       const list = await window.electronAPI.listSessions(project.encoded);
-      const top = list.slice(0, MAX_SESSIONS);
-      const enriched: SessionListItem[] = await Promise.all(
-        top.map(async (s) => {
-          const parsed = await window.electronAPI.readSession(
-            project.encoded,
-            s.sessionId
-          );
-          return {
-            sessionId: s.sessionId,
-            title: parsed?.meta.title ?? null,
-            updatedAt: parsed?.meta.updatedAt ?? s.mtimeMs,
-            messageCount: parsed?.meta.messageCount ?? 0,
-          };
-        })
-      );
+      const enriched: SessionListItem[] = list
+        .slice(0, MAX_SESSIONS)
+        .map((s) => ({
+          sessionId: s.sessionId,
+          title: s.title,
+          updatedAt: s.updatedAt,
+          messageCount: s.messageCount,
+          archived: s.archived,
+        }));
       setSessions(enriched);
       setSelectedSessionId((current) => {
-        if (current && enriched.some((s) => s.sessionId === current))
+        // Keep brand-new chats selected even before their JSONL exists.
+        if (
+          current &&
+          (enriched.some((s) => s.sessionId === current) ||
+            NEW_SESSION_IDS.has(current))
+        )
           return current;
-        return enriched[0]?.sessionId ?? null;
+        // Prefer the most recent non-archived session.
+        return (
+          enriched.find((s) => !s.archived)?.sessionId ??
+          enriched[0]?.sessionId ??
+          null
+        );
       });
     } finally {
       setSessionsLoading(false);
     }
   }, [project.encoded]);
+
+  const handleSetSessionArchived = useCallback(
+    async (sessionId: string, archived: boolean) => {
+      await window.electronAPI.setSessionArchived(sessionId, archived);
+      refreshSessions();
+    },
+    [refreshSessions]
+  );
 
   const refreshSelectedSession = useCallback(async () => {
     if (!selectedSessionId) {
@@ -506,13 +557,15 @@ export function ProjectWorkspace({
       project.encoded,
       selectedSessionId
     );
-    setSession(parsed);
+    // Identity-preserving merge: unchanged messages keep their old objects so
+    // memoized rows skip re-rendering (otherwise every watcher tick re-renders
+    // the whole transcript's markdown).
+    setSession((prev) => mergeSession(prev, parsed));
   }, [project.encoded, selectedSessionId]);
 
   useEffect(() => {
-    setChatAnnotations([]);
-    setSelectedSessionId(null);
-    setSession(null);
+    // The workspace remounts per project (keyed by encoded), so initial state
+    // is already fresh — don't clear the persisted session/annotations here.
     refreshSessions();
   }, [refreshSessions]);
 
@@ -520,16 +573,30 @@ export function ProjectWorkspace({
     refreshSelectedSession();
   }, [refreshSelectedSession]);
 
-  // Watcher: re-pull what's relevant.
+  // Watcher: re-pull what's relevant. Debounced — a streaming session fires
+  // events continuously, and refreshing (git + session list + transcript) on
+  // every single one stalls the renderer.
   useEffect(() => {
-    return window.electronAPI.onWatcherEvent((e) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let wantSelected = false;
+    const off = window.electronAPI.onWatcherEvent((e) => {
       if (e.encoded !== project.encoded) return;
-      refreshDiff();
-      refreshSessions();
-      if (e.sessionId && e.sessionId === selectedSessionId) {
-        refreshSelectedSession();
-      }
+      if (e.sessionId && e.sessionId === selectedSessionId) wantSelected = true;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        refreshDiff();
+        refreshSessions();
+        if (wantSelected) {
+          wantSelected = false;
+          refreshSelectedSession();
+        }
+      }, 250);
     });
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
   }, [
     project.encoded,
     selectedSessionId,
@@ -582,6 +649,31 @@ export function ProjectWorkspace({
       })),
     [chatAnnotations]
   );
+
+  // One outgoing buffer combining code-diff annotations and chat annotations,
+  // so a single compose box can Copy / Send-to-terminal everything at once.
+  const totalComments =
+    aggregatedDiffAnnotations.length + aggregatedChatAnnotations.length;
+  const composedMessage = useMemo(() => {
+    const parts: string[] = [];
+    if (aggregatedDiffAnnotations.length > 0) {
+      parts.push(
+        "On the code changes:\n\n" +
+          generateMessage(aggregatedDiffAnnotations, {
+            intro: "",
+            leftLabel: "the original",
+            rightLabel: "the changes",
+          })
+      );
+    }
+    if (aggregatedChatAnnotations.length > 0) {
+      parts.push(
+        "On the conversation:\n\n" +
+          generateMessage(aggregatedChatAnnotations, { intro: "" })
+      );
+    }
+    return parts.join("\n\n");
+  }, [aggregatedDiffAnnotations, aggregatedChatAnnotations]);
 
   // ── Chat annotation handlers ─────────────────────────────────
   const addChatAnnotation = useCallback(
@@ -662,12 +754,395 @@ export function ProjectWorkspace({
     []
   );
 
-  // ── Terminal (⌘J) ────────────────────────────────────────────
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  // Keep the xterm mounted once opened (hidden when closed) so scrollback and
-  // the live view survive ⌘J toggles within this project.
-  const [terminalMounted, setTerminalMounted] = useState(false);
-  const [terminalHeight, setTerminalHeight] = useState(300);
+  // ── Terminals (⌘J) ───────────────────────────────────────────
+  // Each project has a default terminal; each chat the user "resumes" gets its
+  // own terminal running `claude --resume <id>`. All opened terminals stay
+  // mounted (hidden) so scrollback survives switching between them.
+  // Terminal view-state persists per project across first-sidebar switches.
+  const {
+    openedIds,
+    setOpenedIds,
+    terminalOpen,
+    setTerminalOpen,
+    terminalHeight,
+    setTerminalHeight,
+  } = useProjectTerminals(project.encoded);
+  // The dock is mounted whenever there's at least one opened terminal.
+  const terminalMounted = openedIds.length > 0;
+
+  const defaultTermId = `proj:${project.encoded}`;
+  const chatPrefix = `chat:${project.encoded}:`;
+  const sessionTermId = (sid: string) => `${chatPrefix}${sid}`;
+  const initialCommandFor = (tid: string): string | undefined => {
+    if (!tid.startsWith(chatPrefix)) return undefined;
+    const sid = tid.slice(chatPrefix.length);
+    // Brand-new chats start claude with a pre-chosen session id (nothing to
+    // resume yet); existing ones resume their transcript.
+    return NEW_SESSION_IDS.has(sid)
+      ? `claude --session-id ${sid}`
+      : `claude --resume ${sid}`;
+  };
+
+  // The terminal shown in the dock: a resumed chat's terminal when viewing that
+  // chat, otherwise the default project terminal.
+  const sessionResumed =
+    tab === "chat" &&
+    selectedSessionId != null &&
+    openedIds.includes(sessionTermId(selectedSessionId));
+  const activeTerminalId = sessionResumed
+    ? sessionTermId(selectedSessionId!)
+    : defaultTermId;
+  const activeTerminalIdRef = useRef(activeTerminalId);
+  activeTerminalIdRef.current = activeTerminalId;
+
+  // Imperative handles + readiness, keyed by terminal id (for sending to a pty).
+  const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+  const readyIds = useRef<Set<string>>(new Set());
+  const pendingPasteRef = useRef<
+    { id: string; text: string; submit: boolean } | null
+  >(null);
+
+  const ensureOpened = useCallback((tid: string) => {
+    setOpenedIds((ids) => (ids.includes(tid) ? ids : [...ids, tid]));
+  }, []);
+
+  const writeToTerminal = (tid: string, text: string, submit: boolean) => {
+    if (submit) {
+      // Main pastes the body, then sends Enter as a SEPARATE keystroke a beat
+      // later — Claude's TUI ignores an Enter bundled with the paste itself.
+      window.electronAPI.terminalSubmit(tid, text);
+    } else {
+      const body = text.replace(/\r\n/g, "\n").replace(/\r/g, "");
+      window.electronAPI.terminalInput(tid, `\x1b[200~${body}\x1b[201~`);
+    }
+  };
+
+  const handleTerminalReady = useCallback((tid: string) => {
+    readyIds.current.add(tid);
+    const p = pendingPasteRef.current;
+    if (p && p.id === tid) {
+      writeToTerminal(p.id, p.text, p.submit);
+      pendingPasteRef.current = null;
+    }
+  }, []);
+
+  // Send text to terminal `tid` (paste + optional Enter), queuing until ready.
+  const sendToTerminal = useCallback(
+    (tid: string, text: string, submit: boolean) => {
+      if (!text.trim()) return;
+      ensureOpened(tid);
+      if (readyIds.current.has(tid)) writeToTerminal(tid, text, submit);
+      else pendingPasteRef.current = { id: tid, text, submit };
+    },
+    [ensureOpened]
+  );
+
+  // Whether the selected chat has a live (resumed) terminal to send into.
+  const chatTerminalReady =
+    selectedSessionId != null &&
+    openedIds.includes(`${chatPrefix}${selectedSessionId}`);
+
+  // session in a ref so callbacks can read the latest without re-creating.
+  const sessionRef = useRef<ParsedSession | null>(null);
+  sessionRef.current = session;
+
+  // Send watchdog: if no user message lands in the transcript within 12s of a
+  // UI send, the message may be stuck behind a TUI prompt — say so.
+  const sendWatchdogRef = useRef<{
+    baseLen: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  const armSendWatchdog = useCallback(() => {
+    if (sendWatchdogRef.current) clearTimeout(sendWatchdogRef.current.timer);
+    sendWatchdogRef.current = {
+      baseLen: sessionRef.current?.messages.length ?? 0,
+      timer: setTimeout(() => {
+        sendWatchdogRef.current = null;
+        pushToast({
+          text: "Your message hasn't appeared in the session log after 12s — Claude may be stuck on a prompt. Check the terminal.",
+          actionLabel: "Open terminal",
+          onAction: () => setTerminalOpen(true),
+        });
+        if (!document.hasFocus())
+          osNotify("plan", "Message may be stuck — check the terminal");
+      }, 12_000),
+    };
+  }, [setTerminalOpen]);
+
+  // Chat composer: send a message into the selected chat's `claude` (submits).
+  // No optimistic echo / "working" indicator — the transcript (JSONL watcher)
+  // is the source of truth; the message appears when it actually lands.
+  const handleSendChat = useCallback(
+    (text: string) => {
+      if (!selectedSessionId) return;
+      const tid = `${chatPrefix}${selectedSessionId}`;
+      if (!openedIds.includes(tid)) return;
+      sendToTerminal(tid, text, true);
+      // The transcript will confirm delivery; if it doesn't within 12s, the
+      // watchdog says so (toast + notification) instead of leaving you lost.
+      armSendWatchdog();
+    },
+    [selectedSessionId, chatPrefix, openedIds, sendToTerminal, armSendWatchdog]
+  );
+
+  // Drive the chat terminal's TUI selectors (e.g. AskUserQuestion options)
+  // with discrete keystrokes.
+  const handleSendKeysToChat = useCallback(
+    (keys: string[]) => {
+      if (!selectedSessionId) return;
+      const tid = `${chatPrefix}${selectedSessionId}`;
+      if (!openedIds.includes(tid)) return;
+      window.electronAPI.terminalSendKeys(tid, keys);
+    },
+    [selectedSessionId, chatPrefix, openedIds]
+  );
+
+  // New chat: pre-pick the session uuid and start `claude --session-id` in a
+  // background terminal — the composer is immediately live; the transcript
+  // appears with the first exchange.
+  const handleNewChat = useCallback(() => {
+    const sid = crypto.randomUUID();
+    NEW_SESSION_IDS.add(sid);
+    setSelectedSessionId(sid);
+    ensureOpened(`${chatPrefix}${sid}`);
+    setTab("chat");
+    requestAnimationFrame(() => chatInputRef.current?.focus());
+  }, [chatPrefix, ensureOpened]);
+
+  // ── Activity signals (all transcript/OS facts — nothing invented) ──
+
+  // The transcript is the truth: a user message arriving clears the watchdog.
+  useEffect(() => {
+    const w = sendWatchdogRef.current;
+    if (!w || !session) return;
+    const delivered = session.messages
+      .slice(w.baseLen)
+      .some(
+        (m) =>
+          m.role === "user" && m.parts.some((p) => p.kind !== "tool_result")
+      );
+    if (delivered) {
+      clearTimeout(w.timer);
+      sendWatchdogRef.current = null;
+    }
+  }, [session]);
+  useEffect(() => {
+    // Watchdog is per-session.
+    if (sendWatchdogRef.current) {
+      clearTimeout(sendWatchdogRef.current.timer);
+      sendWatchdogRef.current = null;
+    }
+  }, [selectedSessionId]);
+
+  // Reply notification: a NEW assistant message in the transcript (fact).
+  // OS notification + sound when the app is unfocused; toast when you're on
+  // another tab. Nothing while you're already watching the chat.
+  const lastAssistantUuidRef = useRef<string | null>(null);
+  const notifyBaselineRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    const lastAssistant = [...session.messages]
+      .reverse()
+      .find(
+        (m) => m.role === "assistant" && m.parts.some((p) => p.kind === "text")
+      );
+    const uuid = lastAssistant?.uuid ?? null;
+    if (notifyBaselineRef.current !== selectedSessionId) {
+      // First load of this session — baseline, don't notify about history.
+      notifyBaselineRef.current = selectedSessionId;
+      lastAssistantUuidRef.current = uuid;
+      return;
+    }
+    if (uuid && uuid !== lastAssistantUuidRef.current) {
+      lastAssistantUuidRef.current = uuid;
+      const title =
+        sessions.find((s) => s.sessionId === selectedSessionId)?.title ??
+        "Claude";
+      if (!document.hasFocus()) {
+        osNotify("Claude replied", title);
+      } else if (tab !== "chat") {
+        pushToast({
+          text: `Claude replied in “${title}”`,
+          actionLabel: "View",
+          onAction: () => setTab("chat"),
+        });
+      }
+    }
+  }, [session, selectedSessionId, sessions, tab]);
+
+  // Stall signal: the transcript's LAST message has a tool call with no result
+  // and nothing new has been written for 20s — that's the shape of a pending
+  // permission prompt. Worded as "may", because that's all we can know.
+  useEffect(() => {
+    if (!session || !chatTerminalReady) return;
+    const last = session.messages[session.messages.length - 1];
+    if (!last || last.role !== "assistant") return;
+    const resultIds = new Set<string>();
+    for (const m of session.messages)
+      for (const p of m.parts)
+        if (p.kind === "tool_result") resultIds.add(p.toolUseId);
+    const pendingTool = last.parts.some(
+      (p) => p.kind === "tool_use" && !resultIds.has(p.id)
+    );
+    if (!pendingTool) return;
+    const timer = setTimeout(() => {
+      pushToast(
+        {
+          text: "Claude may be waiting on a tool approval — check the terminal.",
+          actionLabel: "Open terminal",
+          onAction: () => setTerminalOpen(true),
+        },
+        15_000
+      );
+      if (!document.hasFocus())
+        osNotify("plan", "Claude may be waiting on an approval");
+    }, 20_000);
+    return () => clearTimeout(timer);
+  }, [session, chatTerminalReady, setTerminalOpen]);
+
+  // Agent status: poll the pty's foreground process name (an OS fact) so the
+  // header can say whether Claude itself is running in the chat terminal.
+  const [agentProcess, setAgentProcess] = useState<string | null>(null);
+  useEffect(() => {
+    if (!chatTerminalReady || !selectedSessionId) {
+      setAgentProcess(null);
+      return;
+    }
+    const tid = `${chatPrefix}${selectedSessionId}`;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const st = await window.electronAPI.terminalStatus(tid);
+        if (alive) setAgentProcess(st.running ? st.process : null);
+      } catch {
+        // Status unavailable — show the neutral state, not a wrong one.
+        if (alive) setAgentProcess(null);
+      }
+    };
+    void poll();
+    const interval = setInterval(poll, 5_000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, [chatTerminalReady, selectedSessionId, chatPrefix]);
+  // Claude's CLI runs under node; either name means the agent process is live.
+  const agentLive = /claude|node/i.test(agentProcess ?? "");
+
+  // Conversation turns (user messages that aren't tool results) — far more
+  // meaningful than raw transcript entry count, and free to compute.
+  const turnCount = useMemo(
+    () =>
+      session
+        ? session.messages.filter(
+            (m) =>
+              m.role === "user" &&
+              m.parts.some((p) => p.kind !== "tool_result")
+          ).length
+        : 0,
+    [session]
+  );
+
+  // "Add to chat": move the composed comments into the chat composer, then
+  // clear them — they now live in the composer text.
+  const handleAddToChat = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      setTab("chat");
+      setAnnotationsByFile({});
+      setChatAnnotations([]);
+      requestAnimationFrame(() => {
+        chatInputRef.current?.append(text);
+        chatInputRef.current?.focus();
+      });
+    },
+    [setAnnotationsByFile, setChatAnnotations]
+  );
+
+  // "Run terminal": start `claude --resume` for the selected session in the
+  // background (does NOT reveal the dock — ⌘J shows it). Enables the composer.
+  const handleResumeChat = useCallback(() => {
+    if (!selectedSessionId) return;
+    ensureOpened(`${chatPrefix}${selectedSessionId}`);
+  }, [selectedSessionId, chatPrefix, ensureOpened]);
+
+  // Whenever the dock is open, make sure the active terminal is mounted.
+  useEffect(() => {
+    if (terminalOpen) ensureOpened(activeTerminalId);
+  }, [terminalOpen, activeTerminalId, ensureOpened]);
+
+  // ⌘⇧T starts the selected chat's terminal.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "t"
+      ) {
+        e.preventDefault();
+        handleResumeChat();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleResumeChat]);
+
+  // ── Session rename (modal; persisted in plan-desktop.json) ───
+  const [renaming, setRenaming] = useState<{
+    sessionId: string;
+    name: string;
+  } | null>(null);
+
+  const handleRenameRequest = useCallback(
+    (sessionId: string, currentTitle: string) =>
+      setRenaming({ sessionId, name: currentTitle }),
+    []
+  );
+
+  const handleRenameSave = useCallback(
+    async (sessionId: string, name: string) => {
+      await window.electronAPI.renameSession(sessionId, name);
+      refreshSessions();
+    },
+    [refreshSessions]
+  );
+
+  // ⌘⇧R renames the selected chat.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "r"
+      ) {
+        e.preventDefault();
+        if (!selectedSessionId) return;
+        const current =
+          sessions.find((s) => s.sessionId === selectedSessionId)?.title ?? "";
+        setRenaming({ sessionId: selectedSessionId, name: current });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectedSessionId, sessions]);
+
+  // ⌘L focuses the chat composer.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "l"
+      ) {
+        e.preventDefault();
+        setTab("chat");
+        requestAnimationFrame(() => chatInputRef.current?.focus());
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const startTerminalResize = useCallback(
     (e: React.PointerEvent) => {
@@ -696,18 +1171,14 @@ export function ProjectWorkspace({
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        setTerminalOpen((v) => {
-          const next = !v;
-          if (next) setTerminalMounted(true);
-          return next;
-        });
+        setTerminalOpen((v) => !v);
       } else if (e.key === "Escape" && terminalOpen) {
         setTerminalOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [terminalOpen]);
+  }, [terminalOpen, setTerminalOpen]);
 
   return (
     <SidebarProvider
@@ -716,6 +1187,14 @@ export function ProjectWorkspace({
       shortcut={{ key: "e", meta: true }}
     >
       {confirmDialog}
+      <Toasts />
+      {renaming && (
+        <RenameSessionDialog
+          initialName={renaming.name}
+          onSave={(name) => void handleRenameSave(renaming.sessionId, name)}
+          onClose={() => setRenaming(null)}
+        />
+      )}
       <div className="flex h-full w-full flex-row">
         <MiddleSidebar
           tab={tab}
@@ -739,6 +1218,9 @@ export function ProjectWorkspace({
           sessions={sessions}
           selectedSession={selectedSessionId}
           onSelectSession={setSelectedSessionId}
+          onSetSessionArchived={handleSetSessionArchived}
+          onRenameSession={handleRenameRequest}
+          onNewChat={handleNewChat}
           sessionsLoading={sessionsLoading}
           plans={plans}
           selectedPlan={selectedPlanPath}
@@ -753,8 +1235,14 @@ export function ProjectWorkspace({
           />
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col">
-            {tab === "diffs" && (
-              <div className="flex min-h-0 flex-1 flex-col">
+            {/* Tab panes stay MOUNTED and hide via CSS — re-mounting re-parses
+                the whole transcript / re-highlights diffs on every switch. */}
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                tab !== "diffs" && "hidden"
+              )}
+            >
                 <div className="min-h-0 flex-1">
                   {selectedFile && selectedFileDiff ? (
                     <FileDiffViewer
@@ -763,6 +1251,7 @@ export function ProjectWorkspace({
                       subPath={selectedFile.subPath}
                       file={selectedFileDiff}
                       mode={selectedFile.staged ? "staged" : "unstaged"}
+                      active={tab === "diffs"}
                       annotationsByFile={annotationsByFile}
                       setAnnotationsByFile={setAnnotationsByFile}
                       onStage={() =>
@@ -792,30 +1281,61 @@ export function ProjectWorkspace({
                     </div>
                   )}
                 </div>
-                {aggregatedDiffAnnotations.length > 0 && (
-                  <div className="border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                    <MessageOutput
-                      annotations={aggregatedDiffAnnotations}
-                      options={{
-                        intro: "Some feedback on the working-tree changes:",
-                        leftLabel: "the original",
-                        rightLabel: "the changes",
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            </div>
 
-            {tab === "chat" && (
-              <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                tab !== "chat" && "hidden"
+              )}
+            >
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
                   <span className="truncate text-[var(--text-secondary)]">
-                    {session?.meta.title ?? selectedSessionId ?? "No session"}
+                    {sessions.find((s) => s.sessionId === selectedSessionId)
+                      ?.title ??
+                      session?.meta.title ??
+                      selectedSessionId ??
+                      "No session"}
                   </span>
-                  <span>
-                    {session ? `${session.meta.messageCount} msgs` : ""}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span>
+                      {session
+                        ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
+                        : ""}
+                    </span>
+                    {selectedSessionId &&
+                      (chatTerminalReady ? (
+                        <span
+                          className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1"
+                          title={
+                            agentLive
+                              ? "Claude is running in this chat's terminal — ⌘J to view"
+                              : "Terminal is open, but no Claude process detected — ⌘J to view"
+                          }
+                        >
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              agentLive
+                                ? "bg-emerald-500"
+                                : "bg-[var(--text-tertiary)]"
+                            )}
+                          />
+                          <span>{agentLive ? "Claude" : "Terminal"}</span>
+                        </span>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleResumeChat}
+                          title="Connect this chat to Claude (runs claude --resume in a background terminal — ⌘J shows it)"
+                          className="flex items-center gap-1.5"
+                        >
+                          <span>Connect</span>
+                          <Kbd keys={["⌘", "⇧", "T"]} />
+                        </Button>
+                      ))}
+                  </div>
                 </div>
                 <div className="min-h-0 flex-1">
                   {session ? (
@@ -825,28 +1345,35 @@ export function ProjectWorkspace({
                       onAddAnnotation={addChatAnnotation}
                       onUpdateAnnotation={updateChatAnnotation}
                       onRemoveAnnotation={removeChatAnnotation}
+                      visible={tab === "chat"}
+                      terminalReady={chatTerminalReady}
+                      onSendKeys={handleSendKeysToChat}
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                      Select a session
+                      {selectedSessionId
+                        ? "New chat — send a message to start it."
+                        : "Select a session"}
                     </div>
                   )}
                 </div>
-                {aggregatedChatAnnotations.length > 0 && (
-                  <div className="border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                    <MessageOutput
-                      annotations={aggregatedChatAnnotations}
-                      options={{
-                        intro: "Some feedback on the conversation:",
-                      }}
-                    />
-                  </div>
+                {selectedSessionId && (
+                  <ChatInput
+                    ref={chatInputRef}
+                    sessionId={selectedSessionId}
+                    inactive={!chatTerminalReady}
+                    onStart={handleResumeChat}
+                    onSend={handleSendChat}
+                  />
                 )}
-              </div>
-            )}
+            </div>
 
-            {tab === "plans" && (
-              <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                tab !== "plans" && "hidden"
+              )}
+            >
                 {selectedPlan ? (
                   <PlanViewer key={selectedPlan.filePath} plan={selectedPlan} />
                 ) : (
@@ -856,17 +1383,31 @@ export function ProjectWorkspace({
                       : "Select a plan"}
                   </div>
                 )}
-              </div>
-            )}
+            </div>
 
             </div>
+
+            {/* Unified compose buffer: code-diff + chat annotations combined.
+                Persists across tabs. "Add to chat" drops it into the chat
+                composer (so it's sent through the chat → terminal path). */}
+            {totalComments > 0 && (
+              <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                <MessageOutput
+                  annotations={[]}
+                  message={composedMessage}
+                  count={totalComments}
+                  onSend={handleAddToChat}
+                  sendLabel="Add to chat"
+                />
+              </div>
+            )}
 
             {/* Resizable docked terminal (⌘J). Kept mounted once opened so
                 scrollback survives toggles; hidden (height 0) when closed. */}
             {terminalMounted && (
               <div
                 className={cn(
-                  "flex shrink-0 flex-col border-t border-[var(--border)]",
+                  "flex shrink-0 flex-col overflow-hidden border-t border-[var(--border)]",
                   !terminalOpen && "hidden"
                 )}
                 style={{ height: terminalOpen ? terminalHeight : 0 }}
@@ -875,12 +1416,33 @@ export function ProjectWorkspace({
                   onPointerDown={startTerminalResize}
                   className="h-1.5 shrink-0 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
                 />
-                <div className="min-h-0 flex-1">
-                  <TerminalPanel
-                    encoded={project.encoded}
-                    visible={terminalOpen}
-                    onClose={() => setTerminalOpen(false)}
-                  />
+                <div className="relative min-h-0 flex-1 overflow-hidden">
+                  {openedIds.map((tid) => {
+                    const active = tid === activeTerminalId;
+                    return (
+                      <div
+                        key={tid}
+                        className={cn(
+                          "absolute inset-0 overflow-hidden",
+                          !active && "hidden"
+                        )}
+                      >
+                        <TerminalPanel
+                          ref={(h) => {
+                            if (h) terminalRefs.current.set(tid, h);
+                            else terminalRefs.current.delete(tid);
+                          }}
+                          id={tid}
+                          encoded={project.encoded}
+                          initialCommand={initialCommandFor(tid)}
+                          visible={terminalOpen && active}
+                          fitSignal={terminalHeight}
+                          onClose={() => setTerminalOpen(false)}
+                          onReady={() => handleTerminalReady(tid)}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

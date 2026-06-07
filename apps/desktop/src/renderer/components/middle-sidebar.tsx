@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -53,6 +53,9 @@ interface Props {
   sessions: SessionListItem[];
   selectedSession: string | null;
   onSelectSession: (id: string) => void;
+  onSetSessionArchived: (sessionId: string, archived: boolean) => void;
+  onRenameSession: (sessionId: string, currentTitle: string) => void;
+  onNewChat: () => void;
   sessionsLoading: boolean;
 
   plans: Plan[];
@@ -86,7 +89,8 @@ function UploadIcon() {
   );
 }
 
-export function MiddleSidebar({
+/** Memoized so composer keystrokes in the workspace don't re-render the lists. */
+export const MiddleSidebar = memo(function MiddleSidebar({
   tab,
   onTabChange,
   repos,
@@ -108,6 +112,9 @@ export function MiddleSidebar({
   sessions,
   selectedSession,
   onSelectSession,
+  onSetSessionArchived,
+  onRenameSession,
+  onNewChat,
   sessionsLoading,
   plans,
   selectedPlan,
@@ -146,7 +153,7 @@ export function MiddleSidebar({
       >
         <SidebarHeader
           className={cn(
-            "h-[52px] justify-center pr-3 pt-9 pb-2 [-webkit-app-region:drag]",
+            "h-[44px] justify-center pr-3 pt-2 pb-2 [-webkit-app-region:drag]",
             projectsSidebarOpen ? "pl-3" : "pl-20"
           )}
         >
@@ -247,6 +254,9 @@ export function MiddleSidebar({
               sessions={sessions}
               selected={selectedSession}
               onSelect={onSelectSession}
+              onSetArchived={onSetSessionArchived}
+              onRename={onRenameSession}
+              onNewChat={onNewChat}
               loading={sessionsLoading}
             />
           </TabsContent>
@@ -266,4 +276,4 @@ export function MiddleSidebar({
       </Tabs>
     </Sidebar>
   );
-}
+});

@@ -70,6 +70,10 @@ export interface SessionListEntry {
   sessionId: string;
   filePath: string;
   mtimeMs: number;
+  archived: boolean;
+  title: string | null;
+  messageCount: number;
+  updatedAt: number | string | null;
 }
 
 export type SessionEventKind = "new-session" | "session-changed" | "project-added";

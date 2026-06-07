@@ -74,6 +74,21 @@ body {
   background: var(--selection-bg);
 }
 
+/*
+ * Chat annotation highlights, drawn with the CSS Custom Highlight API so they
+ * sit over rendered markdown without splitting its DOM. (Custom highlights
+ * support only a few paint properties — background, underline, color.)
+ */
+::highlight(chat-annotation) {
+  background-color: var(--highlight-bg);
+  text-decoration: underline;
+  text-decoration-color: var(--text-tertiary);
+  text-decoration-thickness: 1.5px;
+}
+::highlight(chat-annotation-pending) {
+  background-color: var(--selection-bg);
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;

@@ -41,6 +41,10 @@ const electronAPI = {
   addManualProject: () => ipcRenderer.invoke("projects:addManual"),
   setProjectArchived: (encoded: string, archived: boolean) =>
     ipcRenderer.invoke("projects:setArchived", encoded, archived),
+  setSessionArchived: (sessionId: string, archived: boolean) =>
+    ipcRenderer.invoke("sessions:setArchived", sessionId, archived),
+  renameSession: (sessionId: string, name: string) =>
+    ipcRenderer.invoke("sessions:rename", sessionId, name),
 
   // Plans
   listPlans: () => ipcRenderer.invoke("plans:list"),
@@ -75,26 +79,44 @@ const electronAPI = {
   push: (encoded: string, subPath: string = "") =>
     ipcRenderer.invoke("git:push", encoded, subPath),
 
-  // Terminal
-  terminalOpen: (encoded: string, cols: number, rows: number) =>
-    ipcRenderer.invoke("terminal:open", encoded, cols, rows),
-  terminalInput: (encoded: string, data: string) =>
-    ipcRenderer.send("terminal:input", encoded, data),
-  terminalResize: (encoded: string, cols: number, rows: number) =>
-    ipcRenderer.send("terminal:resize", encoded, cols, rows),
-  terminalKill: (encoded: string) =>
-    ipcRenderer.send("terminal:kill", encoded),
-  onTerminalData: (cb: (chunk: { encoded: string; data: string }) => void) => {
+  // Terminal (keyed by terminal id; cwd resolved from encoded in main)
+  terminalOpen: (
+    id: string,
+    encoded: string,
+    cols: number,
+    rows: number,
+    initialCommand?: string
+  ) =>
+    ipcRenderer.invoke(
+      "terminal:open",
+      id,
+      encoded,
+      cols,
+      rows,
+      initialCommand
+    ),
+  terminalInput: (id: string, data: string) =>
+    ipcRenderer.send("terminal:input", id, data),
+  terminalSubmit: (id: string, text: string) =>
+    ipcRenderer.send("terminal:submit", id, text),
+  terminalSendKeys: (id: string, keys: string[]) =>
+    ipcRenderer.send("terminal:sendKeys", id, keys),
+  terminalStatus: (id: string) => ipcRenderer.invoke("terminal:status", id),
+  terminalResize: (id: string, cols: number, rows: number) =>
+    ipcRenderer.send("terminal:resize", id, cols, rows),
+  terminalKill: (id: string) => ipcRenderer.send("terminal:kill", id),
+  saveTempImage: (data: Uint8Array, ext: string) =>
+    ipcRenderer.invoke("terminal:saveTempImage", data, ext),
+  onTerminalData: (cb: (chunk: { id: string; data: string }) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      chunk: { encoded: string; data: string }
+      chunk: { id: string; data: string }
     ) => cb(chunk);
     ipcRenderer.on("terminal:data", handler);
     return () => ipcRenderer.removeListener("terminal:data", handler);
   },
-  onTerminalExit: (cb: (encoded: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, encoded: string) =>
-      cb(encoded);
+  onTerminalExit: (cb: (id: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, id: string) => cb(id);
     ipcRenderer.on("terminal:exit", handler);
     return () => ipcRenderer.removeListener("terminal:exit", handler);
   },
