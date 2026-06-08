@@ -15,9 +15,19 @@ interface TerminalState {
   open: boolean;
   /** Dock height in px. */
   height: number;
+  /** Scratch shells (`term:<encoded>:<n>`), in sidebar order. */
+  shells: string[];
+  /** Shell shown in the sidebar's embedded terminal pane. */
+  activeShellId: string | null;
 }
 
-const DEFAULT: TerminalState = { openedIds: [], open: false, height: 300 };
+const DEFAULT: TerminalState = {
+  openedIds: [],
+  open: false,
+  height: 300,
+  shells: [],
+  activeShellId: null,
+};
 
 const store = new Map<string, TerminalState>();
 const listeners = new Set<() => void>();
@@ -60,6 +70,10 @@ export function useProjectTerminals(encoded: string): {
   setTerminalOpen: Dispatch<SetStateAction<boolean>>;
   terminalHeight: number;
   setTerminalHeight: Dispatch<SetStateAction<number>>;
+  shells: string[];
+  setShells: Dispatch<SetStateAction<string[]>>;
+  activeShellId: string | null;
+  setActiveShellId: Dispatch<SetStateAction<string | null>>;
 } {
   const snapshot = useSyncExternalStore(
     subscribe,
@@ -73,6 +87,11 @@ export function useProjectTerminals(encoded: string): {
     makeSetter(encoded, "height"),
     [encoded]
   );
+  const setShells = useCallback(makeSetter(encoded, "shells"), [encoded]);
+  const setActiveShellId = useCallback(
+    makeSetter(encoded, "activeShellId"),
+    [encoded]
+  );
 
   return {
     openedIds: snapshot.openedIds,
@@ -81,5 +100,9 @@ export function useProjectTerminals(encoded: string): {
     setTerminalOpen,
     terminalHeight: snapshot.height,
     setTerminalHeight,
+    shells: snapshot.shells,
+    setShells,
+    activeShellId: snapshot.activeShellId,
+    setActiveShellId,
   };
 }

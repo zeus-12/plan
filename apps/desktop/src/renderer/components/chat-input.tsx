@@ -20,6 +20,8 @@ interface Props {
   /** No live terminal yet — clicking the box starts one (see onStart). */
   inactive?: boolean;
   onStart?: () => void;
+  /** Focus the textarea when this session becomes the composer's session. */
+  autoFocus?: boolean;
 }
 
 interface Attachment {
@@ -46,7 +48,7 @@ const draftKey = (sid: string) => `plan.draft.${sid}`;
  * every attachment has a real path — the paths are what actually get sent.
  */
 export const ChatInput = forwardRef<ChatInputHandle, Props>(
-  function ChatInput({ sessionId, onSend, inactive, onStart }, ref) {
+  function ChatInput({ sessionId, onSend, inactive, onStart, autoFocus }, ref) {
     const [value, setValue] = useState(
       () => window.localStorage.getItem(draftKey(sessionId)) ?? ""
     );
@@ -72,6 +74,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     useEffect(() => {
       setValue(window.localStorage.getItem(draftKey(sessionId)) ?? "");
     }, [sessionId]);
+
+    // Focus on session swap when asked (e.g. a brand-new chat) — driven by the
+    // commit lifecycle, not a rAF race against React's render.
+    useEffect(() => {
+      if (autoFocus) innerRef.current?.focus();
+    }, [sessionId, autoFocus]);
 
     // Debounced draft persistence.
     useEffect(() => {

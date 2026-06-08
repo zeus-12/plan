@@ -6,6 +6,7 @@ import {
 } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { useTheme } from "@plan/shared/components/theme-provider";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalHandle {
@@ -19,11 +20,15 @@ interface Props {
   id: string;
   /** Project encoded dir — main resolves the pty cwd from it. */
   encoded: string;
+  /** Header label (e.g. "Claude", "Terminal 2"). */
+  label?: string;
+  /** Hide the title/close header row (e.g. embedded in the sidebar). */
+  showHeader?: boolean;
   /** Run once when the pty is first created (e.g. `claude --resume <id>`). */
   initialCommand?: string;
   /** Whether the panel is currently shown (drives refit + focus). */
   visible: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   /** Fired once the pty is open and ready to receive input. */
   onReady?: () => void;
   /** Changing this value forces a refit (e.g. the dock height during a drag). */
@@ -71,12 +76,23 @@ function cssVar(name: string, fallback: string): string {
  */
 export const TerminalPanel = forwardRef<TerminalHandle, Props>(
   function TerminalPanel(
-    { id, encoded, initialCommand, visible, onClose, onReady, fitSignal },
+    {
+      id,
+      encoded,
+      label,
+      showHeader = true,
+      initialCommand,
+      visible,
+      onClose,
+      onReady,
+      fitSignal,
+    },
     ref
   ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const { theme } = useTheme();
 
   // Held in a ref so changing the callback's identity doesn't tear down the pty.
   const onReadyRef = useRef(onReady);
@@ -226,6 +242,19 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     };
   }, [id]);
 
+  // Re-read the CSS vars on theme change so a mounted terminal re-colors live
+  // (the classList swap happens before this effect runs, so the vars are new).
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.theme = {
+      background: cssVar("--bg", "#1b1c20"),
+      foreground: cssVar("--text", "#d2d3d8"),
+      cursor: cssVar("--text", "#d2d3d8"),
+      selectionBackground: cssVar("--selection-bg", "rgba(120,120,160,0.4)"),
+    };
+  }, [theme]);
+
   // Refit + focus when shown (it may have been display:none with 0 size).
   useEffect(() => {
     if (!visible) return;
@@ -286,16 +315,18 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
 
   return (
     <div className="flex h-full w-full flex-col bg-[var(--bg)]">
-      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-        <span>Terminal</span>
-        <button
-          onClick={onClose}
-          title="Close (⌘J)"
-          className="flex h-5 w-5 items-center justify-center rounded text-[14px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-        >
-          ×
-        </button>
-      </div>
+      {showHeader && (
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+          <span>{label ?? "Terminal"}</span>
+          <button
+            onClick={onClose}
+            title="Close (⌘J)"
+            className="flex h-5 w-5 items-center justify-center rounded text-[14px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden pl-2" />
     </div>
   );
