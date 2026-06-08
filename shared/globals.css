@@ -28,9 +28,9 @@
 }
 
 .dark {
-  --bg: #09090b;
-  --bg-surface: #18181b;
-  --bg-surface-hover: #1f1f23;
+  --bg: #050506;
+  --bg-surface: #101012;
+  --bg-surface-hover: #18181a;
   --border: #27272a;
   --border-strong: #3f3f46;
   --text: #fafafa;
@@ -54,6 +54,67 @@
   --diff-remove-gutter: rgba(248, 81, 73, 0.2);
   --diff-remove-bar: #f85149;
   --diff-remove-word: rgba(248, 81, 73, 0.4);
+}
+
+/* Soft Light — warm paper instead of clinical white; lower text contrast. */
+.theme-soft-light {
+  --bg: #f3f1ec;
+  --bg-surface: #faf8f4;
+  --bg-surface-hover: #ebe8e1;
+  --border: #e1ddd3;
+  --border-strong: #cfcabe;
+  --text: #43423d;
+  --text-secondary: #6e6c64;
+  --text-tertiary: #8f8d83;
+  --accent: #55534c;
+  --accent-hover: #6e6c64;
+  --added-text: #3a7d4f;
+  --removed-text: #b04a42;
+  --selection-bg: #cbdcec;
+  --popover-bg: #faf8f4;
+  --popover-border: #e1ddd3;
+  --highlight-bg: rgba(60, 50, 20, 0.06);
+  --highlight-bg-hover: rgba(60, 50, 20, 0.12);
+
+  --diff-add-bg: #e3f0e5;
+  --diff-add-gutter: #c3e0c9;
+  --diff-add-bar: #4d9961;
+  --diff-add-word: #c3e0c9;
+  --diff-remove-bg: #f7e8e4;
+  --diff-remove-gutter: #efd3cd;
+  --diff-remove-bar: #c4655c;
+  --diff-remove-word: #efd3cd;
+}
+
+/* Soft Dark — warm dark gray, off-white text; ~half the contrast of `dark`.
+   Applied together with `.dark`; declared after it, so these vars win. */
+.theme-soft-dark {
+  --bg: #1b1c20;
+  --bg-surface: #232429;
+  --bg-surface-hover: #2b2c32;
+  --border: #2f3036;
+  --border-strong: #41434b;
+  --text: #d2d3d8;
+  --text-secondary: #9b9ca5;
+  --text-tertiary: #707178;
+  --accent: #c2c3cc;
+  --accent-hover: #aaabb6;
+  --added-text: #93ce9f;
+  --removed-text: #e6a8a1;
+  --selection-bg: #2c4a6e;
+  --popover-bg: #26272d;
+  --popover-border: #383a41;
+  --highlight-bg: rgba(255, 255, 255, 0.06);
+  --highlight-bg-hover: rgba(255, 255, 255, 0.12);
+
+  --diff-add-bg: rgba(95, 168, 115, 0.12);
+  --diff-add-gutter: rgba(95, 168, 115, 0.22);
+  --diff-add-bar: #5fa873;
+  --diff-add-word: rgba(95, 168, 115, 0.38);
+  --diff-remove-bg: rgba(207, 118, 112, 0.12);
+  --diff-remove-gutter: rgba(207, 118, 112, 0.2);
+  --diff-remove-bar: #cf7670;
+  --diff-remove-word: rgba(207, 118, 112, 0.36);
 }
 
 * {

@@ -66,7 +66,7 @@ function readHashState(): SharedState | null {
 }
 
 export default function Home() {
-  const { theme, toggle } = useTheme();
+  const { isDark, toggle } = useTheme();
   const [settings, updateSettings] = useDiffSettings();
   const {
     left: leftText,
@@ -243,7 +243,7 @@ export default function Home() {
             </Button>
           )}
           <Button variant="outline" size="icon" onClick={toggle}>
-            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+            {isDark ? <SunIcon /> : <MoonIcon />}
           </Button>
         </div>
       </header>
