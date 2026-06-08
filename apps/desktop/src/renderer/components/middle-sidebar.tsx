@@ -3,6 +3,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarHeader,
+  useSidebar,
 } from "@plan/shared/components/ui/sidebar";
 import {
   Tabs,
@@ -16,6 +17,7 @@ import { FileList, type RepoFileGroup } from "./file-list";
 import { SessionList, type SessionListItem } from "./session-list";
 import { PlansList } from "./plans-list";
 import { CommitPanel } from "./commit-panel";
+import { TerminalPanel } from "./terminal-panel";
 
 export type WorkTab = "diffs" | "chat" | "plans";
 
@@ -45,7 +47,7 @@ interface Props {
   onPush: (subPath: string) => void;
   onCommit: (
     message: string,
-    subPath: string
+    subPath: string,
   ) => Promise<{ ok: boolean; error?: string }>;
   filesLoading: boolean;
   diffAvailable: boolean;
@@ -62,11 +64,36 @@ interface Props {
   selectedPlan: string | null;
   onSelectPlan: (filePath: string) => void;
 
-  projectsSidebarOpen: boolean;
+  /** Project encoded dir — the embedded shells resolve their cwd from it. */
+  encoded: string;
+  terminals: { id: string; label: string }[];
+  /** The shell shown in the embedded pane below the tab strip. */
+  activeTerminalId: string | null;
+  onNewTerminal: () => void;
+  onSelectTerminal: (id: string) => void;
+  onCloseTerminal: (id: string) => void;
 }
 
 function totalUnread(plans: Plan[]): number {
   return plans.reduce((s, p) => s + p.unread, 0);
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
 }
 
 function UploadIcon() {
@@ -119,8 +146,15 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   plans,
   selectedPlan,
   onSelectPlan,
-  projectsSidebarOpen,
+  encoded,
+  terminals,
+  activeTerminalId,
+  onNewTerminal,
+  onSelectTerminal,
+  onCloseTerminal,
 }: Props) {
+  const sidebar = useSidebar();
+
   // ⌘1 / ⌘2 / ⌘3 → swap tabs
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -145,18 +179,13 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   const multiRepo = repos.length > 1;
 
   return (
-    <Sidebar className="w-[280px]">
+    <Sidebar side="right" className="w-[280px]">
       <Tabs
         value={tab}
         onValueChange={(v) => onTabChange(v as WorkTab)}
-        className="flex h-full min-h-0 flex-col"
+        className="flex min-h-0 flex-1 flex-col"
       >
-        <SidebarHeader
-          className={cn(
-            "h-[44px] justify-center pr-3 pt-2 pb-2 [-webkit-app-region:drag]",
-            projectsSidebarOpen ? "pl-3" : "pl-20"
-          )}
-        >
+        <SidebarHeader className="h-[44px] justify-center px-3 pt-2 pb-2 [-webkit-app-region:drag]">
           <div className="[-webkit-app-region:no-drag]">
             <TabsList>
               <TabsTrigger value="diffs">Diffs</TabsTrigger>
@@ -237,7 +266,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                       </span>
                     </span>
                     <span className="shrink-0 truncate text-[10px] text-[var(--text-tertiary)]">
-                      {multiRepo ? t.repoName : t.branch ?? ""}
+                      {multiRepo ? t.repoName : (t.branch ?? "")}
                     </span>
                   </button>
                 ))}
@@ -274,6 +303,80 @@ export const MiddleSidebar = memo(function MiddleSidebar({
           </TabsContent>
         </SidebarContent>
       </Tabs>
+
+      {/* ── Terminals: always-present tab strip + embedded pane ── */}
+      <div className="shrink-0 border-t border-[var(--border)]">
+        <div className="flex items-center gap-4 overflow-x-auto px-3 pt-2">
+          {terminals.map((t) => {
+            const active = t.id === activeTerminalId;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onSelectTerminal(t.id)}
+                className={cn(
+                  "group flex shrink-0 items-center gap-1.5 border-b-2 pb-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
+                  active
+                    ? "border-[var(--text)] text-[var(--text)]"
+                    : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                )}
+              >
+                <span>{t.label}</span>
+                <span
+                  role="button"
+                  aria-label={`Close ${t.label}`}
+                  title="Close terminal"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseTerminal(t.id);
+                  }}
+                  className={cn(
+                    "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
+                    active
+                      ? "text-[var(--text-tertiary)]"
+                      : "opacity-0 group-hover:opacity-100"
+                  )}
+                >
+                  ×
+                </span>
+              </button>
+            );
+          })}
+          <button
+            onClick={onNewTerminal}
+            title="New terminal (⌘⇧J)"
+            aria-label="New terminal"
+            className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+          >
+            <PlusIcon />
+          </button>
+        </div>
+        {/* Embedded terminal pane: the active shell renders right here, sized
+            to this bottom section only. All opened shells stay mounted
+            (hidden) so their scrollback survives tab switches. */}
+        {terminals.length > 0 && (
+          <div className="relative h-72 border-t border-[var(--border)]">
+            {terminals.map((t) => {
+              const active = t.id === activeTerminalId;
+              return (
+                <div
+                  key={t.id}
+                  className={cn(
+                    "absolute inset-0 overflow-hidden",
+                    !active && "hidden"
+                  )}
+                >
+                  <TerminalPanel
+                    id={t.id}
+                    encoded={encoded}
+                    showHeader={false}
+                    visible={active && sidebar.open}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </Sidebar>
   );
 });

@@ -13,7 +13,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
-import { useTheme } from "@plan/shared/components/theme-provider";
 import { cn } from "@plan/shared/lib/utils";
 import type {
   ProjectEntry,
@@ -32,6 +31,7 @@ import { useProjectAnnotations } from "../lib/annotation-store";
 import { useProjectTerminals } from "../lib/terminal-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
+import { ThemeMenu } from "./theme-menu";
 import { Toasts } from "./toasts";
 import { mergeSession } from "../lib/merge-session";
 import { osNotify, pushToast } from "../lib/toast-store";
@@ -53,44 +53,6 @@ interface Props {
 
 const MAX_SESSIONS = 5;
 
-function SunIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
-  );
-}
-
 function WorkspaceHeader({
   project,
   projectsSidebarOpen,
@@ -100,7 +62,6 @@ function WorkspaceHeader({
   projectsSidebarOpen: boolean;
   branch: string | null;
 }) {
-  const { theme, toggle: toggleTheme } = useTheme();
   const middle = useSidebar();
   const shortName =
     project.cwd.split("/").filter(Boolean).pop() ?? project.cwd;
@@ -113,24 +74,6 @@ function WorkspaceHeader({
         projectsSidebarOpen ? "pl-3" : "pl-20"
       )}
     >
-      <div className="flex min-w-0 items-center gap-1 [-webkit-app-region:no-drag]">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={middle.toggle}
-              aria-label="Toggle files & chat sidebar"
-            >
-              <PanelRightIcon />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="flex items-center gap-1.5">
-            <span>{middle.open ? "Hide" : "Show"} files & chat</span>
-            <Kbd keys={["⌘", "E"]} />
-          </TooltipContent>
-        </Tooltip>
-      </div>
       {/* Project name (bold) · path (muted) · branch as a labelled pill. */}
       <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-3">
         <span className="shrink-0 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text)]">
@@ -146,14 +89,21 @@ function WorkspaceHeader({
         )}
       </div>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
+        <ThemeMenu />
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={toggleTheme}>
-              {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={middle.toggle}
+              aria-label="Toggle files & chat sidebar"
+            >
+              <PanelRightIcon />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {theme === "dark" ? "Light mode" : "Dark mode"}
+          <TooltipContent side="bottom" className="flex items-center gap-1.5">
+            <span>{middle.open ? "Hide" : "Show"} files & chat</span>
+            <Kbd keys={["⌘", "E"]} />
           </TooltipContent>
         </Tooltip>
       </div>
@@ -510,7 +460,22 @@ export function ProjectWorkspace({
       // List metadata comes straight from main's mtime cache — never fetch
       // full transcripts here (that froze the renderer on every watcher tick).
       const list = await window.electronAPI.listSessions(project.encoded);
-      const enriched: SessionListItem[] = list
+      // Newest first by the transcript's own timestamp (mtime is a fallback —
+      // it moves on any file touch, e.g. a resume, not just new messages).
+      const toMillis = (
+        v: number | string | null,
+        fallback: number
+      ): number => {
+        if (v == null) return fallback;
+        if (typeof v === "number") return v;
+        const t = new Date(v).getTime();
+        return Number.isNaN(t) ? fallback : t;
+      };
+      const enriched: SessionListItem[] = [...list]
+        .sort(
+          (a, b) =>
+            toMillis(b.updatedAt, b.mtimeMs) - toMillis(a.updatedAt, a.mtimeMs)
+        )
         .slice(0, MAX_SESSIONS)
         .map((s) => ({
           sessionId: s.sessionId,
@@ -756,9 +721,10 @@ export function ProjectWorkspace({
 
   // ── Terminals (⌘J) ───────────────────────────────────────────
   // Each project has a default terminal; each chat the user "resumes" gets its
-  // own terminal running `claude --resume <id>`. All opened terminals stay
-  // mounted (hidden) so scrollback survives switching between them.
-  // Terminal view-state persists per project across first-sidebar switches.
+  // own terminal running `claude --resume <id>`; the sidebar's Terminals
+  // section adds scratch shells. All opened terminals stay mounted (hidden) so
+  // scrollback survives switching between them. Terminal view-state persists
+  // per project across first-sidebar switches.
   const {
     openedIds,
     setOpenedIds,
@@ -766,12 +732,17 @@ export function ProjectWorkspace({
     setTerminalOpen,
     terminalHeight,
     setTerminalHeight,
+    shells,
+    setShells,
+    activeShellId,
+    setActiveShellId,
   } = useProjectTerminals(project.encoded);
   // The dock is mounted whenever there's at least one opened terminal.
   const terminalMounted = openedIds.length > 0;
 
   const defaultTermId = `proj:${project.encoded}`;
   const chatPrefix = `chat:${project.encoded}:`;
+  const shellPrefix = `term:${project.encoded}:`;
   const sessionTermId = (sid: string) => `${chatPrefix}${sid}`;
   const initialCommandFor = (tid: string): string | undefined => {
     if (!tid.startsWith(chatPrefix)) return undefined;
@@ -783,8 +754,9 @@ export function ProjectWorkspace({
       : `claude --resume ${sid}`;
   };
 
-  // The terminal shown in the dock: a resumed chat's terminal when viewing that
-  // chat, otherwise the default project terminal.
+  // The dock (⌘J) shows only agent terminals: a resumed chat's terminal when
+  // viewing that chat, otherwise the default project terminal. Scratch shells
+  // render embedded in the sidebar's Terminals section instead.
   const sessionResumed =
     tab === "chat" &&
     selectedSessionId != null &&
@@ -853,22 +825,38 @@ export function ProjectWorkspace({
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
 
-  const armSendWatchdog = useCallback(() => {
-    if (sendWatchdogRef.current) clearTimeout(sendWatchdogRef.current.timer);
-    sendWatchdogRef.current = {
-      baseLen: sessionRef.current?.messages.length ?? 0,
-      timer: setTimeout(() => {
-        sendWatchdogRef.current = null;
-        pushToast({
-          text: "Your message hasn't appeared in the session log after 12s — Claude may be stuck on a prompt. Check the terminal.",
-          actionLabel: "Open terminal",
-          onAction: () => setTerminalOpen(true),
-        });
-        if (!document.hasFocus())
-          osNotify("plan", "Message may be stuck — check the terminal");
-      }, 12_000),
-    };
-  }, [setTerminalOpen]);
+  // Reveal a chat's terminal: select the chat, switch to its tab, snap the
+  // dock off any scratch shell, and open it — so the dock lands on THAT chat's
+  // terminal regardless of where the user currently is.
+  const revealChatTerminal = useCallback(
+    (sid: string) => {
+      setSelectedSessionId(sid);
+      setTab("chat");
+      setActiveShellId(null);
+      setTerminalOpen(true);
+    },
+    [setActiveShellId, setTerminalOpen]
+  );
+
+  const armSendWatchdog = useCallback(
+    (sid: string) => {
+      if (sendWatchdogRef.current) clearTimeout(sendWatchdogRef.current.timer);
+      sendWatchdogRef.current = {
+        baseLen: sessionRef.current?.messages.length ?? 0,
+        timer: setTimeout(() => {
+          sendWatchdogRef.current = null;
+          pushToast({
+            text: "Your message hasn't appeared in the session log after 12s — Claude may be stuck on a prompt. Check the terminal.",
+            actionLabel: "Open terminal",
+            onAction: () => revealChatTerminal(sid),
+          });
+          if (!document.hasFocus())
+            osNotify("plan", "Message may be stuck — check the terminal");
+        }, 12_000),
+      };
+    },
+    [revealChatTerminal]
+  );
 
   // Chat composer: send a message into the selected chat's `claude` (submits).
   // No optimistic echo / "working" indicator — the transcript (JSONL watcher)
@@ -881,7 +869,7 @@ export function ProjectWorkspace({
       sendToTerminal(tid, text, true);
       // The transcript will confirm delivery; if it doesn't within 12s, the
       // watchdog says so (toast + notification) instead of leaving you lost.
-      armSendWatchdog();
+      armSendWatchdog(selectedSessionId);
     },
     [selectedSessionId, chatPrefix, openedIds, sendToTerminal, armSendWatchdog]
   );
@@ -975,7 +963,8 @@ export function ProjectWorkspace({
   // and nothing new has been written for 20s — that's the shape of a pending
   // permission prompt. Worded as "may", because that's all we can know.
   useEffect(() => {
-    if (!session || !chatTerminalReady) return;
+    if (!session || !chatTerminalReady || !selectedSessionId) return;
+    const sid = selectedSessionId;
     const last = session.messages[session.messages.length - 1];
     if (!last || last.role !== "assistant") return;
     const resultIds = new Set<string>();
@@ -991,7 +980,7 @@ export function ProjectWorkspace({
         {
           text: "Claude may be waiting on a tool approval — check the terminal.",
           actionLabel: "Open terminal",
-          onAction: () => setTerminalOpen(true),
+          onAction: () => revealChatTerminal(sid),
         },
         15_000
       );
@@ -999,7 +988,7 @@ export function ProjectWorkspace({
         osNotify("plan", "Claude may be waiting on an approval");
     }, 20_000);
     return () => clearTimeout(timer);
-  }, [session, chatTerminalReady, setTerminalOpen]);
+  }, [session, chatTerminalReady, selectedSessionId, revealChatTerminal]);
 
   // Agent status: poll the pty's foreground process name (an OS fact) so the
   // header can say whether Claude itself is running in the chat terminal.
@@ -1066,6 +1055,62 @@ export function ProjectWorkspace({
     if (!selectedSessionId) return;
     ensureOpened(`${chatPrefix}${selectedSessionId}`);
   }, [selectedSessionId, chatPrefix, ensureOpened]);
+
+  // ── Scratch shells (sidebar "Terminals" section) ─────────────
+  const shellNumber = useCallback(
+    (id: string) => parseInt(id.slice(shellPrefix.length), 10) || 0,
+    [shellPrefix]
+  );
+
+  const sidebarTerminals = useMemo(
+    () => shells.map((id) => ({ id, label: `Terminal ${shellNumber(id)}` })),
+    [shells, shellNumber]
+  );
+
+  const handleNewShell = useCallback(() => {
+    // Numbering reuses gaps after closes; the pty behind a reused id is fresh.
+    const n = shells.reduce((m, id) => Math.max(m, shellNumber(id)), 0) + 1;
+    const id = `${shellPrefix}${n}`;
+    setShells((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setActiveShellId(id);
+  }, [shells, shellNumber, shellPrefix, setShells, setActiveShellId]);
+
+  const handleSelectShell = useCallback(
+    (id: string) => {
+      setActiveShellId(id);
+    },
+    [setActiveShellId]
+  );
+
+  const removeShell = useCallback(
+    (id: string) => {
+      readyIds.current.delete(id);
+      const remaining = shells.filter((x) => x !== id);
+      setShells(remaining);
+      // Closing the shown shell falls back to the most recent remaining one.
+      setActiveShellId((cur) =>
+        cur === id ? (remaining[remaining.length - 1] ?? null) : cur
+      );
+    },
+    [shells, setShells, setActiveShellId]
+  );
+
+  const handleCloseShell = useCallback(
+    (id: string) => {
+      window.electronAPI.terminalKill(id);
+      removeShell(id);
+    },
+    [removeShell]
+  );
+
+  // A shell pty exiting on its own (e.g. typing `exit`) removes its entry too.
+  useEffect(
+    () =>
+      window.electronAPI.onTerminalExit((id) => {
+        if (id.startsWith(shellPrefix)) removeShell(id);
+      }),
+    [shellPrefix, removeShell]
+  );
 
   // Whenever the dock is open, make sure the active terminal is mounted.
   useEffect(() => {
@@ -1144,6 +1189,22 @@ export function ProjectWorkspace({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // ⌘N starts a new chat in this project.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "n"
+      ) {
+        e.preventDefault();
+        handleNewChat();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleNewChat]);
+
   const startTerminalResize = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
@@ -1169,16 +1230,20 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "j") {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setTerminalOpen((v) => !v);
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        handleNewShell();
       } else if (e.key === "Escape" && terminalOpen) {
         setTerminalOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [terminalOpen, setTerminalOpen]);
+  }, [terminalOpen, setTerminalOpen, handleNewShell]);
 
   return (
     <SidebarProvider
@@ -1196,37 +1261,6 @@ export function ProjectWorkspace({
         />
       )}
       <div className="flex h-full w-full flex-row">
-        <MiddleSidebar
-          tab={tab}
-          onTabChange={setTab}
-          repos={repos}
-          repoGroups={repoGroups}
-          selectedFile={selectedFile}
-          onSelectFile={handleSelectFile}
-          onStageFile={handleStageFile}
-          onUnstageFile={handleUnstageFile}
-          onDiscardFile={handleDiscardFile}
-          onStageAll={handleStageAll}
-          onUnstageAll={handleUnstageAll}
-          onDiscardAll={handleDiscardAll}
-          onStashAll={handleStashAll}
-          syncTargets={syncTargets}
-          onPush={handlePush}
-          onCommit={handleCommit}
-          filesLoading={filesLoading}
-          diffAvailable={repos.length > 0}
-          sessions={sessions}
-          selectedSession={selectedSessionId}
-          onSelectSession={setSelectedSessionId}
-          onSetSessionArchived={handleSetSessionArchived}
-          onRenameSession={handleRenameRequest}
-          onNewChat={handleNewChat}
-          sessionsLoading={sessionsLoading}
-          plans={plans}
-          selectedPlan={selectedPlanPath}
-          onSelectPlan={handleSelectPlan}
-          projectsSidebarOpen={projectsSidebarOpen}
-        />
         <div className="flex min-w-0 flex-1 flex-col">
           <WorkspaceHeader
             project={project}
@@ -1364,6 +1398,7 @@ export function ProjectWorkspace({
                     inactive={!chatTerminalReady}
                     onStart={handleResumeChat}
                     onSend={handleSendChat}
+                    autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
                   />
                 )}
             </div>
@@ -1434,6 +1469,9 @@ export function ProjectWorkspace({
                           }}
                           id={tid}
                           encoded={project.encoded}
+                          label={
+                            tid.startsWith(chatPrefix) ? "Claude" : "Terminal"
+                          }
                           initialCommand={initialCommandFor(tid)}
                           visible={terminalOpen && active}
                           fitSignal={terminalHeight}
@@ -1448,6 +1486,42 @@ export function ProjectWorkspace({
             )}
           </div>
         </div>
+        <MiddleSidebar
+          tab={tab}
+          onTabChange={setTab}
+          repos={repos}
+          repoGroups={repoGroups}
+          selectedFile={selectedFile}
+          onSelectFile={handleSelectFile}
+          onStageFile={handleStageFile}
+          onUnstageFile={handleUnstageFile}
+          onDiscardFile={handleDiscardFile}
+          onStageAll={handleStageAll}
+          onUnstageAll={handleUnstageAll}
+          onDiscardAll={handleDiscardAll}
+          onStashAll={handleStashAll}
+          syncTargets={syncTargets}
+          onPush={handlePush}
+          onCommit={handleCommit}
+          filesLoading={filesLoading}
+          diffAvailable={repos.length > 0}
+          sessions={sessions}
+          selectedSession={selectedSessionId}
+          onSelectSession={setSelectedSessionId}
+          onSetSessionArchived={handleSetSessionArchived}
+          onRenameSession={handleRenameRequest}
+          onNewChat={handleNewChat}
+          sessionsLoading={sessionsLoading}
+          plans={plans}
+          selectedPlan={selectedPlanPath}
+          onSelectPlan={handleSelectPlan}
+          encoded={project.encoded}
+          terminals={sidebarTerminals}
+          activeTerminalId={activeShellId}
+          onNewTerminal={handleNewShell}
+          onSelectTerminal={handleSelectShell}
+          onCloseTerminal={handleCloseShell}
+        />
       </div>
     </SidebarProvider>
   );
