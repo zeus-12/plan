@@ -29,6 +29,8 @@ interface Props {
   /** Whether the panel is currently shown (drives refit + focus). */
   visible: boolean;
   onClose?: () => void;
+  /** ⌘W while this terminal is focused asks to close it (scratch shells). */
+  onRequestClose?: () => void;
   /** Fired once the pty is open and ready to receive input. */
   onReady?: () => void;
   /** Changing this value forces a refit (e.g. the dock height during a drag). */
@@ -84,6 +86,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       initialCommand,
       visible,
       onClose,
+      onRequestClose,
       onReady,
       fitSignal,
     },
@@ -93,6 +96,10 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const { theme } = useTheme();
+
+  // Held in a ref so changing the callback doesn't tear down the pty.
+  const onRequestCloseRef = useRef(onRequestClose);
+  onRequestCloseRef.current = onRequestClose;
 
   // Held in a ref so changing the callback's identity doesn't tear down the pty.
   const onReadyRef = useRef(onReady);
@@ -150,6 +157,20 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     term.attachCustomKeyEventHandler((e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         if (e.type === "keydown") term.clear();
+        return false;
+      }
+      // ⌘W closes this terminal when it's the focused one (scratch shells only;
+      // the agent terminal passes no onRequestClose). Swallow it so it neither
+      // reaches the shell nor triggers a window close.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key.toLowerCase() === "w" &&
+        onRequestCloseRef.current
+      ) {
+        if (e.type === "keydown") {
+          e.preventDefault();
+          onRequestCloseRef.current();
+        }
         return false;
       }
       const seq = controlSequenceFor(e);

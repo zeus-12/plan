@@ -137,7 +137,7 @@ export function ProjectWorkspace({
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
-  const [tab, setTab] = useState<WorkTab>("diffs");
+  const [tab, setTab] = useState<WorkTab>("chat");
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   // ── Files state (per-repo) ───────────────────────────────────

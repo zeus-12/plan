@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@plan/shared/lib/utils";
+import { useSelectionCommit } from "@plan/shared/lib/use-selection-commit";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { Markdown } from "@plan/shared/components/markdown";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
@@ -538,49 +539,53 @@ export const MessageList = memo(function MessageList({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Selection → comment popover (within a single text part)
-  const handleMouseUp = useCallback(() => {
-    requestAnimationFrame(() => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !parentRef.current) return;
-      const range = sel.getRangeAt(0);
-      if (!parentRef.current.contains(range.commonAncestorContainer)) return;
+  // Selection → comment popover (within a single text part). Timing (when the
+  // selection has settled, and catching releases outside the pane) is handled
+  // by useSelectionCommit; this just reads the final selection.
+  const handleSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !parentRef.current) return;
+    const range = sel.getRangeAt(0);
+    if (!parentRef.current.contains(range.commonAncestorContainer)) return;
 
-      // Selection must live entirely inside a single text-part block
-      const startPart = ancestorWithAttr(range.startContainer, "data-part-index");
-      const endPart = ancestorWithAttr(range.endContainer, "data-part-index");
-      if (!startPart || !endPart || startPart !== endPart) {
-        sel.removeAllRanges();
-        return;
-      }
-      const messageUuid = startPart.getAttribute("data-message-uuid") ?? "";
-      const partIndexStr = startPart.getAttribute("data-part-index") ?? "0";
-      const partIndex = parseInt(partIndexStr, 10);
+    // Selection must live entirely inside a single text-part block. Bail
+    // WITHOUT clearing — clearing fights the user mid-gesture and is what made
+    // cross-line selections feel like they "didn't register".
+    const startPart = ancestorWithAttr(range.startContainer, "data-part-index");
+    const endPart = ancestorWithAttr(range.endContainer, "data-part-index");
+    if (!startPart || !endPart || startPart !== endPart) return;
 
-      const text = sel.toString();
-      if (!text.trim()) return;
+    const messageUuid = startPart.getAttribute("data-message-uuid") ?? "";
+    const partIndexStr = startPart.getAttribute("data-part-index") ?? "0";
+    const partIndex = parseInt(partIndexStr, 10);
 
-      const startOffset = offsetWithin(startPart, range.startContainer, range.startOffset);
-      const endOffset = offsetWithin(startPart, range.endContainer, range.endOffset);
-      if (startOffset === -1 || endOffset === -1) return;
+    const text = sel.toString();
+    if (!text.trim()) return;
 
-      const rect = range.getBoundingClientRect();
-      setPending({
-        messageUuid,
-        partIndex,
-        selectedText: text.trim(),
-        startOffset,
-        endOffset,
-        popoverPos: {
-          top: rect.bottom + 8,
-          left: Math.max(
-            8,
-            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
-          ),
-        },
-      });
+    const startOffset = offsetWithin(startPart, range.startContainer, range.startOffset);
+    const endOffset = offsetWithin(startPart, range.endContainer, range.endOffset);
+    if (startOffset === -1 || endOffset === -1) return;
+
+    const rect = range.getBoundingClientRect();
+    setPending({
+      messageUuid,
+      partIndex,
+      selectedText: text.trim(),
+      startOffset,
+      endOffset,
+      popoverPos: {
+        top: rect.bottom + 8,
+        left: Math.max(
+          8,
+          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+        ),
+      },
     });
   }, []);
+
+  // Only listen while this pane is the visible one (the diffs/plans panes stay
+  // mounted-but-hidden; we don't want their selections firing here).
+  useSelectionCommit(handleSelection, visible);
 
   const submitNew = useCallback(
     (comment: string) => {
@@ -634,11 +639,7 @@ export const MessageList = memo(function MessageList({
 
   return (
     <>
-      <div
-        ref={parentRef}
-        onMouseUp={handleMouseUp}
-        className="h-full overflow-auto py-3"
-      >
+      <div ref={parentRef} className="h-full overflow-auto py-3">
         {items.map((m, idx) => {
           const partMap = annotationsByMessage.get(m.uuid);
           const showHeader = showHeaderForRow[idx];

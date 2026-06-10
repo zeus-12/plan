@@ -29,6 +29,7 @@ import {
 } from "../lib/diff-merge";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import { useShikiReady } from "../lib/shiki";
+import { useSelectionCommit } from "../lib/use-selection-commit";
 import { CommentPopover } from "./comment-popover";
 
 /* ── Constants ────────────────────────────────────────────── */
@@ -573,55 +574,55 @@ export function InteractiveDiff({
 
   /* ── Selection ──────────────────────────────────────────── */
 
-  function handleMouseUp() {
-    if (!interactive) return;
-    requestAnimationFrame(() => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !contentRef.current) return;
-      const range = sel.getRangeAt(0);
-      if (!contentRef.current.contains(range.commonAncestorContainer)) return;
+  // Timing (settle multi-clicks, catch releases outside the pane) lives in
+  // useSelectionCommit; this reads the final selection.
+  function handleSelection() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !contentRef.current) return;
+    const range = sel.getRangeAt(0);
+    if (!contentRef.current.contains(range.commonAncestorContainer)) return;
 
-      let side: "left" | "right" = "right";
+    let side: "left" | "right" = "right";
 
-      if (effectiveViewMode === "split") {
-        const startSide = findSplitSide(range.startContainer);
-        const endSide = findSplitSide(range.endContainer);
-        if (!startSide || !endSide || startSide !== endSide) {
-          sel.removeAllRanges();
-          return;
-        }
-        if (startSide === "left") side = "left";
-      }
+    if (effectiveViewMode === "split") {
+      const startSide = findSplitSide(range.startContainer);
+      const endSide = findSplitSide(range.endContainer);
+      // Bail without clearing — clearing mid-gesture is what made cross-line
+      // selections feel like they didn't register.
+      if (!startSide || !endSide || startSide !== endSide) return;
+      if (startSide === "left") side = "left";
+    }
 
-      const text = sel.toString();
-      if (!text.trim()) return;
+    const text = sel.toString();
+    if (!text.trim()) return;
 
-      const start = getAbsoluteOffset(range.startContainer, range.startOffset);
-      const end = getAbsoluteOffset(range.endContainer, range.endOffset);
-      if (start === -1 || end === -1) return;
+    const start = getAbsoluteOffset(range.startContainer, range.startOffset);
+    const end = getAbsoluteOffset(range.endContainer, range.endOffset);
+    if (start === -1 || end === -1) return;
 
-      // In unified view, determine side from the diff line type
-      if (effectiveViewMode === "unified") {
-        const lineIdx = getDiffLineForOffset(start, dLines);
-        if (dLines[lineIdx]?.type === "remove") side = "left";
-      }
+    // In unified view, determine side from the diff line type
+    if (effectiveViewMode === "unified") {
+      const lineIdx = getDiffLineForOffset(start, dLines);
+      if (dLines[lineIdx]?.type === "remove") side = "left";
+    }
 
-      const rect = range.getBoundingClientRect();
-      setPending({
-        selectedText: text.trim(),
-        startOffset: start,
-        endOffset: end,
-        side,
-        popoverPos: {
-          top: rect.bottom + 8,
-          left: Math.max(
-            8,
-            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
-          ),
-        },
-      });
+    const rect = range.getBoundingClientRect();
+    setPending({
+      selectedText: text.trim(),
+      startOffset: start,
+      endOffset: end,
+      side,
+      popoverPos: {
+        top: rect.bottom + 8,
+        left: Math.max(
+          8,
+          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+        ),
+      },
     });
   }
+
+  useSelectionCommit(handleSelection, interactive);
 
   function submitNew(comment: string) {
     if (!pending || !onAddAnnotation) return;
@@ -1242,7 +1243,6 @@ export function InteractiveDiff({
 
       <div
         ref={contentRef}
-        onMouseUp={handleMouseUp}
         onClick={(e) => {
           if (!mergeEnabled) return;
           // Don't trigger on a drag-select.

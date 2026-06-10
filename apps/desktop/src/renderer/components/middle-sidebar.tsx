@@ -1,4 +1,4 @@
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -78,6 +78,24 @@ function totalUnread(plans: Plan[]): number {
   return plans.reduce((s, p) => s + p.unread, 0);
 }
 
+function ChevronIcon({ up }: { up: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn("transition-transform duration-200", up && "rotate-180")}
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
 function PlusIcon() {
   return (
     <svg
@@ -154,17 +172,20 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onCloseTerminal,
 }: Props) {
   const sidebar = useSidebar();
+  // Minimise the embedded terminal pane while keeping the tab strip visible.
+  // Local UI state — independent of the dock and ⌘J.
+  const [paneCollapsed, setPaneCollapsed] = useState(false);
 
-  // ⌘1 / ⌘2 / ⌘3 → swap tabs
+  // ⌘1 / ⌘2 / ⌘3 → swap tabs (match the visual order: Chat, Diffs, Plans)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key === "1") {
         e.preventDefault();
-        onTabChange("diffs");
+        onTabChange("chat");
       } else if (e.key === "2") {
         e.preventDefault();
-        onTabChange("chat");
+        onTabChange("diffs");
       } else if (e.key === "3") {
         e.preventDefault();
         onTabChange("plans");
@@ -173,6 +194,34 @@ export const MiddleSidebar = memo(function MiddleSidebar({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onTabChange]);
+
+  // ⌘T → toggle the embedded terminal pane (⌘J stays the coding-agent dock).
+  // Reveals a hidden sidebar and spawns a first shell when there are none, so
+  // one keystroke always lands you in a terminal.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        !(e.metaKey || e.ctrlKey) ||
+        e.shiftKey ||
+        e.altKey ||
+        e.key.toLowerCase() !== "t"
+      )
+        return;
+      e.preventDefault();
+      const wasOpen = sidebar.open;
+      if (!wasOpen) sidebar.setOpen(true);
+      if (terminals.length === 0) {
+        onNewTerminal();
+        setPaneCollapsed(false);
+      } else if (!wasOpen) {
+        setPaneCollapsed(false);
+      } else {
+        setPaneCollapsed((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [sidebar, terminals.length, onNewTerminal]);
 
   const plansBadge = totalUnread(plans);
   const stagedGroups = repoGroups.filter((g) => g.staged.length > 0);
@@ -188,8 +237,8 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         <SidebarHeader className="h-[44px] justify-center px-3 pt-2 pb-2 [-webkit-app-region:drag]">
           <div className="[-webkit-app-region:no-drag]">
             <TabsList>
-              <TabsTrigger value="diffs">Diffs</TabsTrigger>
               <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="diffs">Diffs</TabsTrigger>
               <TabsTrigger value="plans" className="relative">
                 Plans
                 {plansBadge > 0 && (
@@ -306,55 +355,78 @@ export const MiddleSidebar = memo(function MiddleSidebar({
 
       {/* ── Terminals: always-present tab strip + embedded pane ── */}
       <div className="shrink-0 border-t border-[var(--border)]">
-        <div className="flex items-center gap-4 overflow-x-auto px-3 pt-2">
-          {terminals.map((t) => {
-            const active = t.id === activeTerminalId;
-            return (
-              <button
-                key={t.id}
-                onClick={() => onSelectTerminal(t.id)}
-                className={cn(
-                  "group flex shrink-0 items-center gap-1.5 border-b-2 pb-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
-                  active
-                    ? "border-[var(--text)] text-[var(--text)]"
-                    : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
-                )}
-              >
-                <span>{t.label}</span>
-                <span
-                  role="button"
-                  aria-label={`Close ${t.label}`}
-                  title="Close terminal"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseTerminal(t.id);
+        <div className="flex items-stretch gap-2 px-3 pt-2">
+          {terminals.length > 0 && (
+            <button
+              onClick={() => setPaneCollapsed((v) => !v)}
+              title={paneCollapsed ? "Expand terminal" : "Minimise terminal"}
+              aria-label={
+                paneCollapsed ? "Expand terminal" : "Minimise terminal"
+              }
+              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            >
+              <ChevronIcon up={paneCollapsed} />
+            </button>
+          )}
+          <div className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto">
+            {terminals.map((t) => {
+              const active = t.id === activeTerminalId;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    onSelectTerminal(t.id);
+                    setPaneCollapsed(false);
                   }}
                   className={cn(
-                    "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
-                    active
-                      ? "text-[var(--text-tertiary)]"
-                      : "opacity-0 group-hover:opacity-100"
+                    "group flex shrink-0 items-center gap-1.5 border-b-2 pb-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
+                    active && !paneCollapsed
+                      ? "border-[var(--text)] text-[var(--text)]"
+                      : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
                   )}
                 >
-                  ×
-                </span>
-              </button>
-            );
-          })}
-          <button
-            onClick={onNewTerminal}
-            title="New terminal (⌘⇧J)"
-            aria-label="New terminal"
-            className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-          >
-            <PlusIcon />
-          </button>
+                  <span>{t.label}</span>
+                  <span
+                    role="button"
+                    aria-label={`Close ${t.label}`}
+                    title="Close terminal"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTerminal(t.id);
+                    }}
+                    className={cn(
+                      "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
+                      active
+                        ? "text-[var(--text-tertiary)]"
+                        : "opacity-0 group-hover:opacity-100"
+                    )}
+                  >
+                    ×
+                  </span>
+                </button>
+              );
+            })}
+            {/* Immediately right of the last tab; scrolls with the strip. */}
+            <button
+              onClick={onNewTerminal}
+              title="New terminal (⌘⇧J)"
+              aria-label="New terminal"
+              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            >
+              <PlusIcon />
+            </button>
+          </div>
         </div>
         {/* Embedded terminal pane: the active shell renders right here, sized
             to this bottom section only. All opened shells stay mounted
-            (hidden) so their scrollback survives tab switches. */}
+            (hidden) so their scrollback survives tab switches and minimise. */}
         {terminals.length > 0 && (
-          <div className="relative h-72 border-t border-[var(--border)]">
+          <div
+            className={cn(
+              "relative border-t border-[var(--border)] transition-all duration-200",
+              paneCollapsed ? "h-0 border-t-0" : "h-72"
+            )}
+          >
             {terminals.map((t) => {
               const active = t.id === activeTerminalId;
               return (
@@ -362,14 +434,15 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                   key={t.id}
                   className={cn(
                     "absolute inset-0 overflow-hidden",
-                    !active && "hidden"
+                    (!active || paneCollapsed) && "hidden"
                   )}
                 >
                   <TerminalPanel
                     id={t.id}
                     encoded={encoded}
                     showHeader={false}
-                    visible={active && sidebar.open}
+                    visible={active && !paneCollapsed && sidebar.open}
+                    onRequestClose={() => onCloseTerminal(t.id)}
                   />
                 </div>
               );
