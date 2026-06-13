@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
-import { join } from "path";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, protocol, shell } from "electron";
+import { extname, join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
-import { stat, writeFile } from "fs/promises";
+import { readFile, stat, writeFile } from "fs/promises";
 import {
   listProjects,
   resolveProjectCwd,
@@ -39,6 +39,7 @@ import {
   recordNewPlan,
   recordPlanChange,
   removePlan,
+  setPlanArchived,
 } from "./plans-store";
 import {
   setTerminalCallbacks,
@@ -72,7 +73,79 @@ const isMac = process.platform === "darwin";
 
 let mainWindow: BrowserWindow | null = null;
 
+// ── Local image protocol ───────────────────────────────────────────
+// Transcripts reference pasted images by file path (e.g. the synthetic
+// "[Image: source: /var/.../plan-paste-x.png]" note). The renderer can't load
+// `file://` from its http dev origin (webSecurity), so we serve those files
+// through `plan-media://` — the image bytes stream straight from disk, no copy
+// and no base64. Must be declared privileged BEFORE the app is ready.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "plan-media",
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
+
+const IMG_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+};
+
+function registerMediaProtocol() {
+  protocol.handle("plan-media", async (request) => {
+    try {
+      const path = new URL(request.url).searchParams.get("p");
+      if (!path) return new Response("missing path", { status: 400 });
+      const mime = IMG_MIME[extname(path).toLowerCase()];
+      // Only ever serve image files — never arbitrary disk paths.
+      if (!mime) return new Response("unsupported", { status: 415 });
+      const data = await readFile(path);
+      return new Response(data, { headers: { "content-type": mime } });
+    } catch {
+      // Missing/expired file → 404; the renderer shows an "unavailable" note
+      // rather than a broken image.
+      return new Response("not found", { status: 404 });
+    }
+  });
+}
+
 // ── Menu ───────────────────────────────────────────────────────────
+
+function sendSwitcherCycle(shift: boolean) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("switcher:cycle", { shift });
+}
+
+// Ctrl+Tab / Ctrl+Shift+Tab via OS-level hotkeys. This is the dependable way
+// to catch Ctrl+Tab on macOS — Chromium swallows it before the page's keydown,
+// and a menu accelerator for Tab is unreliable. globalShortcut taps the event
+// at the OS level, so it always fires. We register only while OUR window is
+// focused (toggled on focus/blur) so the combo isn't hijacked from other apps.
+// Commit-on-release still works: globalShortcut consumes Ctrl+Tab but not a
+// lone Ctrl keyup, so the renderer still sees the release.
+let switcherRegistered = false;
+
+function registerSwitcherShortcuts() {
+  if (switcherRegistered) return;
+  const a = globalShortcut.register("Control+Tab", () => sendSwitcherCycle(false));
+  const b = globalShortcut.register("Control+Shift+Tab", () =>
+    sendSwitcherCycle(true)
+  );
+  switcherRegistered = a || b;
+  console.log("[switcher] globalShortcut registered:", { ctrlTab: a, ctrlShiftTab: b });
+}
+
+function unregisterSwitcherShortcuts() {
+  if (!switcherRegistered) return;
+  globalShortcut.unregister("Control+Tab");
+  globalShortcut.unregister("Control+Shift+Tab");
+  switcherRegistered = false;
+}
 
 function buildMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -156,11 +229,34 @@ function createMainWindow(): BrowserWindow {
     if (mainWindow === win) mainWindow = null;
   });
 
+  // Scope the Ctrl+Tab hotkeys to when this window actually has focus.
+  win.on("focus", registerSwitcherShortcuts);
+  win.on("blur", unregisterSwitcherShortcuts);
+
   // Markdown links (target=_blank) open in the user's real browser, not a
   // blank Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  // Ctrl+Tab / Ctrl+Shift+Tab switcher. Chromium swallows plain Ctrl+Tab
+  // before the page's keydown sees it, and a macOS menu accelerator for Tab is
+  // unreliable (often consumed by AppKit without firing). before-input-event is
+  // the dependable interception point: it fires before the page, so we cancel
+  // the keystroke and forward a cycle to the renderer, which owns the modal and
+  // commits when the user releases Ctrl.
+  win.webContents.on("before-input-event", (event, input) => {
+    if (
+      input.type === "keyDown" &&
+      input.key === "Tab" &&
+      input.control &&
+      !input.meta &&
+      !input.alt
+    ) {
+      event.preventDefault();
+      sendSwitcherCycle(input.shift);
+    }
   });
 
   mainWindow = win;
@@ -399,6 +495,13 @@ function registerIpc() {
     markPlanRead(filePath);
     return { ok: true };
   });
+  ipcMain.handle(
+    "plans:setArchived",
+    async (_e, filePath: string, archived: boolean) => {
+      setPlanArchived(filePath, archived);
+      return { ok: true };
+    }
+  );
 
   // Git
   ipcMain.handle("git:branch", async (_e, encoded: string, subPath: string = "") =>
@@ -558,12 +661,16 @@ function sendPlansEvent(e: { kind: string; filePath: string }) {
 // ── App lifecycle ──────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  registerMediaProtocol();
   buildMenu();
   registerIpc();
   bridgeWatcher();
   bridgeTerminal();
 
   createMainWindow();
+  // Register immediately too — the window opens focused, but don't rely solely
+  // on the focus event's timing.
+  registerSwitcherShortcuts();
 
   // Auto-watch every existing project, plus the root for new ones.
   const projects = await listProjects();
@@ -591,4 +698,8 @@ app.on("before-quit", async () => {
   killAllTerminals();
   await stopPlansWatcher();
   await flushPlansWrites();
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });

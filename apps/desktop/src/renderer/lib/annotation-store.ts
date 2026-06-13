@@ -12,9 +12,11 @@ import type { ChatAnnotation } from "../components/message-list";
 interface ProjectAnnotations {
   byFile: Record<string, Annotation[]>;
   chat: ChatAnnotation[];
+  /** Plan-diff comments, keyed by the plan's file path. */
+  byPlan: Record<string, Annotation[]>;
 }
 
-const EMPTY: ProjectAnnotations = { byFile: {}, chat: [] };
+const EMPTY: ProjectAnnotations = { byFile: {}, chat: [], byPlan: {} };
 
 const store = new Map<string, ProjectAnnotations>();
 const listeners = new Set<() => void>();
@@ -40,6 +42,8 @@ export function useProjectAnnotations(encoded: string): {
   setAnnotationsByFile: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
   chatAnnotations: ChatAnnotation[];
   setChatAnnotations: Dispatch<SetStateAction<ChatAnnotation[]>>;
+  annotationsByPlan: Record<string, Annotation[]>;
+  setAnnotationsByPlan: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
 } {
   const snapshot = useSyncExternalStore(
     subscribe,
@@ -72,10 +76,24 @@ export function useProjectAnnotations(encoded: string): {
     [encoded]
   );
 
+  const setAnnotationsByPlan = useCallback<
+    Dispatch<SetStateAction<Record<string, Annotation[]>>>
+  >(
+    (update) => {
+      const cur = get(encoded);
+      const next = typeof update === "function" ? update(cur.byPlan) : update;
+      store.set(encoded, { ...cur, byPlan: next });
+      emit();
+    },
+    [encoded]
+  );
+
   return {
     annotationsByFile: snapshot.byFile,
     setAnnotationsByFile,
     chatAnnotations: snapshot.chat,
     setChatAnnotations,
+    annotationsByPlan: snapshot.byPlan,
+    setAnnotationsByPlan,
   };
 }

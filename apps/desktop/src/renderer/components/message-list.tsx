@@ -303,6 +303,44 @@ interface ToolResult {
   isError?: boolean;
 }
 
+// Claude Code records a pasted image as a standalone message whose text is just
+// "[Image: source: <path>]". Render those from the file on disk, served via the
+// plan-media:// protocol (no base64, no copy).
+function imageOnlyPaths(text: string): string[] | null {
+  const re = /\[Image: source:\s*(.+?)\s*\]/g;
+  const paths: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) paths.push(m[1]);
+  if (paths.length === 0) return null;
+  // Only treat the message as an image if that's ALL it contains.
+  const remainder = text.replace(/\[Image: source:\s*(.+?)\s*\]/g, "").trim();
+  return remainder.length === 0 ? paths : null;
+}
+
+function mediaUrl(path: string): string {
+  return `plan-media://image/?p=${encodeURIComponent(path)}`;
+}
+
+function TranscriptImage({ path }: { path: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="my-1 rounded-md border border-dashed border-[var(--border)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+        Image unavailable
+        <div className="truncate text-[var(--text-tertiary)]">{path}</div>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={mediaUrl(path)}
+      alt="Attached image"
+      onError={() => setFailed(true)}
+      className="my-1 max-h-[340px] max-w-full rounded-md border border-[var(--border)] object-contain"
+    />
+  );
+}
+
 interface MessagePartViewProps {
   part: MessagePart;
   partIndex: number;
@@ -331,7 +369,17 @@ const MessagePartView = memo(function MessagePartView({
   onSendKeys,
 }: MessagePartViewProps) {
   switch (part.kind) {
-    case "text":
+    case "text": {
+      const imgPaths = imageOnlyPaths(part.text);
+      if (imgPaths) {
+        return (
+          <div className="flex flex-col gap-2">
+            {imgPaths.map((p, i) => (
+              <TranscriptImage key={`${i}:${p}`} path={p} />
+            ))}
+          </div>
+        );
+      }
       return (
         <MarkdownText
           text={part.text}
@@ -342,6 +390,7 @@ const MessagePartView = memo(function MessagePartView({
           onClickAnnotation={onClickAnnotation}
         />
       );
+    }
     case "thinking":
       return (
         <CollapsibleBlock label="💭 Thinking" preview={truncate(part.text, 120)}>
@@ -548,31 +597,40 @@ export const MessageList = memo(function MessageList({
     const range = sel.getRangeAt(0);
     if (!parentRef.current.contains(range.commonAncestorContainer)) return;
 
-    // Selection must live entirely inside a single text-part block. Bail
-    // WITHOUT clearing — clearing fights the user mid-gesture and is what made
-    // cross-line selections feel like they "didn't register".
-    const startPart = ancestorWithAttr(range.startContainer, "data-part-index");
-    const endPart = ancestorWithAttr(range.endContainer, "data-part-index");
-    if (!startPart || !endPart || startPart !== endPart) return;
+    // Anchor on the part the selection STARTS in. A triple-click (or a
+    // double-click-drag) often lands the end boundary just past the block — in
+    // a sibling/ancestor with no data-part-index — so requiring both endpoints
+    // in the same part silently dropped those. Instead we clamp the end into
+    // the start part; cross-block selections just comment the first block.
+    const part =
+      ancestorWithAttr(range.startContainer, "data-part-index") ??
+      ancestorWithAttr(range.endContainer, "data-part-index");
+    if (!part) return;
 
-    const messageUuid = startPart.getAttribute("data-message-uuid") ?? "";
-    const partIndexStr = startPart.getAttribute("data-part-index") ?? "0";
-    const partIndex = parseInt(partIndexStr, 10);
+    const messageUuid = part.getAttribute("data-message-uuid") ?? "";
+    const partIndex = parseInt(part.getAttribute("data-part-index") ?? "0", 10);
+    const fullText = part.textContent ?? "";
 
-    const text = sel.toString();
-    if (!text.trim()) return;
+    // Offsets within the part; an endpoint outside it clamps to the part's edge.
+    const rawStart = offsetWithin(part, range.startContainer, range.startOffset);
+    const rawEnd = offsetWithin(part, range.endContainer, range.endOffset);
+    let start = rawStart === -1 ? 0 : rawStart;
+    let end = rawEnd === -1 ? fullText.length : rawEnd;
+    if (start > end) [start, end] = [end, start];
 
-    const startOffset = offsetWithin(startPart, range.startContainer, range.startOffset);
-    const endOffset = offsetWithin(startPart, range.endContainer, range.endOffset);
-    if (startOffset === -1 || endOffset === -1) return;
+    // Trim whitespace by moving the offsets, so text and offsets stay in sync.
+    while (start < end && /\s/.test(fullText[start])) start++;
+    while (end > start && /\s/.test(fullText[end - 1])) end--;
+    const selectedText = fullText.slice(start, end);
+    if (!selectedText) return;
 
     const rect = range.getBoundingClientRect();
     setPending({
       messageUuid,
       partIndex,
-      selectedText: text.trim(),
-      startOffset,
-      endOffset,
+      selectedText,
+      startOffset: start,
+      endOffset: end,
       popoverPos: {
         top: rect.bottom + 8,
         left: Math.max(

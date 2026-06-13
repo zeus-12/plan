@@ -1,8 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
-import { MessageOutput } from "@plan/shared/components/message-output";
 import {
   detectLanguage,
   languageFromPath,
@@ -11,6 +10,20 @@ import type { Plan } from "../../shared-types";
 
 interface Props {
   plan: Plan;
+  /** Comments live in the project-wide store so they join the unified
+   *  "Add to chat" buffer alongside code-diff and chat comments. */
+  annotations: Annotation[];
+  onAddAnnotation: (
+    selectedText: string,
+    startOffset: number,
+    endOffset: number,
+    comment: string,
+    side: "left" | "right"
+  ) => void;
+  onUpdateAnnotation: (id: string, comment: string) => void;
+  onRemoveAnnotation: (id: string) => void;
+  /** Clear this plan's comments when the compared text changes (offsets shift). */
+  onResetAnnotations: () => void;
 }
 
 function basename(filePath: string): string {
@@ -18,16 +31,36 @@ function basename(filePath: string): string {
   return i === -1 ? filePath : filePath.slice(i + 1);
 }
 
-export function PlanViewer({ plan }: Props) {
+export function PlanViewer({
+  plan,
+  annotations,
+  onAddAnnotation,
+  onUpdateAnnotation,
+  onRemoveAnnotation,
+  onResetAnnotations,
+}: Props) {
   const [settings, updateSettings] = useDiffSettings();
-  const [compareIdx, setCompareIdx] = useState<number>(() =>
-    plan.versions.length > 1 ? plan.versions.length - 2 : 0
-  );
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
   const latestIdx = plan.versions.length - 1;
   const latest = plan.versions[latestIdx];
+  const latestId = latest?.id;
   const isFirstVersion = plan.versions.length <= 1;
+
+  // Default to the version immediately BEFORE the latest, so the diff always
+  // shows the most recent change. The user can still pick an older base.
+  const [compareIdx, setCompareIdx] = useState<number>(() =>
+    Math.max(0, latestIdx - 1)
+  );
+
+  // When a new version streams in, the latest changes — snap the base back to
+  // "previous" so the diff keeps tracking the newest change instead of being
+  // frozen against whatever version was latest when this view first mounted.
+  const seenLatestRef = useRef(latestId);
+  useEffect(() => {
+    if (seenLatestRef.current === latestId) return;
+    seenLatestRef.current = latestId;
+    setCompareIdx(Math.max(0, plan.versions.length - 2));
+  }, [latestId, plan.versions.length]);
 
   const leftText = isFirstVersion ? "" : plan.versions[compareIdx]?.text ?? "";
   const rightText = latest?.text ?? "";
@@ -39,45 +72,20 @@ export function PlanViewer({ plan }: Props) {
     return detected === "plaintext" ? "markdown" : detected;
   }, [plan.filePath, rightText]);
 
-  // Reset annotations whenever the selected text changes (offsets shift)
+  // Reset annotations whenever the compared text changes (offsets shift). Skip
+  // the first run so restored comments survive a remount (e.g. switching plans).
   const textSig = `${leftText.length}:${rightText.length}`;
-  useMemo(() => {
-    setAnnotations([]);
-    return textSig;
-  }, [textSig]);
-
-  const addAnnotation = useCallback(
-    (
-      selectedText: string,
-      startOffset: number,
-      endOffset: number,
-      comment: string,
-      side: "left" | "right"
-    ) => {
-      setAnnotations((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          selectedText,
-          startOffset,
-          endOffset,
-          comment,
-          side,
-        },
-      ]);
-    },
-    []
-  );
-
-  const updateAnnotation = useCallback((id: string, comment: string) => {
-    setAnnotations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, comment } : a))
-    );
-  }, []);
-
-  const removeAnnotation = useCallback((id: string) => {
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  const prevSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevSigRef.current === null) {
+      prevSigRef.current = textSig;
+      return;
+    }
+    if (prevSigRef.current !== textSig) {
+      prevSigRef.current = textSig;
+      onResetAnnotations();
+    }
+  }, [textSig, onResetAnnotations]);
 
   if (!latest) {
     return (
@@ -128,24 +136,11 @@ export function PlanViewer({ plan }: Props) {
           isFirstVersion={isFirstVersion}
           language={language}
           annotations={annotations}
-          onAddAnnotation={addAnnotation}
-          onUpdateAnnotation={updateAnnotation}
-          onRemoveAnnotation={removeAnnotation}
+          onAddAnnotation={onAddAnnotation}
+          onUpdateAnnotation={onUpdateAnnotation}
+          onRemoveAnnotation={onRemoveAnnotation}
         />
       </div>
-
-      {annotations.length > 0 && (
-        <div className="border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
-          <MessageOutput
-            annotations={annotations}
-            options={{
-              intro: "I have some feedback on the plan:",
-              leftLabel: "the previous version",
-              rightLabel: "the current version",
-            }}
-          />
-        </div>
-      )}
     </div>
   );
 }

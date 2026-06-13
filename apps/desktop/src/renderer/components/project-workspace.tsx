@@ -32,6 +32,8 @@ import { useProjectTerminals } from "../lib/terminal-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { ThemeMenu } from "./theme-menu";
+import { SwitcherOverlay } from "./switcher-overlay";
+import { useTabSwitcher } from "../lib/use-tab-switcher";
 import { Toasts } from "./toasts";
 import { mergeSession } from "../lib/merge-session";
 import { osNotify, pushToast } from "../lib/toast-store";
@@ -172,6 +174,8 @@ export function ProjectWorkspace({
     setAnnotationsByFile,
     chatAnnotations,
     setChatAnnotations,
+    annotationsByPlan,
+    setAnnotationsByPlan,
   } = useProjectAnnotations(project.encoded);
   /** subPath currently being pushed (for the sync-bar spinner). */
   const [pushingRepo, setPushingRepo] = useState<string | null>(null);
@@ -304,6 +308,12 @@ export function ProjectWorkspace({
   const aggregatedDiffAnnotations = useMemo(
     () => Object.values(annotationsByFile).flat(),
     [annotationsByFile]
+  );
+
+  // Plan comments across all plans — combined into the same compose buffer.
+  const aggregatedPlanAnnotations = useMemo(
+    () => Object.values(annotationsByPlan).flat(),
+    [annotationsByPlan]
   );
 
   // ── Git actions (routed via subPath) ─────────────────────────
@@ -601,6 +611,78 @@ export function ProjectWorkspace({
     [plans, selectedPlanPath]
   );
 
+  const handleSetPlanArchived = useCallback(
+    async (filePath: string, archived: boolean) => {
+      await window.electronAPI.setPlanArchived(filePath, archived);
+      // Don't keep an archived plan open in the viewer.
+      if (archived)
+        setSelectedPlanPath((cur) => (cur === filePath ? null : cur));
+      refreshPlans();
+    },
+    [refreshPlans]
+  );
+
+  // ── Plan annotation handlers (keyed by plan filePath in the shared store,
+  //    so plan comments join the same compose buffer as code + chat) ────────
+  const planAnnotations = useMemo<Annotation[]>(
+    () => (selectedPlanPath ? annotationsByPlan[selectedPlanPath] ?? [] : []),
+    [annotationsByPlan, selectedPlanPath]
+  );
+  const addPlanAnnotation = useCallback(
+    (
+      selectedText: string,
+      startOffset: number,
+      endOffset: number,
+      comment: string,
+      side: "left" | "right"
+    ) => {
+      if (!selectedPlanPath) return;
+      setAnnotationsByPlan((prev) => ({
+        ...prev,
+        [selectedPlanPath]: [
+          ...(prev[selectedPlanPath] ?? []),
+          {
+            id: crypto.randomUUID(),
+            selectedText,
+            startOffset,
+            endOffset,
+            comment,
+            side,
+          },
+        ],
+      }));
+    },
+    [selectedPlanPath, setAnnotationsByPlan]
+  );
+  const updatePlanAnnotation = useCallback(
+    (id: string, comment: string) => {
+      if (!selectedPlanPath) return;
+      setAnnotationsByPlan((prev) => ({
+        ...prev,
+        [selectedPlanPath]: (prev[selectedPlanPath] ?? []).map((a) =>
+          a.id === id ? { ...a, comment } : a
+        ),
+      }));
+    },
+    [selectedPlanPath, setAnnotationsByPlan]
+  );
+  const removePlanAnnotation = useCallback(
+    (id: string) => {
+      if (!selectedPlanPath) return;
+      setAnnotationsByPlan((prev) => ({
+        ...prev,
+        [selectedPlanPath]: (prev[selectedPlanPath] ?? []).filter(
+          (a) => a.id !== id
+        ),
+      }));
+    },
+    [selectedPlanPath, setAnnotationsByPlan]
+  );
+  const resetPlanAnnotations = useCallback(() => {
+    if (!selectedPlanPath) return;
+    setAnnotationsByPlan((prev) => ({ ...prev, [selectedPlanPath]: [] }));
+  }, [selectedPlanPath, setAnnotationsByPlan]);
+
   // ── Aggregated annotations ───────────────────────────────────
   const aggregatedChatAnnotations = useMemo<Annotation[]>(
     () =>
@@ -618,7 +700,9 @@ export function ProjectWorkspace({
   // One outgoing buffer combining code-diff annotations and chat annotations,
   // so a single compose box can Copy / Send-to-terminal everything at once.
   const totalComments =
-    aggregatedDiffAnnotations.length + aggregatedChatAnnotations.length;
+    aggregatedDiffAnnotations.length +
+    aggregatedChatAnnotations.length +
+    aggregatedPlanAnnotations.length;
   const composedMessage = useMemo(() => {
     const parts: string[] = [];
     if (aggregatedDiffAnnotations.length > 0) {
@@ -631,6 +715,16 @@ export function ProjectWorkspace({
           })
       );
     }
+    if (aggregatedPlanAnnotations.length > 0) {
+      parts.push(
+        "On the plan:\n\n" +
+          generateMessage(aggregatedPlanAnnotations, {
+            intro: "",
+            leftLabel: "the previous version",
+            rightLabel: "the current version",
+          })
+      );
+    }
     if (aggregatedChatAnnotations.length > 0) {
       parts.push(
         "On the conversation:\n\n" +
@@ -638,7 +732,11 @@ export function ProjectWorkspace({
       );
     }
     return parts.join("\n\n");
-  }, [aggregatedDiffAnnotations, aggregatedChatAnnotations]);
+  }, [
+    aggregatedDiffAnnotations,
+    aggregatedPlanAnnotations,
+    aggregatedChatAnnotations,
+  ]);
 
   // ── Chat annotation handlers ─────────────────────────────────
   const addChatAnnotation = useCallback(
@@ -1041,20 +1139,29 @@ export function ProjectWorkspace({
       setTab("chat");
       setAnnotationsByFile({});
       setChatAnnotations([]);
+      setAnnotationsByPlan({});
       requestAnimationFrame(() => {
         chatInputRef.current?.append(text);
         chatInputRef.current?.focus();
       });
     },
-    [setAnnotationsByFile, setChatAnnotations]
+    [setAnnotationsByFile, setChatAnnotations, setAnnotationsByPlan]
   );
 
   // "Run terminal": start `claude --resume` for the selected session in the
-  // background (does NOT reveal the dock — ⌘J shows it). Enables the composer.
+  // background (does NOT reveal the dock). Enables the composer.
   const handleResumeChat = useCallback(() => {
     if (!selectedSessionId) return;
     ensureOpened(`${chatPrefix}${selectedSessionId}`);
   }, [selectedSessionId, chatPrefix, ensureOpened]);
+
+  // ⌘J's connect path: hook the selected chat up to Claude if it isn't already
+  // (runs `claude --resume` in the background) AND reveal the dock — one action,
+  // no separate "Connect" step.
+  const connectAndShowChat = useCallback(() => {
+    if (selectedSessionId) ensureOpened(`${chatPrefix}${selectedSessionId}`);
+    setTerminalOpen(true);
+  }, [selectedSessionId, chatPrefix, ensureOpened, setTerminalOpen]);
 
   // ── Scratch shells (sidebar "Terminals" section) ─────────────
   const shellNumber = useCallback(
@@ -1116,22 +1223,6 @@ export function ProjectWorkspace({
   useEffect(() => {
     if (terminalOpen) ensureOpened(activeTerminalId);
   }, [terminalOpen, activeTerminalId, ensureOpened]);
-
-  // ⌘⇧T starts the selected chat's terminal.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        e.key.toLowerCase() === "t"
-      ) {
-        e.preventDefault();
-        handleResumeChat();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [handleResumeChat]);
 
   // ── Session rename (modal; persisted in plan-desktop.json) ───
   const [renaming, setRenaming] = useState<{
@@ -1233,7 +1324,10 @@ export function ProjectWorkspace({
       const meta = e.metaKey || e.ctrlKey;
       if (meta && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        setTerminalOpen((v) => !v);
+        // Not connected to Claude yet → connect this chat and reveal the dock.
+        // Already connected → plain toggle.
+        if (selectedSessionId && !chatTerminalReady) connectAndShowChat();
+        else setTerminalOpen((v) => !v);
       } else if (meta && e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         handleNewShell();
@@ -1243,7 +1337,36 @@ export function ProjectWorkspace({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [terminalOpen, setTerminalOpen, handleNewShell]);
+  }, [
+    terminalOpen,
+    setTerminalOpen,
+    handleNewShell,
+    selectedSessionId,
+    chatTerminalReady,
+    connectAndShowChat,
+  ]);
+
+  // Ctrl+Shift+Tab: cycle this project's chat sessions in a modal, committing
+  // on Ctrl-release. Lands you on the Chat tab. Archived chats are excluded.
+  const activeSessions = useMemo(
+    () => sessions.filter((s) => !s.archived),
+    [sessions]
+  );
+  const sessionIndex = Math.max(
+    0,
+    activeSessions.findIndex((s) => s.sessionId === selectedSessionId)
+  );
+  const sessionSwitcher = useTabSwitcher({
+    id: "sessions",
+    enabled: activeSessions.length > 1,
+    requireShift: true,
+    items: activeSessions,
+    currentIndex: sessionIndex,
+    onCommit: (s) => {
+      setSelectedSessionId(s.sessionId);
+      setTab("chat");
+    },
+  });
 
   return (
     <SidebarProvider
@@ -1253,6 +1376,17 @@ export function ProjectWorkspace({
     >
       {confirmDialog}
       <Toasts />
+      {sessionSwitcher.active && (
+        <SwitcherOverlay
+          title="Chat sessions"
+          index={sessionSwitcher.index}
+          items={activeSessions.map((s) => ({
+            key: s.sessionId,
+            label: s.title ?? "Untitled chat",
+            sub: `${s.messageCount} message${s.messageCount === 1 ? "" : "s"}`,
+          }))}
+        />
+      )}
       {renaming && (
         <RenameSessionDialog
           initialName={renaming.name}
@@ -1361,12 +1495,12 @@ export function ProjectWorkspace({
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={handleResumeChat}
-                          title="Connect this chat to Claude (runs claude --resume in a background terminal — ⌘J shows it)"
+                          onClick={connectAndShowChat}
+                          title="Connect this chat to Claude (runs claude --resume) and open the terminal"
                           className="flex items-center gap-1.5"
                         >
                           <span>Connect</span>
-                          <Kbd keys={["⌘", "⇧", "T"]} />
+                          <Kbd keys={["⌘", "J"]} />
                         </Button>
                       ))}
                   </div>
@@ -1410,7 +1544,15 @@ export function ProjectWorkspace({
               )}
             >
                 {selectedPlan ? (
-                  <PlanViewer key={selectedPlan.filePath} plan={selectedPlan} />
+                  <PlanViewer
+                    key={selectedPlan.filePath}
+                    plan={selectedPlan}
+                    annotations={planAnnotations}
+                    onAddAnnotation={addPlanAnnotation}
+                    onUpdateAnnotation={updatePlanAnnotation}
+                    onRemoveAnnotation={removePlanAnnotation}
+                    onResetAnnotations={resetPlanAnnotations}
+                  />
                 ) : (
                   <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
                     {plans.length === 0
@@ -1515,6 +1657,7 @@ export function ProjectWorkspace({
           plans={plans}
           selectedPlan={selectedPlanPath}
           onSelectPlan={handleSelectPlan}
+          onSetPlanArchived={handleSetPlanArchived}
           encoded={project.encoded}
           terminals={sidebarTerminals}
           activeTerminalId={activeShellId}
