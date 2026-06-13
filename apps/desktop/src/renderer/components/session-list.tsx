@@ -72,20 +72,8 @@ export function SessionList({
           <span>{archived.length}</span>
         </button>
       ) : (
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-          <span>Recent sessions</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onNewChat}
-                aria-label="New chat"
-                className="flex h-5 w-5 items-center justify-center rounded text-[14px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-              >
-                +
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">New chat</TooltipContent>
-          </Tooltip>
+        <div className="flex shrink-0 items-center border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+          Recent sessions
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto">
@@ -154,8 +142,18 @@ export function SessionList({
           </div>
         )}
       </div>
-      {archived.length > 0 && (
-        <div className="flex shrink-0 items-center justify-end border-t border-[var(--border)] px-3 py-2">
+      {/* Footer: full-width New chat with the archive toggle on the same row
+          (mirrors the first sidebar's "Add project" footer). */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-[var(--border)] p-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 flex-1 justify-center"
+          onClick={onNewChat}
+        >
+          + New chat
+        </Button>
+        {archived.length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -174,8 +172,8 @@ export function SessionList({
               {archivedView ? "Back to sessions" : "Archived chats"}
             </TooltipContent>
           </Tooltip>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

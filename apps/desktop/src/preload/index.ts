@@ -38,6 +38,15 @@ const electronAPI = {
     return () => ipcRenderer.removeListener("watcher:event", handler);
   },
 
+  // Ctrl+Tab (projects) / Ctrl+Shift+Tab (sessions), forwarded from main since
+  // Chromium swallows Ctrl+Tab before the page sees it.
+  onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, e: { shift: boolean }) =>
+      cb(e);
+    ipcRenderer.on("switcher:cycle", handler);
+    return () => ipcRenderer.removeListener("switcher:cycle", handler);
+  },
+
   addManualProject: () => ipcRenderer.invoke("projects:addManual"),
   setProjectArchived: (encoded: string, archived: boolean) =>
     ipcRenderer.invoke("projects:setArchived", encoded, archived),
@@ -50,6 +59,8 @@ const electronAPI = {
   listPlans: () => ipcRenderer.invoke("plans:list"),
   markPlanRead: (filePath: string) =>
     ipcRenderer.invoke("plans:markRead", filePath),
+  setPlanArchived: (filePath: string, archived: boolean) =>
+    ipcRenderer.invoke("plans:setArchived", filePath, archived),
   onPlansEvent: (cb: (e: PlansEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, e: PlansEvent) =>
       cb(e);

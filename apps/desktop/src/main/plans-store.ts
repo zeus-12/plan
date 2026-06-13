@@ -18,6 +18,8 @@ export interface Plan {
   unread: number;
   /** Last modified time of the file (or last event ts) — for sort order. */
   updatedAt: number;
+  /** Hidden from the active list until unarchived. */
+  archived: boolean;
 }
 
 interface Stored {
@@ -44,7 +46,12 @@ export async function loadPlans(): Promise<Plan[]> {
     const raw = await readFile(storePath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<Stored>;
     const plans = Array.isArray(parsed.plans) ? parsed.plans : [];
-    cache = { plans: plans.filter(isValidPlan) };
+    // Older stored plans predate `archived` — normalize them to false.
+    cache = {
+      plans: plans
+        .filter(isValidPlan)
+        .map((p) => ({ ...p, archived: p.archived ?? false })),
+    };
   } catch {
     cache = { plans: [] };
   }
@@ -115,6 +122,7 @@ export function recordNewPlan(filePath: string, content: string, ts = Date.now()
     versions: [version],
     unread: 1,
     updatedAt: ts,
+    archived: false,
   };
   cache.plans.push(plan);
   scheduleWrite();
@@ -134,6 +142,7 @@ export function recordPlanChange(
       versions: [],
       unread: 0,
       updatedAt: ts,
+      archived: false,
     };
     cache.plans.push(plan);
   }
@@ -163,5 +172,13 @@ export function markPlanRead(filePath: string): void {
   const plan = cache.plans.find((p) => p.filePath === filePath);
   if (!plan || plan.unread === 0) return;
   plan.unread = 0;
+  scheduleWrite();
+}
+
+export function setPlanArchived(filePath: string, archived: boolean): void {
+  if (!cache) return;
+  const plan = cache.plans.find((p) => p.filePath === filePath);
+  if (!plan || plan.archived === archived) return;
+  plan.archived = archived;
   scheduleWrite();
 }

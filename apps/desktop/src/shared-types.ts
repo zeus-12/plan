@@ -96,6 +96,8 @@ export interface Plan {
   versions: PlanVersion[];
   unread: number;
   updatedAt: number;
+  /** Hidden from the active list until unarchived. */
+  archived: boolean;
 }
 
 export type PlansEventKind = "new-plan" | "plan-changed" | "plan-removed";

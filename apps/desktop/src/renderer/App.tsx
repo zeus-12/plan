@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   SidebarProvider,
   useSidebar,
@@ -7,8 +7,14 @@ import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
+import { SwitcherOverlay } from "./components/switcher-overlay";
+import { useTabSwitcher } from "./lib/use-tab-switcher";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
+
+function projectShortName(p: ProjectEntry): string {
+  return p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
+}
 
 function Shell() {
   const projectsSidebar = useSidebar();
@@ -112,6 +118,30 @@ function Shell() {
 
   const selected = projects.find((p) => p.encoded === selectedEncoded) ?? null;
 
+  // Ctrl+Tab: cycle projects in a modal, commit on Ctrl-release. Ordered
+  // most-recently-active first (same recency signal the sidebar sorts by), so
+  // the current project sits at top and the first Tab lands on the one below.
+  // Archived projects are excluded — you can't switch to one you've hidden.
+  const projectsByRecency = useMemo(
+    () =>
+      projects
+        .filter((p) => !p.archived)
+        .sort((a, b) => b.mtimeMs - a.mtimeMs),
+    [projects]
+  );
+  const projectIndex = Math.max(
+    0,
+    projectsByRecency.findIndex((p) => p.encoded === selectedEncoded)
+  );
+  const projectSwitcher = useTabSwitcher({
+    id: "projects",
+    enabled: projectsByRecency.length > 1,
+    requireShift: false,
+    items: projectsByRecency,
+    currentIndex: projectIndex,
+    onCommit: (p) => setSelectedEncoded(p.encoded),
+  });
+
   return (
     <div className="flex h-screen w-screen flex-row bg-[var(--bg)] text-[var(--text)]">
       <ProjectSidebar
@@ -138,6 +168,17 @@ function Shell() {
           </div>
         )}
       </main>
+      {projectSwitcher.active && (
+        <SwitcherOverlay
+          title="Projects"
+          index={projectSwitcher.index}
+          items={projectsByRecency.map((p) => ({
+            key: p.encoded,
+            label: projectShortName(p),
+            sub: p.cwd,
+          }))}
+        />
+      )}
     </div>
   );
 }

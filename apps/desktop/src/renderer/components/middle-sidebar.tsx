@@ -63,6 +63,7 @@ interface Props {
   plans: Plan[];
   selectedPlan: string | null;
   onSelectPlan: (filePath: string) => void;
+  onSetPlanArchived: (filePath: string, archived: boolean) => void;
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
@@ -75,7 +76,7 @@ interface Props {
 }
 
 function totalUnread(plans: Plan[]): number {
-  return plans.reduce((s, p) => s + p.unread, 0);
+  return plans.reduce((s, p) => s + (p.archived ? 0 : p.unread), 0);
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -164,6 +165,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   plans,
   selectedPlan,
   onSelectPlan,
+  onSetPlanArchived,
   encoded,
   terminals,
   activeTerminalId,
@@ -348,6 +350,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               plans={plans}
               selected={selectedPlan}
               onSelect={onSelectPlan}
+              onSetArchived={onSetPlanArchived}
             />
           </TabsContent>
         </SidebarContent>

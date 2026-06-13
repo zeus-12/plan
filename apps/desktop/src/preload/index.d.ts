@@ -35,6 +35,7 @@ interface ElectronAPI {
     subPath?: string
   ) => Promise<FileView>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
+  onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;
   setProjectArchived: (
     encoded: string,
@@ -48,6 +49,10 @@ interface ElectronAPI {
 
   listPlans: () => Promise<Plan[]>;
   markPlanRead: (filePath: string) => Promise<{ ok: true }>;
+  setPlanArchived: (
+    filePath: string,
+    archived: boolean
+  ) => Promise<{ ok: true }>;
   onPlansEvent: (cb: (e: PlansEvent) => void) => () => void;
 
   getBranch: (encoded: string, subPath?: string) => Promise<string | null>;
