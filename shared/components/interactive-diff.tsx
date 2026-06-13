@@ -254,6 +254,11 @@ export function InteractiveDiff({
   const mergeEnabled = !!onMergeChange;
   const hunkActionsEnabled = !!hunkActions;
   const contentRef = useRef<HTMLDivElement>(null);
+  // Split-view column wrappers — used to lock a text selection to the side it
+  // started in (the two versions are separate tables, so a native drag-select
+  // would otherwise bleed into the other version's aligned lines).
+  const leftColRef = useRef<HTMLDivElement>(null);
+  const rightColRef = useRef<HTMLDivElement>(null);
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingSel | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
@@ -571,6 +576,27 @@ export function InteractiveDiff({
     }
     return null;
   }
+
+  // On mousedown, disable selection on the OTHER column so the drag can't
+  // extend into it — keeping the highlight on one version at a time. Released
+  // on the next mouseup (below).
+  function lockSelectionToStartSide(e: React.MouseEvent) {
+    if (effectiveViewMode !== "split") return;
+    const side = findSplitSide(e.target as Node);
+    if (leftColRef.current)
+      leftColRef.current.style.userSelect = side === "right" ? "none" : "";
+    if (rightColRef.current)
+      rightColRef.current.style.userSelect = side === "left" ? "none" : "";
+  }
+
+  useEffect(() => {
+    const release = () => {
+      if (leftColRef.current) leftColRef.current.style.userSelect = "";
+      if (rightColRef.current) rightColRef.current.style.userSelect = "";
+    };
+    window.addEventListener("mouseup", release);
+    return () => window.removeEventListener("mouseup", release);
+  }, []);
 
   /* ── Selection ──────────────────────────────────────────── */
 
@@ -1179,7 +1205,10 @@ export function InteractiveDiff({
 
     function renderColumn(side: "left" | "right") {
       return (
-        <div data-split-side={side}>
+        <div
+          data-split-side={side}
+          ref={side === "left" ? leftColRef : rightColRef}
+        >
           <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
             <tbody>
               {splitRows.map((row, i) => {
@@ -1243,6 +1272,7 @@ export function InteractiveDiff({
 
       <div
         ref={contentRef}
+        onMouseDown={lockSelectionToStartSide}
         onClick={(e) => {
           if (!mergeEnabled) return;
           // Don't trigger on a drag-select.

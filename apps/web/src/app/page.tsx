@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
+import { formatUnifiedDiff } from "@plan/shared/lib/diff";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import { useUndoable } from "@plan/shared/lib/undoable";
 import { useTheme } from "@plan/shared/components/theme-provider";
@@ -80,7 +81,11 @@ export default function Home() {
   const [language, setLanguage] = useState("auto");
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [commentingEnabled, setCommentingEnabled] = useState(false);
-  const [copiedShare, setCopiedShare] = useState(false);
+  // Share dropdown: which item was just copied (for transient feedback), and
+  // whether the little menu is open.
+  const [copied, setCopied] = useState<"link" | "diff" | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const shareRef = useRef<HTMLDivElement>(null);
 
   // Restore from URL hash on mount.
   useEffect(() => {
@@ -173,7 +178,14 @@ export default function Home() {
     [setBoth]
   );
 
-  const handleShare = useCallback(async () => {
+  const flashCopied = useCallback((kind: "link" | "diff") => {
+    setCopied(kind);
+    setTimeout(() => setCopied(null), 1800);
+  }, []);
+
+  // Share link: stash the diff in the URL hash and copy the URL.
+  const handleShareLink = useCallback(async () => {
+    setShareOpen(false);
     const encoded = encodeState({
       left: leftText,
       right: rightText,
@@ -185,13 +197,41 @@ export default function Home() {
       const url = window.location.href;
       try {
         await navigator.clipboard.writeText(url);
-        setCopiedShare(true);
-        setTimeout(() => setCopiedShare(false), 1800);
+        flashCopied("link");
       } catch {
         // Clipboard may be blocked; URL is still updated for them to copy.
       }
     }
-  }, [leftText, rightText, language]);
+  }, [leftText, rightText, language, flashCopied]);
+
+  // Copy diff: a plain unified diff (text) to paste straight into an LLM.
+  const handleCopyDiff = useCallback(async () => {
+    setShareOpen(false);
+    try {
+      await navigator.clipboard.writeText(formatUnifiedDiff(leftText, rightText));
+      flashCopied("diff");
+    } catch {
+      // Clipboard blocked — nothing else we can do without a user gesture.
+    }
+  }, [leftText, rightText, flashCopied]);
+
+  // Close the share menu on outside click or Escape.
+  useEffect(() => {
+    if (!shareOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (shareRef.current && !shareRef.current.contains(e.target as Node))
+        setShareOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShareOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [shareOpen]);
 
   const hasContent = leftText.length > 0 || rightText.length > 0;
 
@@ -222,14 +262,46 @@ export default function Home() {
             Comments {commentingEnabled ? "on" : "off"}
           </Button>
           {hasContent && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleShare}
-              title="Copy a shareable URL containing both texts"
-            >
-              {copiedShare ? "Copied!" : "Share"}
-            </Button>
+            <div ref={shareRef} className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShareOpen((v) => !v)}
+                title="Share this diff"
+              >
+                {copied === "link"
+                  ? "Link copied!"
+                  : copied === "diff"
+                    ? "Diff copied!"
+                    : "Share"}
+              </Button>
+              {shareOpen && (
+                <div className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg-surface)] py-1 shadow-md">
+                  <button
+                    onClick={handleShareLink}
+                    className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-[var(--bg-surface-hover)]"
+                  >
+                    <span className="text-[13px] text-[var(--text)]">
+                      Copy share link
+                    </span>
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      URL with both versions embedded
+                    </span>
+                  </button>
+                  <button
+                    onClick={handleCopyDiff}
+                    className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-[var(--bg-surface-hover)]"
+                  >
+                    <span className="text-[13px] text-[var(--text)]">
+                      Copy diff to clipboard
+                    </span>
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      Plain unified diff — paste into an LLM
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {hasContent && (
             <Button

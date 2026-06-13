@@ -1,4 +1,4 @@
-import { diffLines, diffWordsWithSpace } from "diff";
+import { createTwoFilesPatch, diffLines, diffWordsWithSpace } from "diff";
 
 export interface WordSegment {
   text: string;
@@ -32,6 +32,26 @@ export interface SplitPair {
 export type SplitRow = SplitPair | Separator;
 
 const CONTEXT_LINES_AROUND_CHANGES = 3;
+
+/**
+ * A standard unified diff (the `git diff` text format) between two strings —
+ * for copying to the clipboard to paste into an LLM. Only the changed hunks
+ * (with a few lines of context) are included, so it stays compact and is the
+ * representation models read most reliably.
+ */
+export function formatUnifiedDiff(oldText: string, newText: string): string {
+  const patch = createTwoFilesPatch(
+    "original",
+    "changed",
+    oldText ?? "",
+    newText ?? ""
+  );
+  // jsdiff prefixes an "===" separator line; drop everything before the
+  // "--- original" header so the result is a clean unified diff.
+  const start = patch.indexOf("--- ");
+  const body = start >= 0 ? patch.slice(start) : patch;
+  return body.replace(/\t(?=\n)/g, "").trimEnd() + "\n";
+}
 
 export function buildDiffLines(
   oldText: string,
