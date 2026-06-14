@@ -616,12 +616,15 @@ export const MessageList = memo(function MessageList({
     const partIndex = parseInt(part.getAttribute("data-part-index") ?? "0", 10);
     const fullText = part.textContent ?? "";
 
-    // Offsets within the part; an endpoint outside it clamps to the part's edge.
-    const rawStart = offsetWithin(part, range.startContainer, range.startOffset);
-    const rawEnd = offsetWithin(part, range.endContainer, range.endOffset);
-    let start = rawStart === -1 ? 0 : rawStart;
-    let end = rawEnd === -1 ? fullText.length : rawEnd;
-    if (start > end) [start, end] = [end, start];
+    // Offsets within the part, derived from which of the part's text nodes the
+    // selection actually covers — not from the raw endpoints. A triple-click
+    // lands the end boundary on an element node just past the block (a
+    // sibling/ancestor), which we can't turn into a character offset directly;
+    // clamping it to the part's end would swallow every block below the one the
+    // user clicked. Intersecting per text node confines us to what's selected.
+    const offsets = selectedOffsetsWithin(part, range);
+    if (!offsets) return null;
+    let { start, end } = offsets;
 
     // Trim whitespace by moving the offsets, so text and offsets stay in sync.
     while (start < end && /\s/.test(fullText[start])) start++;
@@ -809,4 +812,39 @@ function offsetWithin(root: HTMLElement, node: Node, nodeOff: number): number {
     cur = walker.nextNode();
   }
   return -1;
+}
+
+/**
+ * Character offsets [start, end) of the part of `range` that lies inside `root`,
+ * in the same text-content space as {@link rangeForOffsets} / `offsetWithin`.
+ *
+ * Walks `root`'s text nodes and keeps only the portion each one contributes to
+ * the selection, so endpoints that fall outside `root` (or on element nodes, as
+ * a triple-click's end boundary does) are clamped to what's actually covered
+ * rather than to the whole part. Returns null if the range covers no text here.
+ */
+function selectedOffsetsWithin(
+  root: HTMLElement,
+  range: Range
+): { start: number; end: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let acc = 0;
+  let start = -1;
+  let end = -1;
+  let cur: Node | null = walker.nextNode();
+  while (cur) {
+    const len = cur.textContent?.length ?? 0;
+    if (len > 0 && range.intersectsNode(cur)) {
+      const localStart = cur === range.startContainer ? range.startOffset : 0;
+      const localEnd = cur === range.endContainer ? range.endOffset : len;
+      // Skip a node the range only touches at a boundary (no chars covered).
+      if (localStart < localEnd) {
+        if (start === -1) start = acc + localStart;
+        end = acc + localEnd;
+      }
+    }
+    acc += len;
+    cur = walker.nextNode();
+  }
+  return start === -1 ? null : { start, end };
 }
