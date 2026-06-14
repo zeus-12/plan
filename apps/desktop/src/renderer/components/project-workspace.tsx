@@ -147,7 +147,15 @@ export function ProjectWorkspace({
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
+  // VSCode model: `tab` chooses which LIST shows in the right sidebar; the main
+  // content pane is driven by `openKind` instead. Switching tabs never changes
+  // the content — only clicking an item (which sets openKind) does.
   const [tab, setTab] = useState<WorkTab>("chat");
+  const [openKind, setOpenKind] = useState<WorkTab>("chat");
+  // The file currently of interest — a selected diff or an open project file.
+  // Shared across the Diffs and Files tabs so each highlights it. The path is
+  // project-relative (repo subPath prefixed) to compare across both lists.
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   // ── Files state (per-repo) ───────────────────────────────────
@@ -184,6 +192,8 @@ export function ProjectWorkspace({
     setChatAnnotations,
     annotationsByPlan,
     setAnnotationsByPlan,
+    annotationsByProjectFile,
+    setAnnotationsByProjectFile,
   } = useProjectAnnotations(project.encoded);
   /** subPath currently being pushed (for the sync-bar spinner). */
   const [pushingRepo, setPushingRepo] = useState<string | null>(null);
@@ -219,6 +229,8 @@ export function ProjectWorkspace({
       setFilesByRepo(next);
       setSelectedFile((current) => {
         // Keep the current selection if that same stage still has the file.
+        // We DON'T auto-pick a first file — content only opens on explicit
+        // click, so switching to the Diffs tab never changes the main pane.
         if (current) {
           const repo = next.get(current.subPath);
           const stillThere = repo?.status.some(
@@ -227,17 +239,6 @@ export function ProjectWorkspace({
               (current.staged ? s.staged : s.unstaged)
           );
           if (stillThere) return current;
-        }
-        // Otherwise pick the first available file (prefer unstaged changes).
-        for (const r of repos) {
-          const repo = next.get(r.subPath);
-          if (!repo) continue;
-          const unstaged = repo.status.find((s) => s.unstaged);
-          if (unstaged)
-            return { subPath: r.subPath, path: unstaged.path, staged: false };
-          const staged = repo.status.find((s) => s.staged);
-          if (staged)
-            return { subPath: r.subPath, path: staged.path, staged: true };
         }
         return null;
       });
@@ -322,6 +323,12 @@ export function ProjectWorkspace({
   const aggregatedPlanAnnotations = useMemo(
     () => Object.values(annotationsByPlan).flat(),
     [annotationsByPlan]
+  );
+
+  // Read-only file-viewer comments across all files — same compose buffer.
+  const aggregatedProjectFileAnnotations = useMemo(
+    () => Object.values(annotationsByProjectFile).flat(),
+    [annotationsByProjectFile]
   );
 
   // ── Git actions (routed via subPath) ─────────────────────────
@@ -607,6 +614,7 @@ export function ProjectWorkspace({
   const handleSelectPlan = useCallback(
     async (filePath: string) => {
       setSelectedPlanPath(filePath);
+      setOpenKind("plans");
       await window.electronAPI.markPlanRead(filePath);
       // Re-pull so the unread badge clears immediately.
       refreshPlans();
@@ -657,10 +665,6 @@ export function ProjectWorkspace({
         return;
       }
       const list = await fn(project.encoded);
-      console.log(
-        "[files] indexed",
-        Array.isArray(list) ? `${list.length} files` : list
-      );
       setProjectFiles(Array.isArray(list) ? list : []);
     } catch (e) {
       console.error("[files] index failed:", e);
@@ -676,6 +680,14 @@ export function ProjectWorkspace({
 
   const handleSelectProjectFile = useCallback((path: string) => {
     setSelectedProjectFile(path);
+    setOpenKind("files");
+    setActiveFilePath(path);
+  }, []);
+
+  // Clicking a chat in the list opens its conversation in the content pane.
+  const handleSelectSession = useCallback((id: string) => {
+    setSelectedSessionId(id);
+    setOpenKind("chat");
   }, []);
 
   // ── Command palette: ⌘P (files) / ⌘K (switch project or chat) ──────────
@@ -762,6 +774,7 @@ export function ProjectWorkspace({
         if (c.projectEncoded === project.encoded) {
           setSelectedSessionId(c.sessionId);
           setTab("chat");
+          setOpenKind("chat");
         } else {
           // Cross-project: stash the target chat so the new workspace selects
           // it on mount, then switch projects.
@@ -885,6 +898,67 @@ export function ProjectWorkspace({
     setAnnotationsByPlan((prev) => ({ ...prev, [selectedPlanPath]: [] }));
   }, [selectedPlanPath, setAnnotationsByPlan]);
 
+  // ── Project-file (read-only viewer) annotation handlers ──────
+  const projectFileAnnotations = useMemo<Annotation[]>(
+    () =>
+      selectedProjectFile
+        ? annotationsByProjectFile[selectedProjectFile] ?? []
+        : [],
+    [annotationsByProjectFile, selectedProjectFile]
+  );
+  const addProjectFileAnnotation = useCallback(
+    (
+      selectedText: string,
+      startOffset: number,
+      endOffset: number,
+      startLine: number,
+      endLine: number,
+      comment: string
+    ) => {
+      if (!selectedProjectFile) return;
+      setAnnotationsByProjectFile((prev) => ({
+        ...prev,
+        [selectedProjectFile]: [
+          ...(prev[selectedProjectFile] ?? []),
+          {
+            id: crypto.randomUUID(),
+            selectedText,
+            startOffset,
+            endOffset,
+            comment,
+            side: "right",
+            context: { filePath: selectedProjectFile, startLine, endLine },
+          },
+        ],
+      }));
+    },
+    [selectedProjectFile, setAnnotationsByProjectFile]
+  );
+  const updateProjectFileAnnotation = useCallback(
+    (id: string, comment: string) => {
+      if (!selectedProjectFile) return;
+      setAnnotationsByProjectFile((prev) => ({
+        ...prev,
+        [selectedProjectFile]: (prev[selectedProjectFile] ?? []).map((a) =>
+          a.id === id ? { ...a, comment } : a
+        ),
+      }));
+    },
+    [selectedProjectFile, setAnnotationsByProjectFile]
+  );
+  const removeProjectFileAnnotation = useCallback(
+    (id: string) => {
+      if (!selectedProjectFile) return;
+      setAnnotationsByProjectFile((prev) => ({
+        ...prev,
+        [selectedProjectFile]: (prev[selectedProjectFile] ?? []).filter(
+          (a) => a.id !== id
+        ),
+      }));
+    },
+    [selectedProjectFile, setAnnotationsByProjectFile]
+  );
+
   // ── Aggregated annotations ───────────────────────────────────
   const aggregatedChatAnnotations = useMemo<Annotation[]>(
     () =>
@@ -904,9 +978,16 @@ export function ProjectWorkspace({
   const totalComments =
     aggregatedDiffAnnotations.length +
     aggregatedChatAnnotations.length +
-    aggregatedPlanAnnotations.length;
+    aggregatedPlanAnnotations.length +
+    aggregatedProjectFileAnnotations.length;
   const composedMessage = useMemo(() => {
     const parts: string[] = [];
+    if (aggregatedProjectFileAnnotations.length > 0) {
+      parts.push(
+        "On the files:\n\n" +
+          generateMessage(aggregatedProjectFileAnnotations, { intro: "" })
+      );
+    }
     if (aggregatedDiffAnnotations.length > 0) {
       parts.push(
         "On the code changes:\n\n" +
@@ -938,6 +1019,7 @@ export function ProjectWorkspace({
     aggregatedDiffAnnotations,
     aggregatedPlanAnnotations,
     aggregatedChatAnnotations,
+    aggregatedProjectFileAnnotations,
   ]);
 
   // ── Chat annotation handlers ─────────────────────────────────
@@ -1015,6 +1097,8 @@ export function ProjectWorkspace({
   const handleSelectFile = useCallback(
     (subPath: string, path: string, staged: boolean) => {
       setSelectedFile({ subPath, path, staged });
+      setOpenKind("diffs");
+      setActiveFilePath(subPath ? `${subPath}/${path}` : path);
     },
     []
   );
@@ -1132,6 +1216,7 @@ export function ProjectWorkspace({
     (sid: string) => {
       setSelectedSessionId(sid);
       setTab("chat");
+      setOpenKind("chat");
       setActiveShellId(null);
       setTerminalOpen(true);
     },
@@ -1195,6 +1280,7 @@ export function ProjectWorkspace({
     setSelectedSessionId(sid);
     ensureOpened(`${chatPrefix}${sid}`);
     setTab("chat");
+    setOpenKind("chat");
     requestAnimationFrame(() => chatInputRef.current?.focus());
   }, [chatPrefix, ensureOpened]);
 
@@ -1339,15 +1425,22 @@ export function ProjectWorkspace({
     (text: string) => {
       if (!text.trim()) return;
       setTab("chat");
+      setOpenKind("chat");
       setAnnotationsByFile({});
       setChatAnnotations([]);
       setAnnotationsByPlan({});
+      setAnnotationsByProjectFile({});
       requestAnimationFrame(() => {
         chatInputRef.current?.append(text);
         chatInputRef.current?.focus();
       });
     },
-    [setAnnotationsByFile, setChatAnnotations, setAnnotationsByPlan]
+    [
+      setAnnotationsByFile,
+      setChatAnnotations,
+      setAnnotationsByPlan,
+      setAnnotationsByProjectFile,
+    ]
   );
 
   // "Run terminal": start `claude --resume` for the selected session in the
@@ -1573,6 +1666,7 @@ export function ProjectWorkspace({
     onCommit: (s) => {
       setSelectedSessionId(s.sessionId);
       setTab("chat");
+      setOpenKind("chat");
     },
   });
 
@@ -1633,7 +1727,7 @@ export function ProjectWorkspace({
             <div
               className={cn(
                 "flex min-h-0 flex-1 flex-col",
-                tab !== "diffs" && "hidden"
+                openKind !== "diffs" && "hidden"
               )}
             >
                 <div className="min-h-0 flex-1">
@@ -1644,7 +1738,7 @@ export function ProjectWorkspace({
                       subPath={selectedFile.subPath}
                       file={selectedFileDiff}
                       mode={selectedFile.staged ? "staged" : "unstaged"}
-                      active={tab === "diffs"}
+                      active={openKind === "diffs"}
                       annotationsByFile={annotationsByFile}
                       setAnnotationsByFile={setAnnotationsByFile}
                       onStage={() =>
@@ -1679,7 +1773,7 @@ export function ProjectWorkspace({
             <div
               className={cn(
                 "flex min-h-0 flex-1 flex-col",
-                tab !== "chat" && "hidden"
+                openKind !== "chat" && "hidden"
               )}
             >
                 <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -1738,7 +1832,7 @@ export function ProjectWorkspace({
                       onAddAnnotation={addChatAnnotation}
                       onUpdateAnnotation={updateChatAnnotation}
                       onRemoveAnnotation={removeChatAnnotation}
-                      visible={tab === "chat"}
+                      visible={openKind === "chat"}
                       terminalReady={chatTerminalReady}
                       onSendKeys={handleSendKeysToChat}
                     />
@@ -1765,7 +1859,7 @@ export function ProjectWorkspace({
             <div
               className={cn(
                 "flex min-h-0 flex-1 flex-col",
-                tab !== "plans" && "hidden"
+                openKind !== "plans" && "hidden"
               )}
             >
                 {selectedPlan ? (
@@ -1790,7 +1884,7 @@ export function ProjectWorkspace({
             <div
               className={cn(
                 "flex min-h-0 flex-1 flex-col",
-                tab !== "files" && "hidden"
+                openKind !== "files" && "hidden"
               )}
             >
                 {selectedProjectFile ? (
@@ -1798,6 +1892,11 @@ export function ProjectWorkspace({
                     key={selectedProjectFile}
                     encoded={project.encoded}
                     path={selectedProjectFile}
+                    annotations={projectFileAnnotations}
+                    onAddAnnotation={addProjectFileAnnotation}
+                    onUpdateAnnotation={updateProjectFileAnnotation}
+                    onRemoveAnnotation={removeProjectFileAnnotation}
+                    active={openKind === "files"}
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -1878,6 +1977,7 @@ export function ProjectWorkspace({
           repos={repos}
           repoGroups={repoGroups}
           selectedFile={selectedFile}
+          activeFilePath={activeFilePath}
           onSelectFile={handleSelectFile}
           onStageFile={handleStageFile}
           onUnstageFile={handleUnstageFile}
@@ -1893,7 +1993,7 @@ export function ProjectWorkspace({
           diffAvailable={repos.length > 0}
           sessions={sessions}
           selectedSession={selectedSessionId}
-          onSelectSession={setSelectedSessionId}
+          onSelectSession={handleSelectSession}
           onSetSessionArchived={handleSetSessionArchived}
           onRenameSession={handleRenameRequest}
           onNewChat={handleNewChat}

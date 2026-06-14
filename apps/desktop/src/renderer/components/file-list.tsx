@@ -6,6 +6,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
+import { FileIcon } from "./file-icon";
 
 export interface FileEntry {
   path: string;
@@ -31,6 +32,9 @@ export interface RepoFileGroup {
 interface Props {
   groups: RepoFileGroup[];
   selected: { subPath: string; path: string; staged: boolean } | null;
+  /** Project-relative path of the file of interest from another tab (e.g. a
+   * file open in the Files tab) — highlighted distinctly from the selection. */
+  activeFilePath?: string | null;
   onSelect: (subPath: string, path: string, staged: boolean) => void;
   onStage: (path: string, subPath: string) => void;
   onUnstage: (path: string, subPath: string) => void;
@@ -60,14 +64,18 @@ type Row =
 function statusColor(letter: FileEntry["letter"]) {
   switch (letter) {
     case "A":
+    case "?": // untracked — shown as "U", green like an addition (VSCode-style)
       return "text-[var(--diff-add-bar)]";
     case "D":
       return "text-[var(--diff-remove-bar)]";
-    case "?":
-      return "text-[var(--text-tertiary)]";
     default:
       return "text-[var(--text-secondary)]";
   }
+}
+
+/** Git marks untracked files "?"; VSCode shows them as "U". */
+function displayLetter(letter: FileEntry["letter"]): string {
+  return letter === "?" ? "U" : letter;
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -206,6 +214,7 @@ function ActionButton({
 export function FileList({
   groups,
   selected,
+  activeFilePath,
   onSelect,
   onStage,
   onUnstage,
@@ -387,6 +396,10 @@ export function FileList({
             selected?.subPath === file.subPath &&
             selected?.path === file.path &&
             selected?.staged === file.staged;
+          const projPath = file.subPath
+            ? `${file.subPath}/${file.path}`
+            : file.path;
+          const isActive = !isSelected && projPath === activeFilePath;
           const basename = file.path.split("/").pop() ?? file.path;
           const dirname = file.path.includes("/")
             ? file.path.slice(0, file.path.lastIndexOf("/"))
@@ -399,7 +412,9 @@ export function FileList({
                 "group flex items-center border-l-2 transition-colors",
                 isSelected
                   ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                  : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
+                  : isActive
+                    ? "border-l-[var(--accent)] bg-[var(--bg-surface)]"
+                    : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
               )}
             >
               <button
@@ -407,14 +422,7 @@ export function FileList({
                 title={file.subPath ? `${file.subPath}/${file.path}` : file.path}
                 className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 pr-2 text-left"
               >
-                <span
-                  className={cn(
-                    "w-3 shrink-0 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
-                    statusColor(file.letter)
-                  )}
-                >
-                  {file.letter}
-                </span>
+                <FileIcon name={basename} />
                 <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
                   {basename}
                 </span>
@@ -424,6 +432,15 @@ export function FileList({
                   </span>
                 )}
               </button>
+              <span
+                className={cn(
+                  "shrink-0 px-1 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
+                  statusColor(file.letter)
+                )}
+                title={file.letter === "?" ? "Untracked" : undefined}
+              >
+                {displayLetter(file.letter)}
+              </span>
               <div className="flex items-center gap-1.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
                 {file.staged ? (
                   <ActionButton

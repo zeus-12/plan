@@ -14,9 +14,18 @@ interface ProjectAnnotations {
   chat: ChatAnnotation[];
   /** Plan-diff comments, keyed by the plan's file path. */
   byPlan: Record<string, Annotation[]>;
+  /** Read-only file-viewer comments, keyed by the project-relative path.
+   * Separate from `byFile` (diff annotations) so the same path open in both
+   * the Diffs and Files tabs doesn't share/clobber comments. */
+  byProjectFile: Record<string, Annotation[]>;
 }
 
-const EMPTY: ProjectAnnotations = { byFile: {}, chat: [], byPlan: {} };
+const EMPTY: ProjectAnnotations = {
+  byFile: {},
+  chat: [],
+  byPlan: {},
+  byProjectFile: {},
+};
 
 const store = new Map<string, ProjectAnnotations>();
 const listeners = new Set<() => void>();
@@ -44,6 +53,10 @@ export function useProjectAnnotations(encoded: string): {
   setChatAnnotations: Dispatch<SetStateAction<ChatAnnotation[]>>;
   annotationsByPlan: Record<string, Annotation[]>;
   setAnnotationsByPlan: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
+  annotationsByProjectFile: Record<string, Annotation[]>;
+  setAnnotationsByProjectFile: Dispatch<
+    SetStateAction<Record<string, Annotation[]>>
+  >;
 } {
   const snapshot = useSyncExternalStore(
     subscribe,
@@ -88,6 +101,19 @@ export function useProjectAnnotations(encoded: string): {
     [encoded]
   );
 
+  const setAnnotationsByProjectFile = useCallback<
+    Dispatch<SetStateAction<Record<string, Annotation[]>>>
+  >(
+    (update) => {
+      const cur = get(encoded);
+      const next =
+        typeof update === "function" ? update(cur.byProjectFile) : update;
+      store.set(encoded, { ...cur, byProjectFile: next });
+      emit();
+    },
+    [encoded]
+  );
+
   return {
     annotationsByFile: snapshot.byFile,
     setAnnotationsByFile,
@@ -95,5 +121,7 @@ export function useProjectAnnotations(encoded: string): {
     setChatAnnotations,
     annotationsByPlan: snapshot.byPlan,
     setAnnotationsByPlan,
+    annotationsByProjectFile: snapshot.byProjectFile,
+    setAnnotationsByProjectFile,
   };
 }

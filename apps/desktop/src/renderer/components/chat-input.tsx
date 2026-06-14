@@ -57,6 +57,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     const [preview, setPreview] = useState<Attachment | null>(null);
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
     const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Last message sent from THIS session's composer — ⌘Z restores it into an
+    // empty box so an accidental send (or lost text) can be recovered verbatim.
+    const lastSentRef = useRef<string | null>(null);
 
     const clearAttachments = () => {
       setAttachments((prev) => {
@@ -70,9 +73,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     // and on unmount (revoking the preview object URLs).
     useEffect(() => clearAttachments, [sessionId]);
 
-    // Swap drafts when the session changes.
+    // Swap drafts when the session changes. The undo buffer is per-session, so
+    // drop it — ⌘Z must never restore another conversation's message.
     useEffect(() => {
       setValue(window.localStorage.getItem(draftKey(sessionId)) ?? "");
+      lastSentRef.current = null;
     }, [sessionId]);
 
     // Focus on session swap when asked (e.g. a brand-new chat) — driven by the
@@ -139,6 +144,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       const full = [text, paths].filter(Boolean).join("\n\n");
       if (!full) return;
       onSend(full);
+      // Snapshot the raw text so ⌘Z can bring it back verbatim.
+      lastSentRef.current = value;
       setValue("");
       clearAttachments();
       window.localStorage.removeItem(draftKey(sessionId));
@@ -200,6 +207,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();
+                return;
+              }
+              // ⌘Z / Ctrl+Z in an EMPTY box restores the last sent message.
+              // When the box has text, fall through to the browser's own undo.
+              if (
+                (e.metaKey || e.ctrlKey) &&
+                !e.shiftKey &&
+                e.key.toLowerCase() === "z" &&
+                value === "" &&
+                lastSentRef.current
+              ) {
+                e.preventDefault();
+                setValue(lastSentRef.current);
+                lastSentRef.current = null;
               }
             }}
             style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}

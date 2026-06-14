@@ -29,6 +29,9 @@ interface Props {
   repos: DiscoveredRepo[];
   repoGroups: RepoFileGroup[];
   selectedFile: { subPath: string; path: string; staged: boolean } | null;
+  /** Project-relative path of the current file of interest, shared across the
+   * Diffs and Files tabs so each highlights it (cross-tab indicator). */
+  activeFilePath: string | null;
   onSelectFile: (subPath: string, path: string, staged: boolean) => void;
   onStageFile: (path: string, subPath: string) => void;
   onUnstageFile: (path: string, subPath: string) => void;
@@ -148,6 +151,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   repos,
   repoGroups,
   selectedFile,
+  activeFilePath,
   onSelectFile,
   onStageFile,
   onUnstageFile,
@@ -300,6 +304,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                   <FileList
                     groups={repoGroups}
                     selected={selectedFile}
+                    activeFilePath={activeFilePath}
                     onSelect={onSelectFile}
                     onStage={onStageFile}
                     onUnstage={onUnstageFile}
@@ -376,6 +381,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             <ProjectFileList
               files={projectFiles}
               selected={selectedProjectFile}
+              activeFilePath={activeFilePath}
               onSelect={onSelectProjectFile}
               loading={projectFilesLoading}
             />

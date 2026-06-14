@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@plan/shared/lib/utils";
+import { FileIcon, FolderIcon } from "./file-icon";
 
 interface Props {
   files: string[];
   selected: string | null;
   onSelect: (path: string) => void;
   loading: boolean;
+  /** The file of interest from another tab (e.g. an open diff) — highlighted
+   * distinctly from the explicit selection so it's locatable across tabs. */
+  activeFilePath?: string | null;
 }
 
 const ROW_HEIGHT = 24;
@@ -89,19 +93,26 @@ function flatten(
  * to a plain match list (instant), otherwise it shows the tree. Visible rows are
  * virtualized so even huge trees stay smooth.
  */
-export function ProjectFileList({ files, selected, onSelect, loading }: Props) {
+export function ProjectFileList({
+  files,
+  selected,
+  onSelect,
+  loading,
+  activeFilePath,
+}: Props) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const parentRef = useRef<HTMLDivElement>(null);
 
   const tree = useMemo(() => buildTree(files), [files]);
 
-  // Reveal the selected file by expanding its ancestor folders.
+  // Reveal the selected (or cross-tab active) file by expanding its ancestors.
+  const reveal = selected ?? activeFilePath ?? null;
   useEffect(() => {
-    if (!selected) return;
+    if (!reveal) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      const parts = selected.split("/");
+      const parts = reveal.split("/");
       let cur = "";
       for (let i = 0; i < parts.length - 1; i++) {
         cur = cur ? `${cur}/${parts[i]}` : parts[i];
@@ -109,7 +120,7 @@ export function ProjectFileList({ files, selected, onSelect, loading }: Props) {
       }
       return next;
     });
-  }, [selected]);
+  }, [reveal]);
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(
@@ -161,6 +172,12 @@ export function ProjectFileList({ files, selected, onSelect, loading }: Props) {
               const isDir = node.type === "dir";
               const isOpen = isDir && expanded.has(node.path);
               const isSelected = node.type === "file" && node.path === selected;
+              // Cross-tab indicator: the active file (e.g. an open diff) that
+              // isn't the explicit selection here.
+              const isActive =
+                node.type === "file" &&
+                !isSelected &&
+                node.path === activeFilePath;
               return (
                 <button
                   key={vi.key}
@@ -170,7 +187,9 @@ export function ProjectFileList({ files, selected, onSelect, loading }: Props) {
                     "absolute left-0 top-0 flex w-full items-center gap-1 border-l-2 pr-2 text-left font-[family-name:var(--font-mono)] text-[12px] transition-colors",
                     isSelected
                       ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)] text-[var(--text)]"
-                      : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
+                      : isActive
+                        ? "border-l-[var(--accent)] bg-[var(--bg-surface)] text-[var(--text)]"
+                        : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
                   )}
                   style={{
                     height: ROW_HEIGHT,
@@ -181,6 +200,11 @@ export function ProjectFileList({ files, selected, onSelect, loading }: Props) {
                   <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[var(--text-tertiary)]">
                     {isDir ? <Chevron open={!!isOpen} /> : null}
                   </span>
+                  {isDir ? (
+                    <FolderIcon open={!!isOpen} />
+                  ) : (
+                    <FileIcon name={node.name} />
+                  )}
                   <span className="truncate">
                     {filtered && node.type === "file" ? (
                       <>
