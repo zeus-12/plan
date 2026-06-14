@@ -123,6 +123,7 @@ const electronAPI = {
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", id, cols, rows),
   terminalKill: (id: string) => ipcRenderer.send("terminal:kill", id),
+  terminalList: () => ipcRenderer.invoke("terminal:list"),
   saveTempImage: (data: Uint8Array, ext: string) =>
     ipcRenderer.invoke("terminal:saveTempImage", data, ext),
   onTerminalData: (cb: (chunk: { id: string; data: string }) => void) => {

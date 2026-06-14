@@ -102,6 +102,7 @@ interface ElectronAPI {
   ) => Promise<{ running: boolean; process: string | null }>;
   terminalResize: (id: string, cols: number, rows: number) => void;
   terminalKill: (id: string) => void;
+  terminalList: () => Promise<{ id: string; cwd: string; pid: number }[]>;
   saveTempImage: (data: Uint8Array, ext: string) => Promise<string | null>;
   onTerminalData: (
     cb: (chunk: { id: string; data: string }) => void

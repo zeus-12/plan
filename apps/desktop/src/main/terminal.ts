@@ -238,3 +238,18 @@ export function killTerminal(id: string) {
 export function killAllTerminals() {
   for (const enc of [...sessions.keys()]) killTerminal(enc);
 }
+
+export interface TerminalInfo {
+  id: string;
+  cwd: string;
+  pid: number;
+}
+
+/** Snapshot of every live pty — the source of truth for "what's running". */
+export function listTerminals(): TerminalInfo[] {
+  return [...sessions.entries()].map(([id, s]) => ({
+    id,
+    cwd: s.cwd,
+    pid: s.pty.pid,
+  }));
+}

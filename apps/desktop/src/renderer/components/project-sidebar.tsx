@@ -46,6 +46,7 @@ interface Props {
   onSelect: (encoded: string) => void;
   onAddProject: () => void;
   onSetArchived: (encoded: string, archived: boolean) => Promise<void> | void;
+  onOpenDashboard: () => void;
 }
 
 const LEAF_HEIGHT = 50;
@@ -76,6 +77,24 @@ function persistExpanded(s: Set<string>) {
 type Row = VisibleItem;
 
 /** Panel-left glyph — toggles the projects (1st) sidebar. */
+function GaugeIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m12 14 4-4" />
+      <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+    </svg>
+  );
+}
+
 function PanelLeftIcon() {
   return (
     <svg
@@ -136,6 +155,7 @@ export function ProjectSidebar({
   onSelect,
   onAddProject,
   onSetArchived,
+  onOpenDashboard,
 }: Props) {
   const sidebar = useSidebar();
   // Pick a representative branch per project: first repo's branch.
@@ -251,7 +271,22 @@ export function ProjectSidebar({
         <span className="font-[family-name:var(--font-mono)] text-sm font-semibold tracking-tight text-[var(--text)]">
           plan
         </span>
-        <div className="[-webkit-app-region:no-drag]">
+        <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenDashboard}
+                aria-label="Running Claude sessions"
+              >
+                <GaugeIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <span>Running Claude sessions</span>
+            </TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

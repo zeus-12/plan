@@ -56,6 +56,7 @@ import {
   resizeTerminal,
   killTerminal,
   killAllTerminals,
+  listTerminals,
   type TerminalChunk,
 } from "./terminal";
 import {
@@ -569,6 +570,7 @@ function registerIpc() {
       resizeTerminal(id, cols, rows)
   );
   ipcMain.on("terminal:kill", (_e, id: string) => killTerminal(id));
+  ipcMain.handle("terminal:list", () => listTerminals());
 
   // Write a pasted image to a temp file; the renderer types the path into the
   // terminal (Claude Code reads image paths as attachments).

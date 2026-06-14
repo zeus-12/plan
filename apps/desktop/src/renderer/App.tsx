@@ -8,7 +8,9 @@ import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
 import { SwitcherOverlay } from "./components/switcher-overlay";
+import { SessionsDashboard } from "./components/sessions-dashboard";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
+import { requestSessionNav } from "./lib/session-nav-store";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
@@ -118,6 +120,20 @@ function Shell() {
 
   const selected = projects.find((p) => p.encoded === selectedEncoded) ?? null;
 
+  // Sessions dashboard: a control-center for every live Claude pty.
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const navigateToSession = useCallback(
+    (encoded: string, sessionId: string) => {
+      // Persist the target so the workspace selects it on (re)mount when we
+      // switch project; notify the store for the already-open-project case.
+      window.localStorage.setItem(`plan.session.${encoded}`, sessionId);
+      setSelectedEncoded(encoded);
+      requestSessionNav(encoded, sessionId);
+      setDashboardOpen(false);
+    },
+    []
+  );
+
   // Ctrl+Tab: cycle projects in a modal, commit on Ctrl-release. Ordered
   // most-recently-active first (same recency signal the sidebar sorts by), so
   // the current project sits at top and the first Tab lands on the one below.
@@ -151,6 +167,7 @@ function Shell() {
         onSelect={setSelectedEncoded}
         onAddProject={handleAddProject}
         onSetArchived={handleSetArchived}
+        onOpenDashboard={() => setDashboardOpen(true)}
       />
       <main className="flex min-w-0 flex-1 flex-col">
         {selected ? (
@@ -170,6 +187,11 @@ function Shell() {
           </div>
         )}
       </main>
+      <SessionsDashboard
+        open={dashboardOpen}
+        onClose={() => setDashboardOpen(false)}
+        onNavigate={navigateToSession}
+      />
       {projectSwitcher.active && (
         <SwitcherOverlay
           title="Projects"
