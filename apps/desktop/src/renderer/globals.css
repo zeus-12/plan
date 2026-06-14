@@ -32,3 +32,17 @@ textarea {
   -webkit-user-select: text;
   cursor: text;
 }
+
+/*
+ * The file viewer's editor surface is a transparent textarea laid over the
+ * syntax-highlighted layer (caret + keyboard nav come from the textarea). Its
+ * native selection is what the user sees while dragging — live and GPU-fast —
+ * so we keep it, just translucent enough that the colored text beneath shows
+ * through.
+ */
+.file-editor-input::selection {
+  background: color-mix(in srgb, var(--selection-bg) 70%, transparent);
+}
+.file-editor-input::-moz-selection {
+  background: color-mix(in srgb, var(--selection-bg) 70%, transparent);
+}

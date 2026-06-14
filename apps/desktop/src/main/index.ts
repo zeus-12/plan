@@ -29,7 +29,11 @@ import {
 import { readSessionFile, type ParsedSession } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
-import { listProjectFiles, readProjectFile } from "./project-files";
+import {
+  listProjectFiles,
+  readProjectFile,
+  resolveProjectFilePath,
+} from "./project-files";
 import { readdir } from "fs/promises";
 import { startPlansWatcher, stopPlansWatcher } from "./plans-watcher";
 import {
@@ -456,6 +460,9 @@ function registerIpc() {
   );
   ipcMain.handle("files:read", async (_e, encoded: string, relPath: string) =>
     readProjectFile(encoded, relPath)
+  );
+  ipcMain.handle("files:path", async (_e, encoded: string, relPath: string) =>
+    resolveProjectFilePath(encoded, relPath)
   );
 
   ipcMain.handle("repos:list", async (_e, encoded: string) =>

@@ -19,6 +19,11 @@ interface MessageOutputProps {
   /** When provided, renders a "Send" button that passes the current message. */
   onSend?: (message: string) => void;
   sendLabel?: string;
+  /**
+   * When provided, renders a "Clear" reset button (top-right). The handler is
+   * expected to confirm with the user before discarding the comments.
+   */
+  onClear?: () => void;
 }
 
 export function MessageOutput({
@@ -29,6 +34,7 @@ export function MessageOutput({
   count,
   onSend,
   sendLabel = "Send to terminal",
+  onClear,
 }: MessageOutputProps) {
   const [copied, setCopied] = useState(false);
   const [sent, setSent] = useState(false);
@@ -127,6 +133,15 @@ export function MessageOutput({
           </span>
         </button>
         <div className="flex items-center gap-2">
+          {onClear && !isEditing && (
+            <button
+              onClick={onClear}
+              title="Clear all comments"
+              className="rounded-md px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--removed-text)]"
+            >
+              Clear
+            </button>
+          )}
           {!isEditing && (
             <button
               onClick={startEditing}

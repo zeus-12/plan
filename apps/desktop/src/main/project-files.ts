@@ -130,3 +130,19 @@ function isBinary(buf: Buffer): boolean {
   for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
   return false;
 }
+
+/**
+ * Absolute filesystem path for a project-relative file, or null if it escapes
+ * the project root. Used to build a `file://` URL for image previews — no bytes
+ * are read into JS (same approach as transcript images).
+ */
+export async function resolveProjectFilePath(
+  encoded: string,
+  relPath: string
+): Promise<string | null> {
+  const cwd = await resolveProjectCwd(encoded);
+  const full = join(cwd, relPath);
+  const rel = relative(cwd, full);
+  if (rel.startsWith("..") || rel === "") return null;
+  return full;
+}

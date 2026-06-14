@@ -39,6 +39,10 @@ interface ElectronAPI {
     encoded: string,
     relPath: string
   ) => Promise<{ text: string; truncated: boolean; binary: boolean } | null>;
+  projectFilePath: (
+    encoded: string,
+    relPath: string
+  ) => Promise<string | null>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
   onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;

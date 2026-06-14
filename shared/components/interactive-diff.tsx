@@ -29,7 +29,7 @@ import {
 } from "../lib/diff-merge";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import { useShikiReady } from "../lib/shiki";
-import { useSelectionCommit } from "../lib/use-selection-commit";
+import { useCommentSelection } from "../lib/use-comment-selection";
 import { CommentPopover } from "./comment-popover";
 
 /* ── Constants ────────────────────────────────────────────── */
@@ -46,11 +46,10 @@ const GUTTER_FONT_SIZE = 11;
 
 /* ── Types ────────────────────────────────────────────────── */
 
-interface PendingSel {
-  selectedText: string;
+/** Surface-specific anchor for a diff comment: a char range + which side. */
+interface DiffAnchor {
   startOffset: number;
   endOffset: number;
-  popoverPos: { top: number; left: number };
   side: "left" | "right";
 }
 
@@ -260,7 +259,6 @@ export function InteractiveDiff({
   const leftColRef = useRef<HTMLDivElement>(null);
   const rightColRef = useRef<HTMLDivElement>(null);
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
-  const [pending, setPending] = useState<PendingSel | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
     new Set()
@@ -601,12 +599,10 @@ export function InteractiveDiff({
   /* ── Selection ──────────────────────────────────────────── */
 
   // Timing (settle multi-clicks, catch releases outside the pane) lives in
-  // useSelectionCommit; this reads the final selection.
-  function handleSelection() {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !contentRef.current) return;
-    const range = sel.getRangeAt(0);
-    if (!contentRef.current.contains(range.commonAncestorContainer)) return;
+  // useCommentSelection; this just maps a settled selection to a diff anchor.
+  function resolveSelection(range: Range, sel: Selection) {
+    if (!contentRef.current) return null;
+    if (!contentRef.current.contains(range.commonAncestorContainer)) return null;
 
     let side: "left" | "right" = "right";
 
@@ -615,16 +611,16 @@ export function InteractiveDiff({
       const endSide = findSplitSide(range.endContainer);
       // Bail without clearing — clearing mid-gesture is what made cross-line
       // selections feel like they didn't register.
-      if (!startSide || !endSide || startSide !== endSide) return;
+      if (!startSide || !endSide || startSide !== endSide) return null;
       if (startSide === "left") side = "left";
     }
 
     const text = sel.toString();
-    if (!text.trim()) return;
+    if (!text.trim()) return null;
 
     const start = getAbsoluteOffset(range.startContainer, range.startOffset);
     const end = getAbsoluteOffset(range.endContainer, range.endOffset);
-    if (start === -1 || end === -1) return;
+    if (start === -1 || end === -1) return null;
 
     // In unified view, determine side from the diff line type
     if (effectiveViewMode === "unified") {
@@ -633,35 +629,32 @@ export function InteractiveDiff({
     }
 
     const rect = range.getBoundingClientRect();
-    setPending({
+    return {
+      data: { startOffset: start, endOffset: end, side },
       selectedText: text.trim(),
-      startOffset: start,
-      endOffset: end,
-      side,
-      popoverPos: {
+      position: {
         top: rect.bottom + 8,
         left: Math.max(
           8,
           Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
         ),
       },
-    });
+    };
   }
 
-  useSelectionCommit(handleSelection, interactive);
-
-  function submitNew(comment: string) {
-    if (!pending || !onAddAnnotation) return;
-    onAddAnnotation(
-      pending.selectedText,
-      pending.startOffset,
-      pending.endOffset,
-      comment,
-      pending.side
-    );
-    setPending(null);
-    window.getSelection()?.removeAllRanges();
-  }
+  const selection = useCommentSelection<DiffAnchor>({
+    enabled: interactive,
+    resolve: resolveSelection,
+    onCreate: (data, selectedText, comment) =>
+      onAddAnnotation?.(
+        selectedText,
+        data.startOffset,
+        data.endOffset,
+        comment,
+        data.side
+      ),
+  });
+  const pending = selection.pending;
 
   function submitEdit(comment: string) {
     if (!editing || !onUpdateAnnotation) return;
@@ -686,13 +679,18 @@ export function InteractiveDiff({
 
   type Hl = { s: number; e: number; kind: "ann" | "pending"; annId?: string };
 
-  function hlsForLine(lineIdx: number): Hl[] {
+  // `side` is the column being rendered in split view. A context (unchanged)
+  // line shares one DiffLine.idx across both columns, so without this filter a
+  // highlight anchored to one side bleeds onto the aligned line in the other.
+  // Undefined (unified view) means a single column — no filtering needed.
+  function hlsForLine(lineIdx: number, side?: "left" | "right"): Hl[] {
     const line = dLines[lineIdx];
     const ls = line.flatOffset;
     const le = ls + line.content.length;
     const out: Hl[] = [];
 
     for (const a of annotations) {
+      if (side && a.side !== side) continue;
       if (a.startOffset < le && a.endOffset > ls) {
         out.push({
           s: Math.max(a.startOffset, ls) - ls,
@@ -703,10 +701,15 @@ export function InteractiveDiff({
       }
     }
 
-    if (pending && pending.startOffset < le && pending.endOffset > ls) {
+    if (
+      pending &&
+      (!side || pending.data.side === side) &&
+      pending.data.startOffset < le &&
+      pending.data.endOffset > ls
+    ) {
       out.push({
-        s: Math.max(pending.startOffset, ls) - ls,
-        e: Math.min(pending.endOffset, le) - ls,
+        s: Math.max(pending.data.startOffset, ls) - ls,
+        e: Math.min(pending.data.endOffset, le) - ls,
         kind: "pending",
       });
     }
@@ -714,12 +717,12 @@ export function InteractiveDiff({
     return out.sort((a, b) => a.s - b.s);
   }
 
-  function renderContent(lineIdx: number): ReactNode {
+  function renderContent(lineIdx: number, side?: "left" | "right"): ReactNode {
     const line = dLines[lineIdx];
     const txt = line.content;
     if (!txt) return "\u00A0";
 
-    const hls = hlsForLine(lineIdx);
+    const hls = hlsForLine(lineIdx, side);
     const syntax = tokensForDiffLine(line);
     const wordSegments =
       line.wordSegments && !line.whitespaceOnly ? line.wordSegments : null;
@@ -1172,7 +1175,7 @@ export function InteractiveDiff({
           data-dline={line.idx}
           style={contentCellStyle(vt)}
         >
-          {renderContent(line.idx)}
+          {renderContent(line.idx, side)}
         </td>
       </tr>
     );
@@ -1387,13 +1390,10 @@ export function InteractiveDiff({
 
       {pending && (
         <CommentPopover
-          position={pending.popoverPos}
+          position={pending.position}
           selectedText={pending.selectedText}
-          onSubmit={submitNew}
-          onClose={() => {
-            setPending(null);
-            window.getSelection()?.removeAllRanges();
-          }}
+          onSubmit={selection.submit}
+          onClose={selection.cancel}
         />
       )}
       {editing && (

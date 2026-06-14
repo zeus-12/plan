@@ -8,10 +8,11 @@ import {
   useState,
 } from "react";
 import { cn } from "@plan/shared/lib/utils";
-import { useSelectionCommit } from "@plan/shared/lib/use-selection-commit";
+import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { Markdown } from "@plan/shared/components/markdown";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
+import { ImageLightbox } from "./image-lightbox";
 import type {
   ConversationMessage,
   MessagePart,
@@ -56,13 +57,12 @@ interface Props {
   onSendKeys?: (keys: string[]) => void;
 }
 
-interface PendingSel {
+/** Surface-specific anchor for a chat comment: a char range within one part. */
+interface ChatAnchor {
   messageUuid: string;
   partIndex: number;
-  selectedText: string;
   startOffset: number;
   endOffset: number;
-  popoverPos: { top: number; left: number };
 }
 
 interface EditingAnn {
@@ -325,6 +325,7 @@ function mediaUrl(path: string): string {
 
 function TranscriptImage({ path }: { path: string }) {
   const [failed, setFailed] = useState(false);
+  const [preview, setPreview] = useState(false);
   if (failed) {
     return (
       <div className="my-1 rounded-md border border-dashed border-[var(--border)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -333,13 +334,18 @@ function TranscriptImage({ path }: { path: string }) {
       </div>
     );
   }
+  const src = mediaUrl(path);
   return (
-    <img
-      src={mediaUrl(path)}
-      alt="Attached image"
-      onError={() => setFailed(true)}
-      className="my-1 max-h-[340px] max-w-full rounded-md border border-[var(--border)] object-contain"
-    />
+    <>
+      <img
+        src={src}
+        alt="Attached image"
+        onError={() => setFailed(true)}
+        onClick={() => setPreview(true)}
+        className="my-1 max-h-[340px] max-w-full cursor-zoom-in rounded-md border border-[var(--border)] object-contain"
+      />
+      {preview && <ImageLightbox src={src} onClose={() => setPreview(false)} />}
+    </>
   );
 }
 
@@ -516,7 +522,6 @@ export const MessageList = memo(function MessageList({
     () => messages.filter((m) => !m.parts.every((p) => p.kind === "tool_result")),
     [messages]
   );
-  const [pending, setPending] = useState<PendingSel | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
 
   const annotationsByMessage = useMemo(() => {
@@ -592,12 +597,10 @@ export const MessageList = memo(function MessageList({
 
   // Selection → comment popover (within a single text part). Timing (when the
   // selection has settled, and catching releases outside the pane) is handled
-  // by useSelectionCommit; this just reads the final selection.
-  const handleSelection = useCallback(() => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !parentRef.current) return;
-    const range = sel.getRangeAt(0);
-    if (!parentRef.current.contains(range.commonAncestorContainer)) return;
+  // by useCommentSelection; this just maps a settled selection to a chat anchor.
+  const resolveSelection = useCallback((range: Range, sel: Selection) => {
+    if (!parentRef.current) return null;
+    if (!parentRef.current.contains(range.commonAncestorContainer)) return null;
 
     // Anchor on the part the selection STARTS in. A triple-click (or a
     // double-click-drag) often lands the end boundary just past the block — in
@@ -607,7 +610,7 @@ export const MessageList = memo(function MessageList({
     const part =
       ancestorWithAttr(range.startContainer, "data-part-index") ??
       ancestorWithAttr(range.endContainer, "data-part-index");
-    if (!part) return;
+    if (!part) return null;
 
     const messageUuid = part.getAttribute("data-message-uuid") ?? "";
     const partIndex = parseInt(part.getAttribute("data-part-index") ?? "0", 10);
@@ -624,45 +627,44 @@ export const MessageList = memo(function MessageList({
     while (start < end && /\s/.test(fullText[start])) start++;
     while (end > start && /\s/.test(fullText[end - 1])) end--;
     const selectedText = fullText.slice(start, end);
-    if (!selectedText) return;
+    if (!selectedText) return null;
 
     const rect = range.getBoundingClientRect();
-    setPending({
-      messageUuid,
-      partIndex,
+    return {
+      data: { messageUuid, partIndex, startOffset: start, endOffset: end },
       selectedText,
-      startOffset: start,
-      endOffset: end,
-      popoverPos: {
+      position: {
         top: rect.bottom + 8,
         left: Math.max(
           8,
           Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
         ),
       },
-    });
+    };
   }, []);
+
+  const createAnnotation = useCallback(
+    (data: ChatAnchor, selectedText: string, comment: string) => {
+      onAddAnnotation(
+        data.messageUuid,
+        data.partIndex,
+        selectedText,
+        data.startOffset,
+        data.endOffset,
+        comment
+      );
+    },
+    [onAddAnnotation]
+  );
 
   // Only listen while this pane is the visible one (the diffs/plans panes stay
   // mounted-but-hidden; we don't want their selections firing here).
-  useSelectionCommit(handleSelection, visible);
-
-  const submitNew = useCallback(
-    (comment: string) => {
-      if (!pending) return;
-      onAddAnnotation(
-        pending.messageUuid,
-        pending.partIndex,
-        pending.selectedText,
-        pending.startOffset,
-        pending.endOffset,
-        comment
-      );
-      setPending(null);
-      window.getSelection()?.removeAllRanges();
-    },
-    [pending, onAddAnnotation]
-  );
+  const selection = useCommentSelection<ChatAnchor>({
+    enabled: visible,
+    resolve: resolveSelection,
+    onCreate: createAnnotation,
+  });
+  const pending = selection.pending;
 
   const submitEdit = useCallback(
     (comment: string) => {
@@ -735,11 +737,11 @@ export const MessageList = memo(function MessageList({
                     annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
                     pendingRange={
                       pending &&
-                      pending.messageUuid === m.uuid &&
-                      pending.partIndex === i
+                      pending.data.messageUuid === m.uuid &&
+                      pending.data.partIndex === i
                         ? {
-                            start: pending.startOffset,
-                            end: pending.endOffset,
+                            start: pending.data.startOffset,
+                            end: pending.data.endOffset,
                           }
                         : null
                     }
@@ -761,13 +763,10 @@ export const MessageList = memo(function MessageList({
 
       {pending && (
         <CommentPopover
-          position={pending.popoverPos}
+          position={pending.position}
           selectedText={pending.selectedText}
-          onSubmit={submitNew}
-          onClose={() => {
-            setPending(null);
-            window.getSelection()?.removeAllRanges();
-          }}
+          onSubmit={selection.submit}
+          onClose={selection.cancel}
         />
       )}
       {editing && (

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   highlightPerLine,
@@ -8,11 +16,47 @@ import {
 } from "@plan/shared/lib/highlight";
 import type { Annotation } from "@plan/shared/lib/store";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
-import { useSelectionCommit } from "@plan/shared/lib/use-selection-commit";
+import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { cn } from "@plan/shared/lib/utils";
 import { FileIcon } from "./file-icon";
+import { ImageLightbox } from "./image-lightbox";
 
 const LINE_HEIGHT = 20;
+const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
+const POPOVER_VIEWPORT_PAD = 380;
+
+/**
+ * Editor surface: render the file in a real (read-only) caret/keyboard editor
+ * — a transparent textarea overlaid on the highlighted layer — so the file
+ * behaves like a VS Code pane (blinking caret, arrow-key navigation,
+ * shift+arrow selection). Flip {@link ALLOW_TYPING} to make it editable later.
+ */
+const ENABLE_EDITOR_CARET = true;
+/** When false the editor surface is read-only (caret + selection, no typing). */
+const ALLOW_TYPING = false;
+/**
+ * Above this many lines the editor surface (which can't virtualize — the
+ * textarea must hold the whole file) is skipped in favor of the virtualized
+ * read-only view. Keeps huge files fast at the cost of the caret on those.
+ */
+const EDITOR_MAX_LINES = 4000;
+
+const IMAGE_EXTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "avif",
+  "svg",
+]);
+
+function isImagePath(p: string): boolean {
+  const i = p.lastIndexOf(".");
+  return i !== -1 && IMAGE_EXTS.has(p.slice(i + 1).toLowerCase());
+}
 
 interface Props {
   encoded: string;
@@ -41,12 +85,12 @@ interface Loaded {
   binary: boolean;
 }
 
-interface PendingComment {
-  text: string;
+/** A resolved selection in the file, in absolute character offsets + lines. */
+interface FileAnchor {
   startLine: number;
   endLine: number;
-  top: number;
-  left: number;
+  startOffset: number;
+  endOffset: number;
 }
 
 interface EditingComment {
@@ -57,36 +101,85 @@ interface EditingComment {
   left: number;
 }
 
+/** A character-range highlight within one line, in line-local offsets. */
+interface Hl {
+  s: number;
+  e: number;
+  kind: "ann" | "pending";
+}
+
 function basename(p: string): string {
   const i = p.lastIndexOf("/");
   return i === -1 ? p : p.slice(i + 1);
 }
 
-/** Tokens carry dual light/dark colors; the global `.shiki-tok` rule picks one. */
-function lineNodes(line: string, tokens: SyntaxToken[] | undefined): ReactNode {
-  if (!tokens || tokens.length === 0) return line.length ? line : " ";
-  const out: ReactNode[] = [];
-  let cur = 0;
-  tokens.forEach((t, i) => {
-    if (t.start > cur) out.push(line.slice(cur, t.start));
+/**
+ * Render one line, merging syntax tokens with character-precise highlight
+ * ranges. Highlights tint only the selected characters (not the whole row), so
+ * a partial selection reads like an editor selection.
+ */
+function lineNodes(
+  line: string,
+  tokens: SyntaxToken[] | undefined,
+  hls: Hl[]
+): ReactNode {
+  const hasTokens = !!tokens && tokens.length > 0;
+  if (!hasTokens && hls.length === 0) return line.length ? line : " ";
+
+  const bounds = new Set<number>([0, line.length]);
+  if (hasTokens) {
+    for (const t of tokens!) {
+      bounds.add(t.start);
+      bounds.add(t.end);
+    }
+  }
+  for (const h of hls) {
+    bounds.add(h.s);
+    bounds.add(h.e);
+  }
+  const sorted = [...bounds]
+    .filter((b) => b >= 0 && b <= line.length)
+    .sort((a, b) => a - b);
+
+  const findTok = (p: number) =>
+    hasTokens ? tokens!.find((t) => t.start <= p && p < t.end) ?? null : null;
+  const findHl = (p: number) => hls.find((h) => h.s <= p && p < h.e) ?? null;
+
+  const parts: ReactNode[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const s = sorted[i];
+    const e = sorted[i + 1];
+    if (s >= e) continue;
+    const slice = line.slice(s, e);
+    const tok = findTok(s);
+    const hl = findHl(s);
+
     const style: Record<string, string | number> = {};
-    if (t.lightColor) style["--shiki-light"] = t.lightColor;
-    if (t.darkColor) style["--shiki-dark"] = t.darkColor;
-    if (t.italic) style.fontStyle = "italic";
-    if (t.bold) style.fontWeight = 600;
-    out.push(
+    const cls: string[] = [];
+    if (tok?.lightColor || tok?.darkColor) {
+      cls.push("shiki-tok");
+      if (tok.lightColor) style["--shiki-light"] = tok.lightColor;
+      if (tok.darkColor) style["--shiki-dark"] = tok.darkColor;
+    }
+    if (tok?.italic) style.fontStyle = "italic";
+    if (tok?.bold) style.fontWeight = 600;
+    if (hl) {
+      style.background =
+        hl.kind === "ann" ? "var(--highlight-bg)" : "var(--selection-bg)";
+      cls.push("rounded-sm");
+    }
+
+    parts.push(
       <span
-        key={i}
-        className={t.lightColor || t.darkColor ? "shiki-tok" : undefined}
+        key={s}
+        className={cls.join(" ") || undefined}
         style={style as React.CSSProperties}
       >
-        {line.slice(t.start, t.end)}
+        {slice}
       </span>
     );
-    cur = t.end;
-  });
-  if (cur < line.length) out.push(line.slice(cur));
-  return out;
+  }
+  return <>{parts}</>;
 }
 
 export function FileViewer({
@@ -100,15 +193,40 @@ export function FileViewer({
 }: Props) {
   const [data, setData] = useState<Loaded | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "missing">("loading");
-  const [pending, setPending] = useState<PendingComment | null>(null);
   const [editing, setEditing] = useState<EditingComment | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imgBroken, setImgBroken] = useState(false);
+  const [lightbox, setLightbox] = useState(false);
   const shikiReady = useShikiReady();
   const parentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const measureRef = useRef<HTMLSpanElement>(null);
+
+  const isImage = useMemo(() => isImagePath(path), [path]);
 
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
     setData(null);
+    setImageUrl(null);
+    setImgBroken(false);
+    setLightbox(false);
+    // Images load straight from disk via a file:// URL (no bytes through JS),
+    // the same way transcript images render.
+    if (isImage) {
+      window.electronAPI.projectFilePath(encoded, path).then((abs) => {
+        if (cancelled) return;
+        if (!abs) {
+          setStatus("missing");
+        } else {
+          setImageUrl(`file://${encodeURI(abs)}`);
+          setStatus("ok");
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     window.electronAPI.readProjectFile(encoded, path).then((res) => {
       if (cancelled) return;
       if (!res) {
@@ -121,10 +239,11 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [encoded, path]);
+  }, [encoded, path, isImage]);
 
   const language = useMemo(() => languageFromPath(path) ?? "plaintext", [path]);
-  const lines = useMemo(() => (data?.text ?? "").split("\n"), [data?.text]);
+  const text = data?.text ?? "";
+  const lines = useMemo(() => text.split("\n"), [text]);
   const perLine = useMemo(
     () =>
       data && !data.binary ? highlightPerLine(data.text, language) : [],
@@ -133,8 +252,8 @@ export function FileViewer({
     [data, language, shikiReady]
   );
 
-  // Character offset where each line begins — lets a line range map back to the
-  // offsets the Annotation shape stores.
+  // Character offset where each line begins — lets a line/selection map back to
+  // the absolute offsets the Annotation shape stores.
   const lineStarts = useMemo(() => {
     const arr = new Array<number>(lines.length);
     let acc = 0;
@@ -145,29 +264,127 @@ export function FileViewer({
     return arr;
   }, [lines]);
 
-  // Lines covered by a comment (for tinting) + the comment anchored at each
-  // line's first row (for the clickable gutter marker).
-  const { covered, firstOf } = useMemo(() => {
-    const covered = new Set<number>();
-    const firstOf = new Map<number, Annotation>();
+  const lineOfOffset = useCallback(
+    (offset: number): number => {
+      // lineStarts is ascending — last index whose start is <= offset.
+      let lo = 0;
+      let hi = lineStarts.length - 1;
+      let ans = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (lineStarts[mid] <= offset) {
+          ans = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return ans;
+    },
+    [lineStarts]
+  );
+
+  const editorMode =
+    ENABLE_EDITOR_CARET &&
+    status === "ok" &&
+    !isImage &&
+    !!data &&
+    !data.binary &&
+    lines.length <= EDITOR_MAX_LINES;
+
+  // The comment anchored at each line's first row (for the gutter marker).
+  const firstOf = useMemo(() => {
+    const map = new Map<number, Annotation>();
     for (const an of annotations) {
       const s = an.context?.startLine;
       if (!s) continue;
-      const e = an.context?.endLine ?? s;
-      for (let ln = s; ln <= e; ln++) covered.add(ln);
-      if (!firstOf.has(s)) firstOf.set(s, an);
+      if (!map.has(s)) map.set(s, an);
     }
-    return { covered, firstOf };
+    return map;
   }, [annotations]);
 
-  const virtualizer = useVirtualizer({
-    count: lines.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => LINE_HEIGHT,
-    overscan: 30,
-  });
+  /* ── Monospace metrics (for editor caret/popover alignment) ───── */
+
+  const [charWidth, setCharWidth] = useState(8);
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const w = el.getBoundingClientRect().width / 40;
+    if (w > 0) setCharWidth(w);
+  }, [shikiReady, status]);
 
   const gutterCh = Math.max(2, String(lines.length).length) + 1;
+  const gutterChCount = gutterCh + 2; // matches the gutter span's `ch` width
+  const gutterWidthPx = gutterChCount * charWidth;
+
+  /* ── Editor (textarea) selection state ────────────────────────── */
+
+  // Live selection inside the editor textarea, in absolute char offsets. Drives
+  // the visible highlight (the textarea's own selection is hidden via CSS).
+  const [editorSel, setEditorSel] = useState<{ start: number; end: number } | null>(
+    null
+  );
+  const [editorPopover, setEditorPopover] = useState<
+    { top: number; left: number } | null
+  >(null);
+
+  useEffect(() => {
+    // Reset selection when the open file changes.
+    setEditorSel(null);
+    setEditorPopover(null);
+  }, [encoded, path]);
+
+  const caretPopoverPos = useCallback(
+    (offset: number) => {
+      const parent = parentRef.current;
+      if (!parent) return { top: 0, left: 0 };
+      const rect = parent.getBoundingClientRect();
+      const ln = lineOfOffset(offset);
+      const col = offset - lineStarts[ln];
+      const x =
+        rect.left +
+        gutterWidthPx +
+        CONTENT_PAD_LEFT +
+        col * charWidth -
+        parent.scrollLeft;
+      const y = rect.top + (ln + 1) * LINE_HEIGHT - parent.scrollTop;
+      return {
+        top: y + 8,
+        left: Math.max(
+          8,
+          Math.min(x, window.innerWidth - POPOVER_VIEWPORT_PAD)
+        ),
+      };
+    },
+    [lineOfOffset, lineStarts, gutterWidthPx, charWidth]
+  );
+
+  const ensureCaretVisible = useCallback(
+    (offset: number) => {
+      const parent = parentRef.current;
+      if (!parent) return;
+      const ln = lineOfOffset(offset);
+      const top = ln * LINE_HEIGHT;
+      const bottom = top + LINE_HEIGHT;
+      if (top < parent.scrollTop) parent.scrollTop = top;
+      else if (bottom > parent.scrollTop + parent.clientHeight)
+        parent.scrollTop = bottom - parent.clientHeight;
+    },
+    [lineOfOffset]
+  );
+
+  // Read the textarea's current selection into our state (drives the visible
+  // highlight; the textarea's own selection is hidden via CSS).
+  const readEditorSel = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return null;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    setEditorSel({ start, end });
+    return { start, end };
+  }, []);
+
+  /* ── DOM selection (virtualized read-only fallback) ───────────── */
 
   // Map a selection endpoint back to the 0-based line index of its row.
   const lineIndexOf = useCallback((node: Node | null): number | null => {
@@ -181,60 +398,142 @@ export function FileViewer({
     return null;
   }, []);
 
-  const handleSelection = useCallback(() => {
-    const root = parentRef.current;
-    if (!root) return;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    // Only act when the whole selection lives inside this viewer.
-    if (
-      !root.contains(range.startContainer) ||
-      !root.contains(range.endContainer)
-    )
-      return;
-    const text = sel.toString();
-    if (!text.trim()) return;
-    const a = lineIndexOf(range.startContainer);
-    const b = lineIndexOf(range.endContainer);
-    if (a == null || b == null) return;
-    const rect = range.getBoundingClientRect();
-    setEditing(null);
-    setPending({
-      text,
-      startLine: Math.min(a, b) + 1,
-      endLine: Math.max(a, b) + 1,
-      top: rect.bottom + 8,
-      left: rect.left,
-    });
-  }, [lineIndexOf]);
+  // The content `<span>` an endpoint lives in (so the offset walk skips the
+  // gutter's line-number text).
+  const contentElOf = useCallback((node: Node | null): Element | null => {
+    let el: Element | null =
+      node instanceof Element ? node : node?.parentElement ?? null;
+    while (el && el !== parentRef.current) {
+      if (el.hasAttribute("data-line-content")) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }, []);
 
-  useSelectionCommit(handleSelection, active && status === "ok");
+  const resolveSelection = useCallback(
+    (range: Range, selection: Selection) => {
+      const root = parentRef.current;
+      if (!root) return null;
+      if (
+        !root.contains(range.startContainer) ||
+        !root.contains(range.endContainer)
+      )
+        return null;
+      const sel = selection.toString();
+      if (!sel.trim()) return null;
+      const aIdx = lineIndexOf(range.startContainer);
+      const bIdx = lineIndexOf(range.endContainer);
+      const aEl = contentElOf(range.startContainer);
+      const bEl = contentElOf(range.endContainer);
+      if (aIdx == null || bIdx == null || !aEl || !bEl) return null;
 
-  const submitNew = useCallback(
-    (comment: string) => {
-      if (!pending) return;
-      const startOffset = lineStarts[pending.startLine - 1] ?? 0;
-      const endIdx = pending.endLine - 1;
-      const endOffset = (lineStarts[endIdx] ?? 0) + (lines[endIdx]?.length ?? 0);
+      let startOffset =
+        lineStarts[aIdx] +
+        offsetWithinContent(aEl, range.startContainer, range.startOffset);
+      let endOffset =
+        lineStarts[bIdx] +
+        offsetWithinContent(bEl, range.endContainer, range.endOffset);
+      if (startOffset > endOffset)
+        [startOffset, endOffset] = [endOffset, startOffset];
+
+      return {
+        data: {
+          startLine: Math.min(aIdx, bIdx) + 1,
+          endLine: Math.max(aIdx, bIdx) + 1,
+          startOffset,
+          endOffset,
+        },
+        selectedText: sel,
+      };
+    },
+    [lineIndexOf, contentElOf, lineStarts]
+  );
+
+  const createAnnotation = useCallback(
+    (data: FileAnchor, selectedText: string, comment: string) => {
       onAddAnnotation(
-        pending.text,
-        startOffset,
-        endOffset,
-        pending.startLine,
-        pending.endLine,
+        selectedText,
+        data.startOffset,
+        data.endOffset,
+        data.startLine,
+        data.endLine,
         comment
       );
-      setPending(null);
-      window.getSelection()?.removeAllRanges();
     },
-    [pending, lineStarts, lines, onAddAnnotation]
+    [onAddAnnotation]
   );
+
+  const selection = useCommentSelection<FileAnchor>({
+    enabled: active && status === "ok" && !editorMode,
+    resolve: resolveSelection,
+    onCreate: createAnnotation,
+  });
+  const pending = selection.pending;
+
+  // Uncommitted highlight range. In editor mode the textarea's own (translucent)
+  // native selection is shown live during the drag — drawing our own on top of
+  // that would double it up and re-render every drag tick (the old lag). But the
+  // moment the comment popover opens it steals focus, and a blurred textarea
+  // hides its selection — so once the popover is up we draw a persistent
+  // highlight (one render, not per-tick) to hold the selection visible while the
+  // user types, exactly like the diff/plan/chat surfaces.
+  const activeRange = useMemo<{ s: number; e: number } | null>(() => {
+    if (editorMode) {
+      if (editorPopover && editorSel && editorSel.start !== editorSel.end)
+        return {
+          s: Math.min(editorSel.start, editorSel.end),
+          e: Math.max(editorSel.start, editorSel.end),
+        };
+      return null;
+    }
+    return pending
+      ? { s: pending.data.startOffset, e: pending.data.endOffset }
+      : null;
+  }, [editorMode, editorPopover, editorSel, pending]);
+
+  // Opening the editor for an existing comment dismisses any in-flight selection.
+  useEffect(() => {
+    if (pending) setEditing(null);
+  }, [pending]);
+
+  const hlsForLine = useCallback(
+    (lineIdx: number): Hl[] => {
+      const ls = lineStarts[lineIdx];
+      const le = ls + lines[lineIdx].length;
+      const out: Hl[] = [];
+      for (const a of annotations) {
+        if (a.startOffset < le && a.endOffset > ls) {
+          out.push({
+            s: Math.max(a.startOffset, ls) - ls,
+            e: Math.min(a.endOffset, le) - ls,
+            kind: "ann",
+          });
+        }
+      }
+      if (activeRange && activeRange.s < le && activeRange.e > ls) {
+        out.push({
+          s: Math.max(activeRange.s, ls) - ls,
+          e: Math.min(activeRange.e, le) - ls,
+          kind: "pending",
+        });
+      }
+      return out.sort((a, b) => a.s - b.s);
+    },
+    [annotations, activeRange, lineStarts, lines]
+  );
+
+  const virtualizer = useVirtualizer({
+    count: lines.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => LINE_HEIGHT,
+    overscan: 30,
+  });
 
   const openEditor = useCallback(
     (an: Annotation, e: React.MouseEvent) => {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      setPending(null);
+      selection.cancel();
+      setEditorPopover(null);
       setEditing({
         id: an.id,
         selectedText: an.selectedText,
@@ -243,11 +542,92 @@ export function FileViewer({
         left: rect.left,
       });
     },
-    []
+    [selection]
   );
+
+  const submitEditorComment = useCallback(
+    (comment: string) => {
+      if (!editorSel || editorSel.start === editorSel.end) return;
+      const s = Math.min(editorSel.start, editorSel.end);
+      const e = Math.max(editorSel.start, editorSel.end);
+      onAddAnnotation(
+        text.slice(s, e),
+        s,
+        e,
+        lineOfOffset(s) + 1,
+        lineOfOffset(e) + 1,
+        comment
+      );
+      setEditorPopover(null);
+      const ta = textareaRef.current;
+      if (ta) ta.setSelectionRange(e, e);
+      setEditorSel({ start: e, end: e });
+    },
+    [editorSel, text, onAddAnnotation, lineOfOffset]
+  );
+
+  /* ── Gutter cell (line number + comment marker) ──────────────── */
+
+  function gutterCell(lineNo: number) {
+    const anchored = firstOf.get(lineNo);
+    return (
+      <span
+        className="sticky left-0 z-10 flex shrink-0 select-none items-center justify-end gap-1 bg-[var(--bg)] pr-3 pl-3 text-right text-[var(--text-tertiary)]"
+        // Pixel width (not `ch`) so it matches the textarea overlay's measured
+        // metrics exactly — otherwise the caret/selection drift from the glyphs.
+        style={{ width: gutterWidthPx }}
+      >
+        {anchored && (
+          <button
+            onClick={(e) => openEditor(anchored, e)}
+            aria-label="Edit comment"
+            title={anchored.comment}
+            className="flex h-2 w-2 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] transition-transform hover:scale-125"
+          />
+        )}
+        <span>{lineNo}</span>
+      </span>
+    );
+  }
+
+  const newCommentPopover = editorMode
+    ? editorPopover && editorSel && editorSel.start !== editorSel.end
+      ? {
+          position: editorPopover,
+          selectedText: text.slice(
+            Math.min(editorSel.start, editorSel.end),
+            Math.max(editorSel.start, editorSel.end)
+          ),
+          onSubmit: submitEditorComment,
+          onClose: () => {
+            setEditorPopover(null);
+            const ta = textareaRef.current;
+            if (ta && editorSel) ta.setSelectionRange(editorSel.end, editorSel.end);
+            setEditorSel((s) => (s ? { start: s.end, end: s.end } : null));
+          },
+        }
+      : null
+    : pending
+      ? {
+          position: pending.position,
+          selectedText: pending.selectedText,
+          onSubmit: selection.submit,
+          onClose: selection.cancel,
+        }
+      : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* Hidden ruler: 40 mono chars → per-character width for caret math. */}
+      <span
+        ref={measureRef}
+        aria-hidden
+        className="pointer-events-none invisible absolute font-[family-name:var(--font-mono)] text-[13px] leading-[20px]"
+        style={{ whiteSpace: "pre" }}
+      >
+        0000000000000000000000000000000000000000
+      </span>
+
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px]">
         <FileIcon name={basename(path)} />
         <span className="truncate text-[var(--text)]">{basename(path)}</span>
@@ -263,12 +643,32 @@ export function FileViewer({
         <Centered>Loading…</Centered>
       ) : status === "missing" ? (
         <Centered>File not found</Centered>
+      ) : isImage ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
+          {imageUrl && !imgBroken ? (
+            <img
+              src={imageUrl}
+              alt={basename(path)}
+              onClick={() => setLightbox(true)}
+              onError={() => setImgBroken(true)}
+              className="max-h-full max-w-full cursor-zoom-in rounded-md border border-[var(--border)] object-contain"
+            />
+          ) : (
+            <Centered>Image unavailable</Centered>
+          )}
+        </div>
       ) : data?.binary ? (
         <Centered>Binary file — can&apos;t preview</Centered>
       ) : (
+        /*
+         * One virtualized highlighted layer for both modes. In editor mode a
+         * single full-height textarea overlays it for the caret/keyboard model
+         * (the textarea is one native control, so it stays cheap even for big
+         * files — only the visible highlighted lines are real DOM).
+         */
         <div
           ref={parentRef}
-          className="min-h-0 flex-1 overflow-auto font-[family-name:var(--font-mono)] text-[13px] leading-[20px]"
+          className="relative min-h-0 flex-1 overflow-auto font-[family-name:var(--font-mono)] text-[13px] leading-[20px]"
         >
           <div
             style={{
@@ -280,49 +680,94 @@ export function FileViewer({
           >
             {virtualizer.getVirtualItems().map((vi) => {
               const line = lines[vi.index];
-              const lineNo = vi.index + 1;
-              const isCovered = covered.has(lineNo);
-              const anchored = firstOf.get(lineNo);
               return (
                 <div
                   key={vi.key}
                   data-line-index={vi.index}
-                  className={cn(
-                    "absolute left-0 top-0 flex w-full",
-                    isCovered && "bg-[var(--bg-surface)]"
-                  )}
-                  style={{ height: LINE_HEIGHT, transform: `translateY(${vi.start}px)` }}
+                  className="absolute left-0 top-0 flex w-full"
+                  style={{
+                    height: LINE_HEIGHT,
+                    transform: `translateY(${vi.start}px)`,
+                  }}
                 >
+                  {gutterCell(vi.index + 1)}
                   <span
-                    className="sticky left-0 z-10 flex shrink-0 select-none items-center justify-end gap-1 bg-[var(--bg)] pr-3 pl-3 text-right text-[var(--text-tertiary)]"
-                    style={{ width: `${gutterCh + 2}ch` }}
-                  >
-                    {anchored && (
-                      <button
-                        onClick={(e) => openEditor(anchored, e)}
-                        aria-label="Edit comment"
-                        title={anchored.comment}
-                        className="flex h-2 w-2 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] transition-transform hover:scale-125"
-                      />
+                    data-line-content
+                    className={cn(
+                      "whitespace-pre pl-3 pr-6 text-[var(--text)]",
+                      // In editor mode the textarea owns selection; elsewhere the
+                      // content opts into native text selection.
+                      !editorMode && "select-text [cursor:text]"
                     )}
-                    <span>{lineNo}</span>
-                  </span>
-                  <span className="select-text whitespace-pre pl-3 pr-6 text-[var(--text)] [cursor:text]">
-                    {lineNodes(line, perLine[vi.index])}
+                  >
+                    {lineNodes(line, perLine[vi.index], hlsForLine(vi.index))}
                   </span>
                 </div>
               );
             })}
+            {editorMode && (
+              <textarea
+                ref={textareaRef}
+                className="file-editor-input absolute bottom-0 top-0 resize-none border-0 bg-transparent p-0 text-[13px] leading-[20px] outline-none"
+                style={{
+                  left: gutterWidthPx,
+                  right: 0,
+                  paddingLeft: CONTENT_PAD_LEFT,
+                  fontFamily: "var(--font-mono)",
+                  color: "transparent",
+                  caretColor: "var(--text)",
+                  whiteSpace: "pre",
+                  overflow: "hidden",
+                }}
+                value={text}
+                wrap="off"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                aria-label={`${basename(path)} contents`}
+                // Editable (so the caret actually shows — readOnly hides it), but
+                // every mutation is cancelled. Flip ALLOW_TYPING to make it a real
+                // editor later; the controlled value is the second line of defense.
+                onChange={() => {}}
+                onBeforeInput={(e) => {
+                  if (!ALLOW_TYPING) e.preventDefault();
+                }}
+                onPaste={(e) => {
+                  if (!ALLOW_TYPING) e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  if (!ALLOW_TYPING) e.preventDefault();
+                }}
+                // No onSelect: the native selection renders live on its own.
+                // Reading it into React state per drag-tick is what made the old
+                // selection lag — so we only settle it on release / key-up.
+                onMouseUp={() => {
+                  const s = readEditorSel();
+                  if (!s) return;
+                  if (s.start !== s.end)
+                    setEditorPopover(caretPopoverPos(Math.max(s.start, s.end)));
+                  else setEditorPopover(null);
+                }}
+                onKeyUp={(e) => {
+                  const s = readEditorSel();
+                  if (!s) return;
+                  ensureCaretVisible(s.end);
+                  if (e.shiftKey && s.start !== s.end)
+                    setEditorPopover(caretPopoverPos(Math.max(s.start, s.end)));
+                  else if (s.start === s.end) setEditorPopover(null);
+                }}
+              />
+            )}
           </div>
         </div>
       )}
 
-      {pending && (
+      {newCommentPopover && (
         <CommentPopover
-          position={{ top: pending.top, left: pending.left }}
-          selectedText={pending.text}
-          onSubmit={submitNew}
-          onClose={() => setPending(null)}
+          position={newCommentPopover.position}
+          selectedText={newCommentPopover.selectedText}
+          onSubmit={newCommentPopover.onSubmit}
+          onClose={newCommentPopover.onClose}
         />
       )}
       {editing && (
@@ -342,8 +787,28 @@ export function FileViewer({
           onClose={() => setEditing(null)}
         />
       )}
+      {lightbox && imageUrl && (
+        <ImageLightbox src={imageUrl} onClose={() => setLightbox(false)} />
+      )}
     </div>
   );
+}
+
+/** Sum text length within a content span up to (node, nodeOffset). */
+function offsetWithinContent(
+  contentEl: Element,
+  node: Node,
+  nodeOffset: number
+): number {
+  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
+  let within = 0;
+  let cur: Node | null = walker.nextNode();
+  while (cur) {
+    if (cur === node) return within + nodeOffset;
+    within += cur.textContent?.length ?? 0;
+    cur = walker.nextNode();
+  }
+  return within;
 }
 
 function Centered({ children }: { children: ReactNode }) {

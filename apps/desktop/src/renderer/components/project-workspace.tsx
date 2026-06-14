@@ -1443,6 +1443,28 @@ export function ProjectWorkspace({
     ]
   );
 
+  // "Clear" the comment buffer — discards every comment across files, diffs,
+  // plans, and chat. Gated behind a confirmation since it can't be undone.
+  const handleClearComments = useCallback(async () => {
+    const ok = await confirm({
+      title: "Clear all comments?",
+      description:
+        "This permanently removes every comment you've added across files, diffs, plans, and the chat. This can't be undone.",
+      confirmLabel: "Clear comments",
+    });
+    if (!ok) return;
+    setAnnotationsByFile({});
+    setChatAnnotations([]);
+    setAnnotationsByPlan({});
+    setAnnotationsByProjectFile({});
+  }, [
+    confirm,
+    setAnnotationsByFile,
+    setChatAnnotations,
+    setAnnotationsByPlan,
+    setAnnotationsByProjectFile,
+  ]);
+
   // "Run terminal": start `claude --resume` for the selected session in the
   // background (does NOT reveal the dock). Enables the composer.
   const handleResumeChat = useCallback(() => {
@@ -1918,6 +1940,7 @@ export function ProjectWorkspace({
                   count={totalComments}
                   onSend={handleAddToChat}
                   sendLabel="Add to chat"
+                  onClear={handleClearComments}
                 />
               </div>
             )}
@@ -1976,7 +1999,7 @@ export function ProjectWorkspace({
           onTabChange={setTab}
           repos={repos}
           repoGroups={repoGroups}
-          selectedFile={selectedFile}
+          selectedFile={openKind === "diffs" ? selectedFile : null}
           activeFilePath={activeFilePath}
           onSelectFile={handleSelectFile}
           onStageFile={handleStageFile}
@@ -1992,19 +2015,19 @@ export function ProjectWorkspace({
           filesLoading={filesLoading}
           diffAvailable={repos.length > 0}
           sessions={sessions}
-          selectedSession={selectedSessionId}
+          selectedSession={openKind === "chat" ? selectedSessionId : null}
           onSelectSession={handleSelectSession}
           onSetSessionArchived={handleSetSessionArchived}
           onRenameSession={handleRenameRequest}
           onNewChat={handleNewChat}
           sessionsLoading={sessionsLoading}
           plans={plans}
-          selectedPlan={selectedPlanPath}
+          selectedPlan={openKind === "plans" ? selectedPlanPath : null}
           onSelectPlan={handleSelectPlan}
           onSetPlanArchived={handleSetPlanArchived}
           projectFiles={projectFiles}
           projectFilesLoading={projectFilesLoading}
-          selectedProjectFile={selectedProjectFile}
+          selectedProjectFile={openKind === "files" ? selectedProjectFile : null}
           onSelectProjectFile={handleSelectProjectFile}
           encoded={project.encoded}
           terminals={sidebarTerminals}
