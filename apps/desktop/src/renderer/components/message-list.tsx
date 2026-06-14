@@ -1,6 +1,7 @@
 import {
   memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -12,6 +13,7 @@ import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { Markdown } from "@plan/shared/components/markdown";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
+import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
 import { ImageLightbox } from "./image-lightbox";
 import type {
   ConversationMessage,
@@ -364,6 +366,10 @@ interface MessagePartViewProps {
   terminalReady: boolean;
   /** Send raw keystrokes to the chat's terminal (drives TUI selectors). */
   onSendKeys?: (keys: string[]) => void;
+  /** All ExitPlanMode versions in the session, in order (for a plan part). */
+  planVersions: PlanVersionInfo[];
+  /** This part's index into `planVersions`, or -1 if it isn't a plan. */
+  planVersionIndex: number;
 }
 
 /** Memoized: a keystroke elsewhere must not re-render every markdown block. */
@@ -377,6 +383,8 @@ const MessagePartView = memo(function MessagePartView({
   result,
   terminalReady,
   onSendKeys,
+  planVersions,
+  planVersionIndex,
 }: MessagePartViewProps) {
   switch (part.kind) {
     case "text": {
@@ -429,6 +437,28 @@ const MessagePartView = memo(function MessagePartView({
           );
         }
       }
+      // ExitPlanMode renders as a clean inline Plan card, not a raw tool block.
+      // The body goes through the same annotation-aware markdown path as normal
+      // assistant text, so selecting it comments via the existing chat flow.
+      if (part.tool === "ExitPlanMode" && planVersionIndex >= 0) {
+        const planText = planVersions[planVersionIndex]?.text ?? "";
+        return (
+          <PlanCard
+            versions={planVersions}
+            versionIndex={planVersionIndex}
+            body={
+              <MarkdownText
+                text={planText}
+                messageUuid={message.uuid}
+                partIndex={partIndex}
+                partAnnotations={annotations}
+                pendingRange={pendingRange}
+                onClickAnnotation={onClickAnnotation}
+              />
+            }
+          />
+        );
+      }
       let inputJson: string;
       try {
         inputJson = JSON.stringify(part.input, null, 2);
@@ -470,6 +500,8 @@ const MessagePartView = memo(function MessagePartView({
   prev.onClickAnnotation === next.onClickAnnotation &&
   prev.terminalReady === next.terminalReady &&
   prev.onSendKeys === next.onSendKeys &&
+  prev.planVersions === next.planVersions &&
+  prev.planVersionIndex === next.planVersionIndex &&
   sameRange(prev.pendingRange, next.pendingRange) &&
   sameResult(prev.result, next.result));
 
@@ -489,6 +521,9 @@ function sameResult(a?: ToolResult, b?: ToolResult): boolean {
 }
 
 const EMPTY_ANNOTATIONS: ChatAnnotation[] = [];
+// Stable reference for non-plan parts so the memoized part view doesn't re-render
+// every time `messages` changes (only plan parts read the versions array).
+const EMPTY_PLAN_VERSIONS: PlanVersionInfo[] = [];
 
 /**
  * Memoized: the composer's state lives in the workspace, so without this every
@@ -506,11 +541,19 @@ export const MessageList = memo(function MessageList({
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
 
+  // Building the whole transcript (markdown for every text part) is the cost
+  // that froze the pane on a chat switch. Defer it: React keeps showing the
+  // current chat and builds the new one in a low-priority, interruptible pass,
+  // so the switch never hard-blocks the main thread. Everything below derives
+  // from `deferredMessages` so each render pass is internally consistent — no
+  // virtualization, so natural document flow (and stable scrolling) is intact.
+  const deferredMessages = useDeferredValue(messages);
+
   // Pair tool_result → tool_use (by id) so results render inside their tool
   // block, and drop the now-empty result-only messages from the timeline.
   const resultByToolUseId = useMemo(() => {
     const map = new Map<string, ToolResult>();
-    for (const m of messages) {
+    for (const m of deferredMessages) {
       for (const p of m.parts) {
         if (p.kind === "tool_result") {
           map.set(p.toolUseId, { output: p.output, isError: p.isError });
@@ -518,12 +561,33 @@ export const MessageList = memo(function MessageList({
       }
     }
     return map;
-  }, [messages]);
+  }, [deferredMessages]);
 
   const items = useMemo(
-    () => messages.filter((m) => !m.parts.every((p) => p.kind === "tool_result")),
-    [messages]
+    () =>
+      deferredMessages.filter(
+        (m) => !m.parts.every((p) => p.kind === "tool_result")
+      ),
+    [deferredMessages]
   );
+
+  // Every ExitPlanMode tool_use is one plan revision; in transcript order they
+  // are the plan's full version history. Map each plan part to its index in
+  // that sequence so its PlanCard can diff against earlier versions.
+  const { planVersions, planVersionByPart } = useMemo(() => {
+    const versions: PlanVersionInfo[] = [];
+    const byPart = new Map<string, number>();
+    for (const m of deferredMessages) {
+      m.parts.forEach((p, i) => {
+        if (p.kind !== "tool_use" || p.tool !== "ExitPlanMode") return;
+        const text = parsePlanInput(p.input);
+        if (text === null) return;
+        byPart.set(`${m.uuid}:${i}`, versions.length);
+        versions.push({ text, timestamp: m.timestamp });
+      });
+    }
+    return { planVersions: versions, planVersionByPart: byPart };
+  }, [deferredMessages]);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
 
   const annotationsByMessage = useMemo(() => {
@@ -576,7 +640,7 @@ export const MessageList = memo(function MessageList({
       followingBottomRef.current = true;
     }
     if (followingBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [sessionAnchorKey, items.length, messages]);
+  }, [sessionAnchorKey, items.length, deferredMessages]);
 
   // Becoming visible again (pane was display:none): layout was skipped while
   // hidden, so re-anchor to the bottom if we were following it.
@@ -733,7 +797,10 @@ export const MessageList = memo(function MessageList({
                     : "w-full"
                 )}
               >
-                {m.parts.map((p, i) => (
+                {m.parts.map((p, i) => {
+                  const planVersionIndex =
+                    planVersionByPart.get(`${m.uuid}:${i}`) ?? -1;
+                  return (
                   <MessagePartView
                     key={i}
                     part={p}
@@ -758,8 +825,13 @@ export const MessageList = memo(function MessageList({
                     }
                     terminalReady={terminalReady}
                     onSendKeys={onSendKeys}
+                    planVersions={
+                      planVersionIndex >= 0 ? planVersions : EMPTY_PLAN_VERSIONS
+                    }
+                    planVersionIndex={planVersionIndex}
                   />
-                ))}
+                  );
+                })}
               </div>
             </div>
           );

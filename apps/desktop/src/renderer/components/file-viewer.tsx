@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -23,6 +24,8 @@ import { ImageLightbox } from "./image-lightbox";
 
 const LINE_HEIGHT = 20;
 const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
+// Stable empty token array — `perLine[i]` resolving to undefined renders plain.
+const EMPTY_PER_LINE: SyntaxToken[][] = [];
 const POPOVER_VIEWPORT_PAD = 380;
 
 /**
@@ -244,12 +247,21 @@ export function FileViewer({
   const language = useMemo(() => languageFromPath(path) ?? "plaintext", [path]);
   const text = data?.text ?? "";
   const lines = useMemo(() => text.split("\n"), [text]);
+  // Tokenizing a whole file is a synchronous main-thread cost that, on the
+  // urgent (switch) render, froze the pane until shiki finished. Defer it: the
+  // file paints instantly as plain text, then a low-priority render fills in
+  // colors. `highlightStale` keeps stale tokens (from the previous file) off
+  // the new lines during the one frame the deferred value lags behind.
+  const deferredText = useDeferredValue(text);
+  const highlightStale = deferredText !== text;
   const perLine = useMemo(
     () =>
-      data && !data.binary ? highlightPerLine(data.text, language) : [],
+      data && !data.binary && !highlightStale
+        ? highlightPerLine(text, language)
+        : EMPTY_PER_LINE,
     // shikiReady is a dep so colors appear once the highlighter finishes loading.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, language, shikiReady]
+    [data, text, highlightStale, language, shikiReady]
   );
 
   // Character offset where each line begins — lets a line/selection map back to

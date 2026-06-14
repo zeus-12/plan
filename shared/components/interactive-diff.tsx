@@ -5,6 +5,7 @@ import {
   useState,
   useMemo,
   useCallback,
+  useDeferredValue,
   useEffect,
   Fragment,
   type ReactNode,
@@ -34,6 +35,8 @@ import { CommentPopover } from "./comment-popover";
 
 /* ── Constants ────────────────────────────────────────────── */
 
+// Stable empty per-line token array used while highlighting is deferred.
+const EMPTY_LINE_TOKENS: SyntaxToken[][] = [];
 const LINE_HEIGHT_PX = 22;
 const SEPARATOR_HEIGHT_PX = 32;
 const COMMENT_TRUNCATE_LEN = 55;
@@ -317,15 +320,24 @@ export function InteractiveDiff({
   // Triggers re-render once shiki finishes loading so first-paint tokens
   // (which were empty) get replaced with colored ones.
   const shikiReady = useShikiReady();
+  // Tokenizing both sides of a large diff is a synchronous main-thread cost
+  // that froze the pane on open. Defer it: the diff paints instantly without
+  // colors, then a low-priority render fills them in. `tokensStale` keeps the
+  // previous file's tokens off the new rows during the one lagging frame.
+  const deferredOld = useDeferredValue(oldText);
+  const deferredNew = useDeferredValue(newText);
+  const tokensStale = deferredOld !== oldText || deferredNew !== newText;
   const oldLineTokens = useMemo(
-    () => highlightPerLine(oldText, language),
+    () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(oldText, language)),
     // shikiReady is part of the deps so memo invalidates when the highlighter
     // becomes ready.
-    [oldText, language, shikiReady]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [oldText, tokensStale, language, shikiReady]
   );
   const newLineTokens = useMemo(
-    () => highlightPerLine(newText, language),
-    [newText, language, shikiReady]
+    () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(newText, language)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [newText, tokensStale, language, shikiReady]
   );
 
   function tokensForDiffLine(line: DiffLine): SyntaxToken[] {

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "../lib/utils";
@@ -11,7 +12,7 @@ import type { ComponentPropsWithoutRef, ElementType } from "react";
  * The rendered text is plain selectable DOM, so callers can compute character
  * offsets over `textContent` for annotation highlighting.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   content,
   className,
 }: {
@@ -30,7 +31,7 @@ export function Markdown({
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 type Props<T extends ElementType> = ComponentPropsWithoutRef<T>;
 
