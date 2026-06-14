@@ -304,8 +304,8 @@ interface ToolResult {
 }
 
 // Claude Code records a pasted image as a standalone message whose text is just
-// "[Image: source: <path>]". Render those from the file on disk, served via the
-// plan-media:// protocol (no base64, no copy).
+// "[Image: source: <path>]". Render those straight from the file on disk via a
+// file:// URL — no copy, no base64, no bytes through JS.
 function imageOnlyPaths(text: string): string[] | null {
   const re = /\[Image: source:\s*(.+?)\s*\]/g;
   const paths: string[] = [];
@@ -318,7 +318,9 @@ function imageOnlyPaths(text: string): string[] | null {
 }
 
 function mediaUrl(path: string): string {
-  return `plan-media://image/?p=${encodeURIComponent(path)}`;
+  // Absolute local path → file:// URL (encodeURI keeps the slashes, escapes
+  // spaces in names like ".../CleanShot 2026 ….png").
+  return `file://${encodeURI(path)}`;
 }
 
 function TranscriptImage({ path }: { path: string }) {

@@ -16,10 +16,11 @@ import type { Plan, DiscoveredRepo } from "../../shared-types";
 import { FileList, type RepoFileGroup } from "./file-list";
 import { SessionList, type SessionListItem } from "./session-list";
 import { PlansList } from "./plans-list";
+import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
 
-export type WorkTab = "diffs" | "chat" | "plans";
+export type WorkTab = "diffs" | "chat" | "plans" | "files";
 
 interface Props {
   tab: WorkTab;
@@ -64,6 +65,11 @@ interface Props {
   selectedPlan: string | null;
   onSelectPlan: (filePath: string) => void;
   onSetPlanArchived: (filePath: string, archived: boolean) => void;
+
+  projectFiles: string[];
+  projectFilesLoading: boolean;
+  selectedProjectFile: string | null;
+  onSelectProjectFile: (path: string) => void;
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
@@ -166,6 +172,10 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   selectedPlan,
   onSelectPlan,
   onSetPlanArchived,
+  projectFiles,
+  projectFilesLoading,
+  selectedProjectFile,
+  onSelectProjectFile,
   encoded,
   terminals,
   activeTerminalId,
@@ -189,6 +199,9 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         e.preventDefault();
         onTabChange("diffs");
       } else if (e.key === "3") {
+        e.preventDefault();
+        onTabChange("files");
+      } else if (e.key === "4") {
         e.preventDefault();
         onTabChange("plans");
       }
@@ -241,6 +254,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             <TabsList>
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="diffs">Diffs</TabsTrigger>
+              <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="plans" className="relative">
                 Plans
                 {plansBadge > 0 && (
@@ -351,6 +365,19 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               selected={selectedPlan}
               onSelect={onSelectPlan}
               onSetArchived={onSetPlanArchived}
+            />
+          </TabsContent>
+
+          <TabsContent
+            value="files"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            <ProjectFileList
+              files={projectFiles}
+              selected={selectedProjectFile}
+              onSelect={onSelectProjectFile}
+              loading={projectFilesLoading}
             />
           </TabsContent>
         </SidebarContent>

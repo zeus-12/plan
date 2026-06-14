@@ -159,6 +159,8 @@ function Shell() {
             project={selected}
             repos={reposByProject.get(selected.encoded) ?? []}
             projectsSidebarOpen={projectsSidebar.open}
+            projects={projects}
+            onSelectProject={setSelectedEncoded}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">

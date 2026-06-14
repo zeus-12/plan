@@ -25,6 +25,9 @@ import { MiddleSidebar, type WorkTab } from "./middle-sidebar";
 import { FileDiffViewer } from "./file-diff-viewer";
 import { MessageList, type ChatAnnotation } from "./message-list";
 import { PlanViewer } from "./plan-viewer";
+import { FileViewer } from "./file-viewer";
+import { CommandPalette, type PaletteItem } from "./command-palette";
+import Fuse from "fuse.js";
 import { useConfirm } from "./confirm-dialog";
 import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
 import { useProjectAnnotations } from "../lib/annotation-store";
@@ -51,6 +54,9 @@ interface Props {
   project: ProjectEntry;
   repos: DiscoveredRepo[];
   projectsSidebarOpen: boolean;
+  /** All projects + a switch callback — drives the ⌘K palette. */
+  projects: ProjectEntry[];
+  onSelectProject: (encoded: string) => void;
 }
 
 const MAX_SESSIONS = 5;
@@ -136,6 +142,8 @@ export function ProjectWorkspace({
   project,
   repos,
   projectsSidebarOpen,
+  projects,
+  onSelectProject,
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
@@ -621,6 +629,200 @@ export function ProjectWorkspace({
     },
     [refreshPlans]
   );
+
+  // ── Project files (Files tab + ⌘P) ───────────────────────────
+  // Indexed lazily the first time the Files tab (or ⌘P) is used, then cached
+  // for this project mount. The list is also the source for the ⌘P finder.
+  const [projectFiles, setProjectFiles] = useState<string[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
+  // Ref (not state) so a failed attempt doesn't permanently lock indexing and
+  // the callback identity stays stable (no effect loop).
+  const filesRequestedRef = useRef(false);
+  const [selectedProjectFile, setSelectedProjectFile] = useState<string | null>(
+    null
+  );
+
+  const indexProjectFiles = useCallback(async () => {
+    if (filesRequestedRef.current) return;
+    filesRequestedRef.current = true;
+    setProjectFilesLoading(true);
+    try {
+      const fn = window.electronAPI.listProjectFiles;
+      if (typeof fn !== "function") {
+        // Stale preload build — the IPC method isn't exposed yet.
+        console.error(
+          "[files] window.electronAPI.listProjectFiles is missing — main/preload build is stale; relaunch."
+        );
+        filesRequestedRef.current = false;
+        return;
+      }
+      const list = await fn(project.encoded);
+      console.log(
+        "[files] indexed",
+        Array.isArray(list) ? `${list.length} files` : list
+      );
+      setProjectFiles(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error("[files] index failed:", e);
+      filesRequestedRef.current = false; // allow a retry
+    } finally {
+      setProjectFilesLoading(false);
+    }
+  }, [project.encoded]);
+
+  useEffect(() => {
+    if (tab === "files") void indexProjectFiles();
+  }, [tab, indexProjectFiles]);
+
+  const handleSelectProjectFile = useCallback((path: string) => {
+    setSelectedProjectFile(path);
+  }, []);
+
+  // ── Command palette: ⌘P (files) / ⌘K (switch project or chat) ──────────
+  const [paletteMode, setPaletteMode] = useState<"files" | "switch" | null>(
+    null
+  );
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const closePalette = useCallback(() => {
+    setPaletteMode(null);
+    setPaletteQuery("");
+  }, []);
+
+  // ⌘P: fuzzy file finder (Fuse over the project file index, capped for speed).
+  const fileFuse = useMemo(
+    () => new Fuse(projectFiles, { threshold: 0.4, ignoreLocation: true }),
+    [projectFiles]
+  );
+  const fileItems = useMemo<PaletteItem[]>(() => {
+    if (paletteMode !== "files") return [];
+    const q = paletteQuery.trim();
+    const matched = q
+      ? fileFuse.search(q, { limit: 200 }).map((r) => r.item)
+      : projectFiles.slice(0, 200);
+    return matched.map((f) => ({
+      id: f,
+      label: fileBase(f),
+      sublabel: fileDir(f),
+      onSelect: () => {
+        setSelectedProjectFile(f);
+        setTab("files");
+        closePalette();
+      },
+    }));
+  }, [paletteMode, paletteQuery, fileFuse, projectFiles, closePalette]);
+
+  // ⌘K: switch across every project AND their chats (each chat tagged with the
+  // project it belongs to). Chats are pulled from all projects on open.
+  const [allChats, setAllChats] = useState<
+    {
+      sessionId: string;
+      title: string;
+      projectEncoded: string;
+      projectName: string;
+    }[]
+  >([]);
+  const loadAllChats = useCallback(async () => {
+    const active = projects.filter((p) => !p.archived);
+    const lists = await Promise.all(
+      active.map(async (p) => {
+        try {
+          const list = await window.electronAPI.listSessions(p.encoded);
+          return list
+            .filter((s) => !s.archived)
+            .map((s) => ({
+              sessionId: s.sessionId,
+              title: s.title ?? "Untitled chat",
+              projectEncoded: p.encoded,
+              projectName: projShortName(p),
+            }));
+        } catch {
+          return [];
+        }
+      })
+    );
+    setAllChats(lists.flat());
+  }, [projects]);
+
+  const switchEntries = useMemo<SwitchEntry[]>(() => {
+    const projEntries: SwitchEntry[] = projects
+      .filter((p) => !p.archived)
+      .map((p) => ({
+        id: `p:${p.encoded}`,
+        name: projShortName(p),
+        project: p.cwd,
+        badge: "project",
+        run: () => onSelectProject(p.encoded),
+      }));
+    const chatEntries: SwitchEntry[] = allChats.map((c) => ({
+      id: `s:${c.projectEncoded}:${c.sessionId}`,
+      name: c.title,
+      project: c.projectName,
+      badge: "chat",
+      run: () => {
+        if (c.projectEncoded === project.encoded) {
+          setSelectedSessionId(c.sessionId);
+          setTab("chat");
+        } else {
+          // Cross-project: stash the target chat so the new workspace selects
+          // it on mount, then switch projects.
+          window.localStorage.setItem(
+            `plan.session.${c.projectEncoded}`,
+            c.sessionId
+          );
+          onSelectProject(c.projectEncoded);
+        }
+      },
+    }));
+    return [...projEntries, ...chatEntries];
+  }, [projects, allChats, project.encoded, onSelectProject]);
+
+  const switchFuse = useMemo(
+    () =>
+      new Fuse(switchEntries, {
+        keys: ["name", "project"],
+        threshold: 0.4,
+        ignoreLocation: true,
+      }),
+    [switchEntries]
+  );
+  const switchItems = useMemo<PaletteItem[]>(() => {
+    if (paletteMode !== "switch") return [];
+    const q = paletteQuery.trim();
+    const matched = q
+      ? switchFuse.search(q, { limit: 100 }).map((r) => r.item)
+      : switchEntries.slice(0, 100);
+    return matched.map((e) => ({
+      id: e.id,
+      label: e.name,
+      sublabel: e.project,
+      badge: e.badge,
+      onSelect: () => {
+        e.run();
+        closePalette();
+      },
+    }));
+  }, [paletteMode, paletteQuery, switchFuse, switchEntries, closePalette]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "p") {
+        e.preventDefault();
+        void indexProjectFiles();
+        setPaletteQuery("");
+        setPaletteMode("files");
+      } else if (k === "k") {
+        e.preventDefault();
+        void loadAllChats();
+        setPaletteQuery("");
+        setPaletteMode("switch");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [indexProjectFiles, loadAllChats]);
 
   // ── Plan annotation handlers (keyed by plan filePath in the shared store,
   //    so plan comments join the same compose buffer as code + chat) ────────
@@ -1325,9 +1527,15 @@ export function ProjectWorkspace({
       if (meta && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         // Not connected to Claude yet → connect this chat and reveal the dock.
-        // Already connected → plain toggle.
-        if (selectedSessionId && !chatTerminalReady) connectAndShowChat();
-        else setTerminalOpen((v) => !v);
+        // Already connected → toggle; closing it hands focus back to the composer.
+        if (selectedSessionId && !chatTerminalReady) {
+          connectAndShowChat();
+        } else if (terminalOpen) {
+          setTerminalOpen(false);
+          requestAnimationFrame(() => chatInputRef.current?.focus());
+        } else {
+          setTerminalOpen(true);
+        }
       } else if (meta && e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         handleNewShell();
@@ -1376,6 +1584,23 @@ export function ProjectWorkspace({
     >
       {confirmDialog}
       <Toasts />
+      <CommandPalette
+        open={paletteMode === "files"}
+        placeholder="Search files in this project…"
+        query={paletteQuery}
+        onQueryChange={setPaletteQuery}
+        items={fileItems}
+        onClose={closePalette}
+        emptyLabel={projectFilesLoading ? "Indexing…" : "No files"}
+      />
+      <CommandPalette
+        open={paletteMode === "switch"}
+        placeholder="Switch to a project or chat…"
+        query={paletteQuery}
+        onQueryChange={setPaletteQuery}
+        items={switchItems}
+        onClose={closePalette}
+      />
       {sessionSwitcher.active && (
         <SwitcherOverlay
           title="Chat sessions"
@@ -1562,6 +1787,25 @@ export function ProjectWorkspace({
                 )}
             </div>
 
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                tab !== "files" && "hidden"
+              )}
+            >
+                {selectedProjectFile ? (
+                  <FileViewer
+                    key={selectedProjectFile}
+                    encoded={project.encoded}
+                    path={selectedProjectFile}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                    Select a file
+                  </div>
+                )}
+            </div>
+
             </div>
 
             {/* Unified compose buffer: code-diff + chat annotations combined.
@@ -1658,6 +1902,10 @@ export function ProjectWorkspace({
           selectedPlan={selectedPlanPath}
           onSelectPlan={handleSelectPlan}
           onSetPlanArchived={handleSetPlanArchived}
+          projectFiles={projectFiles}
+          projectFilesLoading={projectFilesLoading}
+          selectedProjectFile={selectedProjectFile}
+          onSelectProjectFile={handleSelectProjectFile}
           encoded={project.encoded}
           terminals={sidebarTerminals}
           activeTerminalId={activeShellId}
@@ -1668,6 +1916,27 @@ export function ProjectWorkspace({
       </div>
     </SidebarProvider>
   );
+}
+
+interface SwitchEntry {
+  id: string;
+  name: string;
+  /** The project this entry belongs to (cwd for projects, name for chats). */
+  project: string;
+  badge: string;
+  run: () => void;
+}
+
+function fileBase(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i === -1 ? p : p.slice(i + 1);
+}
+function fileDir(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i === -1 ? "" : p.slice(0, i);
+}
+function projShortName(p: ProjectEntry): string {
+  return p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
 }
 
 function letterFromCode(code: string): FileEntry["letter"] | null {

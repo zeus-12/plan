@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, protocol, shell } from "electron";
-import { extname, join } from "path";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, shell } from "electron";
+import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
-import { readFile, stat, writeFile } from "fs/promises";
+import { stat, writeFile } from "fs/promises";
 import {
   listProjects,
   resolveProjectCwd,
@@ -29,6 +29,7 @@ import {
 import { readSessionFile, type ParsedSession } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
+import { listProjectFiles, readProjectFile } from "./project-files";
 import { readdir } from "fs/promises";
 import { startPlansWatcher, stopPlansWatcher } from "./plans-watcher";
 import {
@@ -72,47 +73,6 @@ import {
 const isMac = process.platform === "darwin";
 
 let mainWindow: BrowserWindow | null = null;
-
-// ── Local image protocol ───────────────────────────────────────────
-// Transcripts reference pasted images by file path (e.g. the synthetic
-// "[Image: source: /var/.../plan-paste-x.png]" note). The renderer can't load
-// `file://` from its http dev origin (webSecurity), so we serve those files
-// through `plan-media://` — the image bytes stream straight from disk, no copy
-// and no base64. Must be declared privileged BEFORE the app is ready.
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "plan-media",
-    privileges: { standard: true, secure: true, supportFetchAPI: true },
-  },
-]);
-
-const IMG_MIME: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".bmp": "image/bmp",
-  ".svg": "image/svg+xml",
-};
-
-function registerMediaProtocol() {
-  protocol.handle("plan-media", async (request) => {
-    try {
-      const path = new URL(request.url).searchParams.get("p");
-      if (!path) return new Response("missing path", { status: 400 });
-      const mime = IMG_MIME[extname(path).toLowerCase()];
-      // Only ever serve image files — never arbitrary disk paths.
-      if (!mime) return new Response("unsupported", { status: 415 });
-      const data = await readFile(path);
-      return new Response(data, { headers: { "content-type": mime } });
-    } catch {
-      // Missing/expired file → 404; the renderer shows an "unavailable" note
-      // rather than a broken image.
-      return new Response("not found", { status: 404 });
-    }
-  });
-}
 
 // ── Menu ───────────────────────────────────────────────────────────
 
@@ -216,6 +176,11 @@ function createMainWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
+      // Transcript images are shown via <img src="file://…"> from their local
+      // path. In dev the renderer is served over http, whose origin blocks
+      // file:// subresources — so relax webSecurity in dev only. Production
+      // loads the renderer from file:// and is unaffected (stays secure).
+      webSecurity: app.isPackaged,
     },
   });
 
@@ -486,6 +451,13 @@ function registerIpc() {
     ) => getFileView(encoded, path, mode, subPath)
   );
 
+  ipcMain.handle("files:list", async (_e, encoded: string) =>
+    listProjectFiles(encoded)
+  );
+  ipcMain.handle("files:read", async (_e, encoded: string, relPath: string) =>
+    readProjectFile(encoded, relPath)
+  );
+
   ipcMain.handle("repos:list", async (_e, encoded: string) =>
     discoverRepos(encoded)
   );
@@ -661,7 +633,6 @@ function sendPlansEvent(e: { kind: string; filePath: string }) {
 // ── App lifecycle ──────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  registerMediaProtocol();
   buildMenu();
   registerIpc();
   bridgeWatcher();

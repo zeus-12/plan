@@ -31,6 +31,11 @@ const electronAPI = {
     subPath: string = ""
   ) => ipcRenderer.invoke("project:fileView", encoded, path, mode, subPath),
 
+  listProjectFiles: (encoded: string) =>
+    ipcRenderer.invoke("files:list", encoded),
+  readProjectFile: (encoded: string, relPath: string) =>
+    ipcRenderer.invoke("files:read", encoded, relPath),
+
   onWatcherEvent: (cb: (e: SessionEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, e: SessionEvent) =>
       cb(e);

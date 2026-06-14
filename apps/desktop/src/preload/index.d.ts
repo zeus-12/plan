@@ -34,6 +34,11 @@ interface ElectronAPI {
     mode: "staged" | "unstaged",
     subPath?: string
   ) => Promise<FileView>;
+  listProjectFiles: (encoded: string) => Promise<string[]>;
+  readProjectFile: (
+    encoded: string,
+    relPath: string
+  ) => Promise<{ text: string; truncated: boolean; binary: boolean } | null>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
   onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;
