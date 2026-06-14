@@ -124,9 +124,11 @@ function CollapsibleBlock({
         >
           ▶
         </span>
-        <span className="text-[var(--text-secondary)]">{label}</span>
+        <span className="shrink-0 whitespace-nowrap text-[var(--text-secondary)]">
+          {label}
+        </span>
         {!open && preview && (
-          <span className="truncate text-[var(--text-tertiary)]">
+          <span className="min-w-0 truncate text-[var(--text-tertiary)]">
             {preview}
           </span>
         )}
