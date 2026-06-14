@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Command } from "cmdk";
 import { cn } from "@plan/shared/lib/utils";
 
@@ -7,6 +7,8 @@ export interface PaletteItem {
   id: string;
   label: string;
   sublabel?: string;
+  /** Optional leading icon (e.g. a file-type icon). */
+  icon?: ReactNode;
   /** Optional right-aligned tag (e.g. "project", "chat"). */
   badge?: string;
   onSelect: () => void;
@@ -89,6 +91,9 @@ export function CommandPalette({
                   "data-[selected=true]:bg-[var(--bg-surface-hover)]"
                 )}
               >
+                {it.icon && (
+                  <span className="shrink-0 self-center">{it.icon}</span>
+                )}
                 <span className="shrink-0 truncate text-[13px] text-[var(--text)]">
                   {it.label}
                 </span>
