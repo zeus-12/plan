@@ -47,19 +47,36 @@ export function CommentPopover({
         onClose();
       }
     }
-    function handleEscape(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Auto-focusing the textarea collapses the document selection the user
+      // made, so a plain cmd/ctrl+C would copy the empty textarea instead of
+      // the highlighted text. When the textarea has no selection of its own,
+      // honour the gesture by copying the originally-selected text. If the user
+      // has selected text inside the textarea, let the native copy through.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "c" || e.key === "C")) {
+        const el = textareaRef.current;
+        const hasOwnSelection =
+          el != null && el.selectionStart !== el.selectionEnd;
+        if (!hasOwnSelection && selectedText) {
+          e.preventDefault();
+          void navigator.clipboard.writeText(selectedText);
+        }
+      }
     }
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", handleClickOutside);
     }, CLICK_OUTSIDE_DELAY_MS);
-    document.addEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       clearTimeout(timer);
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose]);
+  }, [onClose, selectedText]);
 
   function handleSubmit() {
     const trimmed = comment.trim();
