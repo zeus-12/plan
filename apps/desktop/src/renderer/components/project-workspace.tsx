@@ -27,11 +27,14 @@ import { MessageList, type ChatAnnotation } from "./message-list";
 import { PlanViewer } from "./plan-viewer";
 import { FileViewer } from "./file-viewer";
 import { CommandPalette, type PaletteItem } from "./command-palette";
+import { FileIcon } from "./file-icon";
 import Fuse from "fuse.js";
 import { useConfirm } from "./confirm-dialog";
 import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
 import { useProjectAnnotations } from "../lib/annotation-store";
-import { useProjectTerminals } from "../lib/terminal-store";
+import { useProjectTerminals, useTerminalHeight } from "../lib/terminal-store";
+import { useTerminalWorking } from "../lib/terminal-activity-store";
+import { useSessionNavTarget } from "../lib/session-nav-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { ThemeMenu } from "./theme-menu";
@@ -59,8 +62,6 @@ interface Props {
   onSelectProject: (encoded: string) => void;
 }
 
-const MAX_SESSIONS = 5;
-
 function WorkspaceHeader({
   project,
   projectsSidebarOpen,
@@ -71,15 +72,14 @@ function WorkspaceHeader({
   branch: string | null;
 }) {
   const middle = useSidebar();
-  const shortName =
-    project.cwd.split("/").filter(Boolean).pop() ?? project.cwd;
+  const shortName = project.cwd.split("/").filter(Boolean).pop() ?? project.cwd;
 
   return (
     <header
       className={cn(
         "flex h-[44px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] pr-3 pt-2 pb-2 [-webkit-app-region:drag]",
         // Pad past macOS traffic-light area when this header is the leftmost pane.
-        projectsSidebarOpen ? "pl-3" : "pl-20"
+        projectsSidebarOpen ? "pl-3" : "pl-20",
       )}
     >
       {/* Project name (bold) · path (muted) · branch as a labelled pill. */}
@@ -167,7 +167,7 @@ export function ProjectWorkspace({
     hasUpstream: boolean;
   }
   const [filesByRepo, setFilesByRepo] = useState<Map<string, RepoFiles>>(
-    new Map()
+    new Map(),
   );
   const [filesLoading, setFilesLoading] = useState(true);
   // True once the first load has populated data. Subsequent refreshes (after a
@@ -179,9 +179,11 @@ export function ProjectWorkspace({
    * viewing (staged vs unstaged), since a partially-staged file appears in both
    * sections and each shows a different diff.
    */
-  const [selectedFile, setSelectedFile] = useState<
-    { subPath: string; path: string; staged: boolean } | null
-  >(null);
+  const [selectedFile, setSelectedFile] = useState<{
+    subPath: string;
+    path: string;
+    staged: boolean;
+  } | null>(null);
   // Comments persist per-project across first-sidebar switches (the workspace
   // is keyed by `encoded` and remounts on switch). Both the diff annotations
   // (keyed by "subPath::path") and the chat annotations come from this store.
@@ -223,23 +225,24 @@ export function ProjectWorkspace({
               hasUpstream: status.hasUpstream,
             },
           ] as const;
-        })
+        }),
       );
       const next = new Map(entries);
       setFilesByRepo(next);
       setSelectedFile((current) => {
-        // Keep the current selection if that same stage still has the file.
         // We DON'T auto-pick a first file — content only opens on explicit
         // click, so switching to the Diffs tab never changes the main pane.
-        if (current) {
-          const repo = next.get(current.subPath);
-          const stillThere = repo?.status.some(
-            (s) =>
-              s.path === current.path &&
-              (current.staged ? s.staged : s.unstaged)
-          );
-          if (stillThere) return current;
-        }
+        if (!current) return null;
+        const status = next
+          .get(current.subPath)
+          ?.status.find((s) => s.path === current.path);
+        if (!status) return null; // file no longer changed (committed/discarded)
+        // Keep showing the file if our side still has it.
+        if (current.staged ? status.staged : status.unstaged) return current;
+        // Staging/unstaging the open file moves it across sides — follow it so
+        // the content pane keeps showing that file instead of going blank.
+        if (current.staged ? status.unstaged : status.staged)
+          return { ...current, staged: !current.staged };
         return null;
       });
     } finally {
@@ -309,26 +312,26 @@ export function ProjectWorkspace({
           };
         })
         .filter((t) => t.hasUpstream || t.ahead > 0),
-    [repos, filesByRepo, project.cwd, pushingRepo]
+    [repos, filesByRepo, project.cwd, pushingRepo],
   );
 
   // For diff-annotation aggregation (kept global so the copy box at the
   // bottom shows everything regardless of which file is selected).
   const aggregatedDiffAnnotations = useMemo(
     () => Object.values(annotationsByFile).flat(),
-    [annotationsByFile]
+    [annotationsByFile],
   );
 
   // Plan comments across all plans — combined into the same compose buffer.
   const aggregatedPlanAnnotations = useMemo(
     () => Object.values(annotationsByPlan).flat(),
-    [annotationsByPlan]
+    [annotationsByPlan],
   );
 
   // Read-only file-viewer comments across all files — same compose buffer.
   const aggregatedProjectFileAnnotations = useMemo(
     () => Object.values(annotationsByProjectFile).flat(),
-    [annotationsByProjectFile]
+    [annotationsByProjectFile],
   );
 
   // ── Git actions (routed via subPath) ─────────────────────────
@@ -337,12 +340,12 @@ export function ProjectWorkspace({
       const res = await window.electronAPI.stageFile(
         project.encoded,
         path,
-        subPath
+        subPath,
       );
       if (!res.ok) console.warn("stage failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   const handleUnstageFile = useCallback(
@@ -350,12 +353,12 @@ export function ProjectWorkspace({
       const res = await window.electronAPI.unstageFile(
         project.encoded,
         path,
-        subPath
+        subPath,
       );
       if (!res.ok) console.warn("unstage failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   const handleDiscardFile = useCallback(
@@ -370,12 +373,12 @@ export function ProjectWorkspace({
       const res = await window.electronAPI.discardFile(
         project.encoded,
         path,
-        subPath
+        subPath,
       );
       if (!res.ok) console.warn("discard failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff, confirm]
+    [project.encoded, refreshDiff, confirm],
   );
 
   const handleStageAll = useCallback(
@@ -384,7 +387,7 @@ export function ProjectWorkspace({
       if (!res.ok) console.warn("stage all failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   const handleUnstageAll = useCallback(
@@ -393,7 +396,7 @@ export function ProjectWorkspace({
       if (!res.ok) console.warn("unstage all failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   const handleDiscardAll = useCallback(
@@ -409,7 +412,7 @@ export function ProjectWorkspace({
       if (!res.ok) console.warn("discard all failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff, confirm]
+    [project.encoded, refreshDiff, confirm],
   );
 
   const handleStashAll = useCallback(
@@ -418,7 +421,7 @@ export function ProjectWorkspace({
       if (!res.ok) console.warn("stash all failed:", res.error);
       refreshDiff();
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   const handlePush = useCallback(
@@ -432,7 +435,7 @@ export function ProjectWorkspace({
         setPushingRepo(null);
       }
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   const handleCommit = useCallback(
@@ -440,13 +443,13 @@ export function ProjectWorkspace({
       const res = await window.electronAPI.commit(
         project.encoded,
         message,
-        subPath
+        subPath,
       );
       if (!res.ok) return { ok: false, error: res.error ?? "Commit failed" };
       refreshDiff();
       return { ok: true };
     },
-    [project.encoded, refreshDiff]
+    [project.encoded, refreshDiff],
   );
 
   useEffect(() => {
@@ -463,19 +466,23 @@ export function ProjectWorkspace({
     () =>
       typeof window === "undefined"
         ? null
-        : window.localStorage.getItem(`plan.session.${project.encoded}`)
+        : window.localStorage.getItem(`plan.session.${project.encoded}`),
   );
   const [session, setSession] = useState<ParsedSession | null>(null);
   // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
   // itself lives inside ChatInput so keystrokes don't re-render the workspace.
   const chatInputRef = useRef<ChatInputHandle>(null);
 
+  // Jump to a session requested from the sessions dashboard while this project
+  // is already open (cross-project jumps are handled by the localStorage init).
+  useSessionNavTarget(project.encoded, setSelectedSessionId);
+
   // Persist the selected session per project.
   useEffect(() => {
     if (selectedSessionId)
       window.localStorage.setItem(
         `plan.session.${project.encoded}`,
-        selectedSessionId
+        selectedSessionId,
       );
   }, [project.encoded, selectedSessionId]);
 
@@ -489,7 +496,7 @@ export function ProjectWorkspace({
       // it moves on any file touch, e.g. a resume, not just new messages).
       const toMillis = (
         v: number | string | null,
-        fallback: number
+        fallback: number,
       ): number => {
         if (v == null) return fallback;
         if (typeof v === "number") return v;
@@ -499,9 +506,8 @@ export function ProjectWorkspace({
       const enriched: SessionListItem[] = [...list]
         .sort(
           (a, b) =>
-            toMillis(b.updatedAt, b.mtimeMs) - toMillis(a.updatedAt, a.mtimeMs)
+            toMillis(b.updatedAt, b.mtimeMs) - toMillis(a.updatedAt, a.mtimeMs),
         )
-        .slice(0, MAX_SESSIONS)
         .map((s) => ({
           sessionId: s.sessionId,
           title: s.title,
@@ -533,9 +539,15 @@ export function ProjectWorkspace({
   const handleSetSessionArchived = useCallback(
     async (sessionId: string, archived: boolean) => {
       await window.electronAPI.setSessionArchived(sessionId, archived);
+      // Archiving puts a chat away, so free its resources: kill the connected
+      // `claude` pty if one exists (a no-op otherwise). The terminal:exit event
+      // then drops it from openedIds. No hidden Claude left running for it.
+      if (archived) {
+        window.electronAPI.terminalKill(`chat:${project.encoded}:${sessionId}`);
+      }
       refreshSessions();
     },
-    [refreshSessions]
+    [refreshSessions, project.encoded],
   );
 
   const refreshSelectedSession = useCallback(async () => {
@@ -545,7 +557,7 @@ export function ProjectWorkspace({
     }
     const parsed = await window.electronAPI.readSession(
       project.encoded,
-      selectedSessionId
+      selectedSessionId,
     );
     // Identity-preserving merge: unchanged messages keep their old objects so
     // memoized rows skip re-rendering (otherwise every watcher tick re-renders
@@ -619,12 +631,12 @@ export function ProjectWorkspace({
       // Re-pull so the unread badge clears immediately.
       refreshPlans();
     },
-    [refreshPlans]
+    [refreshPlans],
   );
 
   const selectedPlan = useMemo(
     () => plans.find((p) => p.filePath === selectedPlanPath) ?? null,
-    [plans, selectedPlanPath]
+    [plans, selectedPlanPath],
   );
 
   const handleSetPlanArchived = useCallback(
@@ -635,7 +647,7 @@ export function ProjectWorkspace({
         setSelectedPlanPath((cur) => (cur === filePath ? null : cur));
       refreshPlans();
     },
-    [refreshPlans]
+    [refreshPlans],
   );
 
   // ── Project files (Files tab + ⌘P) ───────────────────────────
@@ -647,8 +659,17 @@ export function ProjectWorkspace({
   // the callback identity stays stable (no effect loop).
   const filesRequestedRef = useRef(false);
   const [selectedProjectFile, setSelectedProjectFile] = useState<string | null>(
-    null
+    null,
   );
+  // A pending "jump to this match" for the file viewer (from the Search tab).
+  // `nonce` re-triggers the scroll even when the same line is clicked twice.
+  const [fileReveal, setFileReveal] = useState<{
+    path: string;
+    line: number;
+    colStart: number;
+    colEnd: number;
+    nonce: number;
+  } | null>(null);
 
   const indexProjectFiles = useCallback(async () => {
     if (filesRequestedRef.current) return;
@@ -659,7 +680,7 @@ export function ProjectWorkspace({
       if (typeof fn !== "function") {
         // Stale preload build — the IPC method isn't exposed yet.
         console.error(
-          "[files] window.electronAPI.listProjectFiles is missing — main/preload build is stale; relaunch."
+          "[files] window.electronAPI.listProjectFiles is missing — main/preload build is stale; relaunch.",
         );
         filesRequestedRef.current = false;
         return;
@@ -684,6 +705,25 @@ export function ProjectWorkspace({
     setActiveFilePath(path);
   }, []);
 
+  // A Search-tab hit: open the file in the content pane and scroll/highlight the
+  // match. Keeps the sidebar on the Search tab (VS Code behaviour) — only the
+  // content pane changes.
+  const handleOpenSearchResult = useCallback(
+    (path: string, line: number, colStart: number, colEnd: number) => {
+      setSelectedProjectFile(path);
+      setOpenKind("files");
+      setActiveFilePath(path);
+      setFileReveal((prev) => ({
+        path,
+        line,
+        colStart,
+        colEnd,
+        nonce: (prev?.nonce ?? 0) + 1,
+      }));
+    },
+    [],
+  );
+
   // Clicking a chat in the list opens its conversation in the content pane.
   const handleSelectSession = useCallback((id: string) => {
     setSelectedSessionId(id);
@@ -692,7 +732,7 @@ export function ProjectWorkspace({
 
   // ── Command palette: ⌘P (files) / ⌘K (switch project or chat) ──────────
   const [paletteMode, setPaletteMode] = useState<"files" | "switch" | null>(
-    null
+    null,
   );
   const [paletteQuery, setPaletteQuery] = useState("");
   const closePalette = useCallback(() => {
@@ -703,7 +743,7 @@ export function ProjectWorkspace({
   // ⌘P: fuzzy file finder (Fuse over the project file index, capped for speed).
   const fileFuse = useMemo(
     () => new Fuse(projectFiles, { threshold: 0.4, ignoreLocation: true }),
-    [projectFiles]
+    [projectFiles],
   );
   const fileItems = useMemo<PaletteItem[]>(() => {
     if (paletteMode !== "files") return [];
@@ -715,13 +755,23 @@ export function ProjectWorkspace({
       id: f,
       label: fileBase(f),
       sublabel: fileDir(f),
+      icon: <FileIcon name={fileBase(f)} />,
       onSelect: () => {
-        setSelectedProjectFile(f);
+        // openKind (not tab) drives the content pane — set both so the file
+        // actually opens instead of just highlighting in the sidebar.
+        handleSelectProjectFile(f);
         setTab("files");
         closePalette();
       },
     }));
-  }, [paletteMode, paletteQuery, fileFuse, projectFiles, closePalette]);
+  }, [
+    paletteMode,
+    paletteQuery,
+    fileFuse,
+    projectFiles,
+    handleSelectProjectFile,
+    closePalette,
+  ]);
 
   // ⌘K: switch across every project AND their chats (each chat tagged with the
   // project it belongs to). Chats are pulled from all projects on open.
@@ -750,7 +800,7 @@ export function ProjectWorkspace({
         } catch {
           return [];
         }
-      })
+      }),
     );
     setAllChats(lists.flat());
   }, [projects]);
@@ -780,7 +830,7 @@ export function ProjectWorkspace({
           // it on mount, then switch projects.
           window.localStorage.setItem(
             `plan.session.${c.projectEncoded}`,
-            c.sessionId
+            c.sessionId,
           );
           onSelectProject(c.projectEncoded);
         }
@@ -796,7 +846,7 @@ export function ProjectWorkspace({
         threshold: 0.4,
         ignoreLocation: true,
       }),
-    [switchEntries]
+    [switchEntries],
   );
   const switchItems = useMemo<PaletteItem[]>(() => {
     if (paletteMode !== "switch") return [];
@@ -827,6 +877,9 @@ export function ProjectWorkspace({
         setPaletteQuery("");
         setPaletteMode("files");
       } else if (k === "k") {
+        // ⌘K inside a terminal clears that terminal (xterm handles it) — don't
+        // also pop the command palette.
+        if (isTerminalFocused()) return;
         e.preventDefault();
         void loadAllChats();
         setPaletteQuery("");
@@ -840,8 +893,8 @@ export function ProjectWorkspace({
   // ── Plan annotation handlers (keyed by plan filePath in the shared store,
   //    so plan comments join the same compose buffer as code + chat) ────────
   const planAnnotations = useMemo<Annotation[]>(
-    () => (selectedPlanPath ? annotationsByPlan[selectedPlanPath] ?? [] : []),
-    [annotationsByPlan, selectedPlanPath]
+    () => (selectedPlanPath ? (annotationsByPlan[selectedPlanPath] ?? []) : []),
+    [annotationsByPlan, selectedPlanPath],
   );
   const addPlanAnnotation = useCallback(
     (
@@ -849,7 +902,7 @@ export function ProjectWorkspace({
       startOffset: number,
       endOffset: number,
       comment: string,
-      side: "left" | "right"
+      side: "left" | "right",
     ) => {
       if (!selectedPlanPath) return;
       setAnnotationsByPlan((prev) => ({
@@ -867,7 +920,7 @@ export function ProjectWorkspace({
         ],
       }));
     },
-    [selectedPlanPath, setAnnotationsByPlan]
+    [selectedPlanPath, setAnnotationsByPlan],
   );
   const updatePlanAnnotation = useCallback(
     (id: string, comment: string) => {
@@ -875,11 +928,11 @@ export function ProjectWorkspace({
       setAnnotationsByPlan((prev) => ({
         ...prev,
         [selectedPlanPath]: (prev[selectedPlanPath] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a
+          a.id === id ? { ...a, comment } : a,
         ),
       }));
     },
-    [selectedPlanPath, setAnnotationsByPlan]
+    [selectedPlanPath, setAnnotationsByPlan],
   );
   const removePlanAnnotation = useCallback(
     (id: string) => {
@@ -887,11 +940,11 @@ export function ProjectWorkspace({
       setAnnotationsByPlan((prev) => ({
         ...prev,
         [selectedPlanPath]: (prev[selectedPlanPath] ?? []).filter(
-          (a) => a.id !== id
+          (a) => a.id !== id,
         ),
       }));
     },
-    [selectedPlanPath, setAnnotationsByPlan]
+    [selectedPlanPath, setAnnotationsByPlan],
   );
   const resetPlanAnnotations = useCallback(() => {
     if (!selectedPlanPath) return;
@@ -902,9 +955,9 @@ export function ProjectWorkspace({
   const projectFileAnnotations = useMemo<Annotation[]>(
     () =>
       selectedProjectFile
-        ? annotationsByProjectFile[selectedProjectFile] ?? []
+        ? (annotationsByProjectFile[selectedProjectFile] ?? [])
         : [],
-    [annotationsByProjectFile, selectedProjectFile]
+    [annotationsByProjectFile, selectedProjectFile],
   );
   const addProjectFileAnnotation = useCallback(
     (
@@ -913,7 +966,7 @@ export function ProjectWorkspace({
       endOffset: number,
       startLine: number,
       endLine: number,
-      comment: string
+      comment: string,
     ) => {
       if (!selectedProjectFile) return;
       setAnnotationsByProjectFile((prev) => ({
@@ -932,7 +985,7 @@ export function ProjectWorkspace({
         ],
       }));
     },
-    [selectedProjectFile, setAnnotationsByProjectFile]
+    [selectedProjectFile, setAnnotationsByProjectFile],
   );
   const updateProjectFileAnnotation = useCallback(
     (id: string, comment: string) => {
@@ -940,11 +993,11 @@ export function ProjectWorkspace({
       setAnnotationsByProjectFile((prev) => ({
         ...prev,
         [selectedProjectFile]: (prev[selectedProjectFile] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a
+          a.id === id ? { ...a, comment } : a,
         ),
       }));
     },
-    [selectedProjectFile, setAnnotationsByProjectFile]
+    [selectedProjectFile, setAnnotationsByProjectFile],
   );
   const removeProjectFileAnnotation = useCallback(
     (id: string) => {
@@ -952,11 +1005,11 @@ export function ProjectWorkspace({
       setAnnotationsByProjectFile((prev) => ({
         ...prev,
         [selectedProjectFile]: (prev[selectedProjectFile] ?? []).filter(
-          (a) => a.id !== id
+          (a) => a.id !== id,
         ),
       }));
     },
-    [selectedProjectFile, setAnnotationsByProjectFile]
+    [selectedProjectFile, setAnnotationsByProjectFile],
   );
 
   // ── Aggregated annotations ───────────────────────────────────
@@ -970,7 +1023,7 @@ export function ProjectWorkspace({
         comment: c.comment,
         side: "right",
       })),
-    [chatAnnotations]
+    [chatAnnotations],
   );
 
   // One outgoing buffer combining code-diff annotations and chat annotations,
@@ -985,7 +1038,7 @@ export function ProjectWorkspace({
     if (aggregatedProjectFileAnnotations.length > 0) {
       parts.push(
         "On the files:\n\n" +
-          generateMessage(aggregatedProjectFileAnnotations, { intro: "" })
+          generateMessage(aggregatedProjectFileAnnotations, { intro: "" }),
       );
     }
     if (aggregatedDiffAnnotations.length > 0) {
@@ -995,7 +1048,7 @@ export function ProjectWorkspace({
             intro: "",
             leftLabel: "the original",
             rightLabel: "the changes",
-          })
+          }),
       );
     }
     if (aggregatedPlanAnnotations.length > 0) {
@@ -1005,13 +1058,13 @@ export function ProjectWorkspace({
             intro: "",
             leftLabel: "the previous version",
             rightLabel: "the current version",
-          })
+          }),
       );
     }
     if (aggregatedChatAnnotations.length > 0) {
       parts.push(
         "On the conversation:\n\n" +
-          generateMessage(aggregatedChatAnnotations, { intro: "" })
+          generateMessage(aggregatedChatAnnotations, { intro: "" }),
       );
     }
     return parts.join("\n\n");
@@ -1030,7 +1083,7 @@ export function ProjectWorkspace({
       selectedText: string,
       startOffset: number,
       endOffset: number,
-      comment: string
+      comment: string,
     ) => {
       setChatAnnotations((prev) => [
         ...prev,
@@ -1045,16 +1098,13 @@ export function ProjectWorkspace({
         },
       ]);
     },
-    []
+    [],
   );
-  const updateChatAnnotation = useCallback(
-    (id: string, comment: string) => {
-      setChatAnnotations((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, comment } : a))
-      );
-    },
-    []
-  );
+  const updateChatAnnotation = useCallback((id: string, comment: string) => {
+    setChatAnnotations((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, comment } : a)),
+    );
+  }, []);
   const removeChatAnnotation = useCallback((id: string) => {
     setChatAnnotations((prev) => prev.filter((a) => a.id !== id));
   }, []);
@@ -1100,7 +1150,7 @@ export function ProjectWorkspace({
       setOpenKind("diffs");
       setActiveFilePath(subPath ? `${subPath}/${path}` : path);
     },
-    []
+    [],
   );
 
   // ── Terminals (⌘J) ───────────────────────────────────────────
@@ -1114,17 +1164,16 @@ export function ProjectWorkspace({
     setOpenedIds,
     terminalOpen,
     setTerminalOpen,
-    terminalHeight,
-    setTerminalHeight,
     shells,
     setShells,
     activeShellId,
     setActiveShellId,
   } = useProjectTerminals(project.encoded);
+  // Dock height is a single global, persisted value — shared across projects.
+  const [terminalHeight, setTerminalHeight] = useTerminalHeight();
   // The dock is mounted whenever there's at least one opened terminal.
   const terminalMounted = openedIds.length > 0;
 
-  const defaultTermId = `proj:${project.encoded}`;
   const chatPrefix = `chat:${project.encoded}:`;
   const shellPrefix = `term:${project.encoded}:`;
   const sessionTermId = (sid: string) => `${chatPrefix}${sid}`;
@@ -1138,25 +1187,29 @@ export function ProjectWorkspace({
       : `claude --resume ${sid}`;
   };
 
-  // The dock (⌘J) shows only agent terminals: a resumed chat's terminal when
-  // viewing that chat, otherwise the default project terminal. Scratch shells
-  // render embedded in the sidebar's Terminals section instead.
+  // The dock (⌘J) mirrors the selected chat's Claude instance — on the Diffs
+  // and Files tabs too, not just the Chat tab — so ⌘J anywhere brings up the
+  // same running agent. The dock is NEVER a plain shell: with no live chat
+  // terminal there's nothing to show, so it stays closed (see the ⌘J handler
+  // and the exit handler). Scratch shells live in the sidebar's Terminals
+  // section instead.
   const sessionResumed =
-    tab === "chat" &&
     selectedSessionId != null &&
     openedIds.includes(sessionTermId(selectedSessionId));
   const activeTerminalId = sessionResumed
     ? sessionTermId(selectedSessionId!)
-    : defaultTermId;
+    : null;
   const activeTerminalIdRef = useRef(activeTerminalId);
   activeTerminalIdRef.current = activeTerminalId;
 
   // Imperative handles + readiness, keyed by terminal id (for sending to a pty).
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
   const readyIds = useRef<Set<string>>(new Set());
-  const pendingPasteRef = useRef<
-    { id: string; text: string; submit: boolean } | null
-  >(null);
+  const pendingPasteRef = useRef<{
+    id: string;
+    text: string;
+    submit: boolean;
+  } | null>(null);
 
   const ensureOpened = useCallback((tid: string) => {
     setOpenedIds((ids) => (ids.includes(tid) ? ids : [...ids, tid]));
@@ -1190,7 +1243,7 @@ export function ProjectWorkspace({
       if (readyIds.current.has(tid)) writeToTerminal(tid, text, submit);
       else pendingPasteRef.current = { id: tid, text, submit };
     },
-    [ensureOpened]
+    [ensureOpened],
   );
 
   // Whether the selected chat has a live (resumed) terminal to send into.
@@ -1220,7 +1273,7 @@ export function ProjectWorkspace({
       setActiveShellId(null);
       setTerminalOpen(true);
     },
-    [setActiveShellId, setTerminalOpen]
+    [setActiveShellId, setTerminalOpen],
   );
 
   const armSendWatchdog = useCallback(
@@ -1240,7 +1293,7 @@ export function ProjectWorkspace({
         }, 12_000),
       };
     },
-    [revealChatTerminal]
+    [revealChatTerminal],
   );
 
   // Chat composer: send a message into the selected chat's `claude` (submits).
@@ -1256,7 +1309,7 @@ export function ProjectWorkspace({
       // watchdog says so (toast + notification) instead of leaving you lost.
       armSendWatchdog(selectedSessionId);
     },
-    [selectedSessionId, chatPrefix, openedIds, sendToTerminal, armSendWatchdog]
+    [selectedSessionId, chatPrefix, openedIds, sendToTerminal, armSendWatchdog],
   );
 
   // Drive the chat terminal's TUI selectors (e.g. AskUserQuestion options)
@@ -1268,7 +1321,7 @@ export function ProjectWorkspace({
       if (!openedIds.includes(tid)) return;
       window.electronAPI.terminalSendKeys(tid, keys);
     },
-    [selectedSessionId, chatPrefix, openedIds]
+    [selectedSessionId, chatPrefix, openedIds],
   );
 
   // New chat: pre-pick the session uuid and start `claude --session-id` in a
@@ -1294,7 +1347,7 @@ export function ProjectWorkspace({
       .slice(w.baseLen)
       .some(
         (m) =>
-          m.role === "user" && m.parts.some((p) => p.kind !== "tool_result")
+          m.role === "user" && m.parts.some((p) => p.kind !== "tool_result"),
       );
     if (delivered) {
       clearTimeout(w.timer);
@@ -1319,7 +1372,7 @@ export function ProjectWorkspace({
     const lastAssistant = [...session.messages]
       .reverse()
       .find(
-        (m) => m.role === "assistant" && m.parts.some((p) => p.kind === "text")
+        (m) => m.role === "assistant" && m.parts.some((p) => p.kind === "text"),
       );
     const uuid = lastAssistant?.uuid ?? null;
     if (notifyBaselineRef.current !== selectedSessionId) {
@@ -1358,7 +1411,7 @@ export function ProjectWorkspace({
       for (const p of m.parts)
         if (p.kind === "tool_result") resultIds.add(p.toolUseId);
     const pendingTool = last.parts.some(
-      (p) => p.kind === "tool_use" && !resultIds.has(p.id)
+      (p) => p.kind === "tool_use" && !resultIds.has(p.id),
     );
     if (!pendingTool) return;
     const timer = setTimeout(() => {
@@ -1368,7 +1421,7 @@ export function ProjectWorkspace({
           actionLabel: "Open terminal",
           onAction: () => revealChatTerminal(sid),
         },
-        15_000
+        15_000,
       );
       if (!document.hasFocus())
         osNotify("plan", "Claude may be waiting on an approval");
@@ -1404,6 +1457,12 @@ export function ProjectWorkspace({
   }, [chatTerminalReady, selectedSessionId, chatPrefix]);
   // Claude's CLI runs under node; either name means the agent process is live.
   const agentLive = /claude|node/i.test(agentProcess ?? "");
+  // Live "is Claude actively emitting output right now" — an observed fact from
+  // the pty stream, not a guess. The spinner redraws while it works, so output
+  // flowing = working; output stopped = idle (done or blocked on approval).
+  const chatWorking = useTerminalWorking(
+    selectedSessionId ? `${chatPrefix}${selectedSessionId}` : null
+  );
 
   // Conversation turns (user messages that aren't tool results) — far more
   // meaningful than raw transcript entry count, and free to compute.
@@ -1413,10 +1472,10 @@ export function ProjectWorkspace({
         ? session.messages.filter(
             (m) =>
               m.role === "user" &&
-              m.parts.some((p) => p.kind !== "tool_result")
+              m.parts.some((p) => p.kind !== "tool_result"),
           ).length
         : 0,
-    [session]
+    [session],
   );
 
   // "Add to chat": move the composed comments into the chat composer, then
@@ -1440,7 +1499,7 @@ export function ProjectWorkspace({
       setChatAnnotations,
       setAnnotationsByPlan,
       setAnnotationsByProjectFile,
-    ]
+    ],
   );
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
@@ -1483,12 +1542,12 @@ export function ProjectWorkspace({
   // ── Scratch shells (sidebar "Terminals" section) ─────────────
   const shellNumber = useCallback(
     (id: string) => parseInt(id.slice(shellPrefix.length), 10) || 0,
-    [shellPrefix]
+    [shellPrefix],
   );
 
   const sidebarTerminals = useMemo(
     () => shells.map((id) => ({ id, label: `Terminal ${shellNumber(id)}` })),
-    [shells, shellNumber]
+    [shells, shellNumber],
   );
 
   const handleNewShell = useCallback(() => {
@@ -1503,7 +1562,7 @@ export function ProjectWorkspace({
     (id: string) => {
       setActiveShellId(id);
     },
-    [setActiveShellId]
+    [setActiveShellId],
   );
 
   const removeShell = useCallback(
@@ -1513,10 +1572,10 @@ export function ProjectWorkspace({
       setShells(remaining);
       // Closing the shown shell falls back to the most recent remaining one.
       setActiveShellId((cur) =>
-        cur === id ? (remaining[remaining.length - 1] ?? null) : cur
+        cur === id ? (remaining[remaining.length - 1] ?? null) : cur,
       );
     },
-    [shells, setShells, setActiveShellId]
+    [shells, setShells, setActiveShellId],
   );
 
   const handleCloseShell = useCallback(
@@ -1524,22 +1583,35 @@ export function ProjectWorkspace({
       window.electronAPI.terminalKill(id);
       removeShell(id);
     },
-    [removeShell]
+    [removeShell],
   );
 
-  // A shell pty exiting on its own (e.g. typing `exit`) removes its entry too.
+  // A pty exiting — typing `exit`, archive-kill, or future idle eviction —
+  // removes its entry. This is the single cleanup path, so killing a pty from
+  // anywhere keeps the renderer's view (openedIds / shells) in sync.
   useEffect(
     () =>
       window.electronAPI.onTerminalExit((id) => {
         if (id.startsWith(shellPrefix)) removeShell(id);
+        else if (id.startsWith(chatPrefix)) {
+          setOpenedIds((ids) => ids.filter((x) => x !== id));
+          // Claude exited. Don't leave an empty dock behind — close it. The
+          // dock has no plain-shell fallback, so reopening (⌘J) reconnects.
+          if (id === activeTerminalIdRef.current) setTerminalOpen(false);
+        }
       }),
-    [shellPrefix, removeShell]
+    [shellPrefix, chatPrefix, removeShell, setOpenedIds, setTerminalOpen],
   );
 
-  // Whenever the dock is open, make sure the active terminal is mounted.
+  // While the dock is open, keep the active chat terminal mounted. If there's
+  // no live Claude for the selected session (e.g. you switched to a chat that
+  // isn't running), there's nothing to show — close the dock rather than leave
+  // a blank pane. ⌘J then reopens it, resuming Claude.
   useEffect(() => {
-    if (terminalOpen) ensureOpened(activeTerminalId);
-  }, [terminalOpen, activeTerminalId, ensureOpened]);
+    if (!terminalOpen) return;
+    if (activeTerminalId) ensureOpened(activeTerminalId);
+    else setTerminalOpen(false);
+  }, [terminalOpen, activeTerminalId, ensureOpened, setTerminalOpen]);
 
   // ── Session rename (modal; persisted in plan-desktop.json) ───
   const [renaming, setRenaming] = useState<{
@@ -1550,7 +1622,7 @@ export function ProjectWorkspace({
   const handleRenameRequest = useCallback(
     (sessionId: string, currentTitle: string) =>
       setRenaming({ sessionId, name: currentTitle }),
-    []
+    [],
   );
 
   const handleRenameSave = useCallback(
@@ -1558,7 +1630,7 @@ export function ProjectWorkspace({
       await window.electronAPI.renameSession(sessionId, name);
       refreshSessions();
     },
-    [refreshSessions]
+    [refreshSessions],
   );
 
   // ⌘⇧R renames the selected chat.
@@ -1622,7 +1694,7 @@ export function ProjectWorkspace({
         // Drag up (negative dy) grows the terminal.
         const next = Math.min(
           Math.max(startH - (ev.clientY - startY), 120),
-          window.innerHeight - 160
+          window.innerHeight - 160,
         );
         setTerminalHeight(next);
       };
@@ -1633,7 +1705,7 @@ export function ProjectWorkspace({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [terminalHeight]
+    [terminalHeight],
   );
 
   useEffect(() => {
@@ -1641,9 +1713,13 @@ export function ProjectWorkspace({
       const meta = e.metaKey || e.ctrlKey;
       if (meta && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        // Not connected to Claude yet → connect this chat and reveal the dock.
-        // Already connected → toggle; closing it hands focus back to the composer.
-        if (selectedSessionId && !chatTerminalReady) {
+        // The dock only ever shows the selected chat's Claude. No chat selected
+        // → nothing to show, so do nothing (never open a bare shell).
+        if (!selectedSessionId) return;
+        // Selected chat not connected to Claude yet → connect it and reveal the
+        // dock (works from any tab — Diffs/Files included). Already connected →
+        // toggle; closing it hands focus back to the composer.
+        if (!chatTerminalReady) {
           connectAndShowChat();
         } else if (terminalOpen) {
           setTerminalOpen(false);
@@ -1673,11 +1749,11 @@ export function ProjectWorkspace({
   // on Ctrl-release. Lands you on the Chat tab. Archived chats are excluded.
   const activeSessions = useMemo(
     () => sessions.filter((s) => !s.archived),
-    [sessions]
+    [sessions],
   );
   const sessionIndex = Math.max(
     0,
-    activeSessions.findIndex((s) => s.sessionId === selectedSessionId)
+    activeSessions.findIndex((s) => s.sessionId === selectedSessionId),
   );
   const sessionSwitcher = useTabSwitcher({
     id: "sessions",
@@ -1744,14 +1820,14 @@ export function ProjectWorkspace({
           />
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col">
-            {/* Tab panes stay MOUNTED and hide via CSS — re-mounting re-parses
+              {/* Tab panes stay MOUNTED and hide via CSS — re-mounting re-parses
                 the whole transcript / re-highlights diffs on every switch. */}
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col",
-                openKind !== "diffs" && "hidden"
-              )}
-            >
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  openKind !== "diffs" && "hidden",
+                )}
+              >
                 <div className="min-h-0 flex-1">
                   {selectedFile && selectedFileDiff ? (
                     <FileDiffViewer
@@ -1764,21 +1840,18 @@ export function ProjectWorkspace({
                       annotationsByFile={annotationsByFile}
                       setAnnotationsByFile={setAnnotationsByFile}
                       onStage={() =>
-                        handleStageFile(
-                          selectedFile.path,
-                          selectedFile.subPath
-                        )
+                        handleStageFile(selectedFile.path, selectedFile.subPath)
                       }
                       onUnstage={() =>
                         handleUnstageFile(
                           selectedFile.path,
-                          selectedFile.subPath
+                          selectedFile.subPath,
                         )
                       }
                       onDiscard={() =>
                         handleDiscardFile(
                           selectedFile.path,
-                          selectedFile.subPath
+                          selectedFile.subPath,
                         )
                       }
                       onChanged={refreshDiff}
@@ -1790,14 +1863,14 @@ export function ProjectWorkspace({
                     </div>
                   )}
                 </div>
-            </div>
+              </div>
 
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col",
-                openKind !== "chat" && "hidden"
-              )}
-            >
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  openKind !== "chat" && "hidden",
+                )}
+              >
                 <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
                   <span className="truncate text-[var(--text-secondary)]">
                     {sessions.find((s) => s.sessionId === selectedSessionId)
@@ -1817,20 +1890,30 @@ export function ProjectWorkspace({
                         <span
                           className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1"
                           title={
-                            agentLive
-                              ? "Claude is running in this chat's terminal — ⌘J to view"
-                              : "Terminal is open, but no Claude process detected — ⌘J to view"
+                            !agentLive
+                              ? "Terminal is open, but no Claude process detected — ⌘J to view"
+                              : chatWorking
+                                ? "Claude is working in this chat — ⌘J to view"
+                                : "Claude is connected and idle in this chat — ⌘J to view"
                           }
                         >
                           <span
                             className={cn(
                               "h-1.5 w-1.5 rounded-full",
-                              agentLive
-                                ? "bg-emerald-500"
-                                : "bg-[var(--text-tertiary)]"
+                              !agentLive
+                                ? "bg-[var(--text-tertiary)]"
+                                : chatWorking
+                                  ? "animate-pulse bg-emerald-500"
+                                  : "bg-emerald-500"
                             )}
                           />
-                          <span>{agentLive ? "Claude" : "Terminal"}</span>
+                          <span>
+                            {!agentLive
+                              ? "Terminal"
+                              : chatWorking
+                                ? "Working"
+                                : "Claude"}
+                          </span>
                         </span>
                       ) : (
                         <Button
@@ -1876,14 +1959,14 @@ export function ProjectWorkspace({
                     autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
                   />
                 )}
-            </div>
+              </div>
 
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col",
-                openKind !== "plans" && "hidden"
-              )}
-            >
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  openKind !== "plans" && "hidden",
+                )}
+              >
                 {selectedPlan ? (
                   <PlanViewer
                     key={selectedPlan.filePath}
@@ -1901,14 +1984,14 @@ export function ProjectWorkspace({
                       : "Select a plan"}
                   </div>
                 )}
-            </div>
+              </div>
 
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col",
-                openKind !== "files" && "hidden"
-              )}
-            >
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  openKind !== "files" && "hidden",
+                )}
+              >
                 {selectedProjectFile ? (
                   <FileViewer
                     key={selectedProjectFile}
@@ -1919,14 +2002,18 @@ export function ProjectWorkspace({
                     onUpdateAnnotation={updateProjectFileAnnotation}
                     onRemoveAnnotation={removeProjectFileAnnotation}
                     active={openKind === "files"}
+                    revealTarget={
+                      fileReveal && fileReveal.path === selectedProjectFile
+                        ? fileReveal
+                        : null
+                    }
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
                     Select a file
                   </div>
                 )}
-            </div>
-
+              </div>
             </div>
 
             {/* Unified compose buffer: code-diff + chat annotations combined.
@@ -1951,7 +2038,7 @@ export function ProjectWorkspace({
               <div
                 className={cn(
                   "flex shrink-0 flex-col overflow-hidden border-t border-[var(--border)]",
-                  !terminalOpen && "hidden"
+                  !terminalOpen && "hidden",
                 )}
                 style={{ height: terminalOpen ? terminalHeight : 0 }}
               >
@@ -1967,7 +2054,7 @@ export function ProjectWorkspace({
                         key={tid}
                         className={cn(
                           "absolute inset-0 overflow-hidden",
-                          !active && "hidden"
+                          !active && "hidden",
                         )}
                       >
                         <TerminalPanel
@@ -2027,8 +2114,11 @@ export function ProjectWorkspace({
           onSetPlanArchived={handleSetPlanArchived}
           projectFiles={projectFiles}
           projectFilesLoading={projectFilesLoading}
-          selectedProjectFile={openKind === "files" ? selectedProjectFile : null}
+          selectedProjectFile={
+            openKind === "files" ? selectedProjectFile : null
+          }
           onSelectProjectFile={handleSelectProjectFile}
+          onOpenSearchResult={handleOpenSearchResult}
           encoded={project.encoded}
           terminals={sidebarTerminals}
           activeTerminalId={activeShellId}
@@ -2048,6 +2138,12 @@ interface SwitchEntry {
   project: string;
   badge: string;
   run: () => void;
+}
+
+/** True when focus is inside an embedded xterm terminal (dock or sidebar). */
+function isTerminalFocused(): boolean {
+  const el = document.activeElement;
+  return !!el && !!el.closest(".xterm");
 }
 
 function fileBase(p: string): string {
