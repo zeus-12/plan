@@ -125,6 +125,9 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
   // (the ResizeObserver → fit → resize loop is what makes xterm "blink").
   const lastDims = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
   const rafRef = useRef<number | null>(null);
+  // The single fit implementation, published by the setup effect so the
+  // visibility / height-drag effects reuse it instead of each rolling their own.
+  const runFitRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -181,10 +184,15 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       return true;
     });
 
-    // Coalesced, idempotent fit: only push a resize to the pty when the
-    // computed cols/rows actually change. Prevents the observer feedback loop.
-    const doFit = () => {
-      rafRef.current = null;
+    // Idempotent fit: recompute cols/rows from the container and push a resize
+    // only when they actually change — both to break the ResizeObserver
+    // feedback loop and to keep the pty (and Claude's TUI) off the hot path
+    // during pixel-level drags. On a real change we repaint the viewport and
+    // re-pin to the bottom: reflowing to a new WIDTH can leave wrapped rows
+    // half-painted under the DOM renderer, which is what makes the text look
+    // garbled at different widths. The repaint runs only on an actual
+    // dimension change, so it stays cheap.
+    const runFit = () => {
       if (host.clientWidth === 0 || host.clientHeight === 0) return;
       try {
         fit.fit();
@@ -197,10 +205,16 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       }
       lastDims.current = { cols, rows };
       window.electronAPI.terminalResize(id, cols, rows);
+      term.refresh(0, Math.max(0, rows - 1));
+      term.scrollToBottom();
     };
+    runFitRef.current = runFit;
     const scheduleFit = () => {
       if (rafRef.current != null) return;
-      rafRef.current = requestAnimationFrame(doFit);
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        runFit();
+      });
     };
 
     scheduleFit();
@@ -259,6 +273,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      runFitRef.current = null;
       // Intentionally NOT killing the pty — it persists in main.
     };
   }, [id]);
@@ -276,7 +291,8 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     };
   }, [theme]);
 
-  // Refit + focus when shown (it may have been display:none with 0 size).
+  // Refit + focus when shown (it may have been display:none with 0 size, or
+  // the container may have changed width while hidden).
   useEffect(() => {
     if (!visible) return;
     // Flush output that arrived while hidden so the current frame shows.
@@ -285,24 +301,11 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       hiddenBufRef.current = "";
     }
     const raf = requestAnimationFrame(() => {
-      const term = termRef.current;
-      const fit = fitRef.current;
-      const host = hostRef.current;
-      if (!term || !fit || !host || host.clientHeight === 0) return;
-      try {
-        fit.fit();
-        if (
-          term.cols !== lastDims.current.cols ||
-          term.rows !== lastDims.current.rows
-        ) {
-          lastDims.current = { cols: term.cols, rows: term.rows };
-          window.electronAPI.terminalResize(id, term.cols, term.rows);
-        }
-        term.scrollToBottom();
-      } catch {
-        /* ignore */
-      }
-      term.focus();
+      runFitRef.current?.();
+      // runFit only scrolls on a dimension change; on a plain re-show the dims
+      // are unchanged, so pin to the bottom explicitly after the buffer flush.
+      termRef.current?.scrollToBottom();
+      termRef.current?.focus();
     });
     return () => cancelAnimationFrame(raf);
   }, [visible, id]);
@@ -311,26 +314,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
   // so the terminal reflows instead of cropping, independent of the observer.
   useEffect(() => {
     if (!visible) return;
-    const raf = requestAnimationFrame(() => {
-      const term = termRef.current;
-      const fit = fitRef.current;
-      const host = hostRef.current;
-      if (!term || !fit || !host || host.clientHeight === 0) return;
-      try {
-        fit.fit();
-      } catch {
-        return;
-      }
-      if (
-        term.cols !== lastDims.current.cols ||
-        term.rows !== lastDims.current.rows
-      ) {
-        lastDims.current = { cols: term.cols, rows: term.rows };
-        window.electronAPI.terminalResize(id, term.cols, term.rows);
-      }
-      term.refresh(0, term.rows - 1);
-      term.scrollToBottom();
-    });
+    const raf = requestAnimationFrame(() => runFitRef.current?.());
     return () => cancelAnimationFrame(raf);
   }, [fitSignal, visible, id]);
 

@@ -13,8 +13,6 @@ interface TerminalState {
   openedIds: string[];
   /** Whether the dock is currently shown. */
   open: boolean;
-  /** Dock height in px. */
-  height: number;
   /** Scratch shells (`term:<encoded>:<n>`), in sidebar order. */
   shells: string[];
   /** Shell shown in the sidebar's embedded terminal pane. */
@@ -24,7 +22,6 @@ interface TerminalState {
 const DEFAULT: TerminalState = {
   openedIds: [],
   open: false,
-  height: 300,
   shells: [],
   activeShellId: null,
 };
@@ -68,8 +65,6 @@ export function useProjectTerminals(encoded: string): {
   setOpenedIds: Dispatch<SetStateAction<string[]>>;
   terminalOpen: boolean;
   setTerminalOpen: Dispatch<SetStateAction<boolean>>;
-  terminalHeight: number;
-  setTerminalHeight: Dispatch<SetStateAction<number>>;
   shells: string[];
   setShells: Dispatch<SetStateAction<string[]>>;
   activeShellId: string | null;
@@ -83,10 +78,6 @@ export function useProjectTerminals(encoded: string): {
 
   const setOpenedIds = useCallback(makeSetter(encoded, "openedIds"), [encoded]);
   const setTerminalOpen = useCallback(makeSetter(encoded, "open"), [encoded]);
-  const setTerminalHeight = useCallback(
-    makeSetter(encoded, "height"),
-    [encoded]
-  );
   const setShells = useCallback(makeSetter(encoded, "shells"), [encoded]);
   const setActiveShellId = useCallback(
     makeSetter(encoded, "activeShellId"),
@@ -98,11 +89,63 @@ export function useProjectTerminals(encoded: string): {
     setOpenedIds,
     terminalOpen: snapshot.open,
     setTerminalOpen,
-    terminalHeight: snapshot.height,
-    setTerminalHeight,
     shells: snapshot.shells,
     setShells,
     activeShellId: snapshot.activeShellId,
     setActiveShellId,
   };
+}
+
+/**
+ * Dock height in px — a SINGLE global value (not per-project), persisted to
+ * localStorage so it survives project switches, window reloads, and app
+ * restarts. Every open workspace shares one height; resizing in one is the
+ * height everywhere.
+ */
+const HEIGHT_KEY = "plan.terminalHeight";
+const DEFAULT_HEIGHT = 300;
+const MIN_HEIGHT = 120;
+
+function readStoredHeight(): number {
+  if (typeof window === "undefined") return DEFAULT_HEIGHT;
+  const raw = window.localStorage.getItem(HEIGHT_KEY);
+  const n = raw == null ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= MIN_HEIGHT ? n : DEFAULT_HEIGHT;
+}
+
+let height = readStoredHeight();
+const heightListeners = new Set<() => void>();
+
+function subscribeHeight(listener: () => void) {
+  heightListeners.add(listener);
+  return () => {
+    heightListeners.delete(listener);
+  };
+}
+
+const setHeight: Dispatch<SetStateAction<number>> = (update) => {
+  const next =
+    typeof update === "function"
+      ? (update as (p: number) => number)(height)
+      : update;
+  if (next === height) return;
+  height = next;
+  try {
+    window.localStorage.setItem(HEIGHT_KEY, String(next));
+  } catch {
+    // localStorage can throw (private mode / quota) — keep the in-memory value.
+  }
+  heightListeners.forEach((l) => l());
+};
+
+export function useTerminalHeight(): [
+  number,
+  Dispatch<SetStateAction<number>>,
+] {
+  const value = useSyncExternalStore(
+    subscribeHeight,
+    () => height,
+    () => height
+  );
+  return [value, setHeight];
 }
