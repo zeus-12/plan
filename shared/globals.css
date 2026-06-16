@@ -149,6 +149,13 @@ body {
 ::highlight(chat-annotation-pending) {
   background-color: var(--selection-bg);
 }
+/* In-view find (⌘F) matches over rendered markdown / transcript text. */
+::highlight(chat-find) {
+  background-color: var(--find-match-bg, rgba(234, 179, 8, 0.32));
+}
+::highlight(chat-find-current) {
+  background-color: var(--find-current-bg, rgba(249, 115, 22, 0.6));
+}
 
 * {
   scrollbar-width: thin;

@@ -33,7 +33,9 @@ import {
   listProjectFiles,
   readProjectFile,
   resolveProjectFilePath,
+  searchProjectFiles,
 } from "./project-files";
+import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
 import { startPlansWatcher, stopPlansWatcher } from "./plans-watcher";
 import {
@@ -53,6 +55,7 @@ import {
   submitToTerminal,
   sendKeys,
   terminalStatus,
+  detectInputState,
   resizeTerminal,
   killTerminal,
   killAllTerminals,
@@ -465,6 +468,23 @@ function registerIpc() {
   ipcMain.handle("files:path", async (_e, encoded: string, relPath: string) =>
     resolveProjectFilePath(encoded, relPath)
   );
+  ipcMain.handle(
+    "files:search",
+    async (_e, encoded: string, query: string, opts: SearchOptions) => {
+      // Never let an unexpected throw reject the IPC (which surfaces as an
+      // opaque "Search failed" in the UI) — return it as a structured error.
+      try {
+        return await searchProjectFiles(encoded, query, opts);
+      } catch (err) {
+        return {
+          files: [],
+          totalMatches: 0,
+          truncated: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+  );
 
   ipcMain.handle("repos:list", async (_e, encoded: string) =>
     discoverRepos(encoded)
@@ -564,6 +584,9 @@ function registerIpc() {
     sendKeys(id, keys)
   );
   ipcMain.handle("terminal:status", (_e, id: string) => terminalStatus(id));
+  ipcMain.handle("terminal:inputState", (_e, id: string) =>
+    detectInputState(id)
+  );
   ipcMain.on(
     "terminal:resize",
     (_e, id: string, cols: number, rows: number) =>

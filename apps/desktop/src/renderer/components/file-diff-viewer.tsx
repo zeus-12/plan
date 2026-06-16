@@ -464,6 +464,7 @@ export function FileDiffViewer({
             newText={viewNewText}
             settings={settings}
             onSettingsChange={updateSettings}
+            findEnabled={active}
             isFirstVersion={!contents.oldText}
             language={effectiveLanguage}
             annotations={annotations}

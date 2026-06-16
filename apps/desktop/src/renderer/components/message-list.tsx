@@ -10,7 +10,9 @@ import {
 } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
+import { useTextFind } from "@plan/shared/lib/use-text-find";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
+import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
@@ -19,6 +21,10 @@ import type {
   ConversationMessage,
   MessagePart,
 } from "../../shared-types";
+
+/** How far (px) above the bottom the user must scroll before the "jump to
+ *  latest" button appears. */
+const SCROLL_DOWN_THRESHOLD_PX = 400;
 
 type MessageCategory = "user-real" | "tool" | "assistant";
 
@@ -106,10 +112,14 @@ function CollapsibleBlock({
   label,
   preview,
   children,
+  /** Exclude the preview + body from ⌘F find (bulky tool args/output); the
+   *  label (e.g. the tool name) stays searchable. */
+  skipFindContent = false,
 }: {
   label: string;
   preview: string;
   children: React.ReactNode;
+  skipFindContent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -130,7 +140,10 @@ function CollapsibleBlock({
           {label}
         </span>
         {!open && preview && (
-          <span className="min-w-0 truncate text-[var(--text-tertiary)]">
+          <span
+            className="min-w-0 truncate text-[var(--text-tertiary)]"
+            data-find-skip={skipFindContent ? "" : undefined}
+          >
             {preview}
           </span>
         )}
@@ -138,6 +151,7 @@ function CollapsibleBlock({
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+        data-find-skip={skipFindContent ? "" : undefined}
       >
         <div className="overflow-hidden">{children}</div>
       </div>
@@ -181,6 +195,82 @@ function getHighlights(): { ann: Highlight; pending: Highlight } | null {
     CSS.highlights.set("chat-annotation-pending", pendingHighlight);
   }
   return { ann: annHighlight, pending: pendingHighlight! };
+}
+
+// In-view find (⌘F) highlights — a separate registry from annotations.
+let findHighlight: Highlight | null = null;
+let findCurrentHighlight: Highlight | null = null;
+
+function getFindHighlights(): { match: Highlight; current: Highlight } | null {
+  if (typeof Highlight === "undefined" || !("highlights" in CSS)) return null;
+  if (!findHighlight) {
+    findHighlight = new Highlight();
+    findCurrentHighlight = new Highlight();
+    CSS.highlights.set("chat-find", findHighlight);
+    CSS.highlights.set("chat-find-current", findCurrentHighlight);
+  }
+  return { match: findHighlight, current: findCurrentHighlight! };
+}
+
+interface FindSeg {
+  node: Text;
+  start: number;
+}
+
+/**
+ * Walk `root` collecting searchable text + the text-node segments it came from,
+ * skipping any subtree marked `data-find-skip` (tool-call args/output — bulky and
+ * not worth searching; the tool name in the header stays searchable). The
+ * returned `segs` let a match offset map back to a DOM Range without re-walking.
+ */
+function collectFindable(root: HTMLElement): { text: string; segs: FindSeg[] } {
+  const segs: FindSeg[] = [];
+  let text = "";
+  const walk = (el: Node) => {
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType === Node.TEXT_NODE) {
+        segs.push({ node: n as Text, start: text.length });
+        text += (n as Text).data;
+      } else if (n.nodeType === Node.ELEMENT_NODE) {
+        if ((n as Element).hasAttribute("data-find-skip")) continue;
+        walk(n);
+      }
+    }
+  };
+  walk(root);
+  return { text, segs };
+}
+
+/** Build a DOM Range for [start, end) over collected segments. */
+function rangeFromSegs(
+  segs: FindSeg[],
+  start: number,
+  end: number
+): Range | null {
+  if (segs.length === 0 || end <= start) return null;
+  const seg = (off: number) => {
+    let lo = 0;
+    let hi = segs.length - 1;
+    let ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (segs[mid].start <= off) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return segs[ans];
+  };
+  const a = seg(start);
+  const b = seg(end - 1);
+  const r = document.createRange();
+  try {
+    r.setStart(a.node, Math.min(start - a.start, a.node.data.length));
+    r.setEnd(b.node, Math.min(end - b.start, b.node.data.length));
+  } catch {
+    return null;
+  }
+  return r;
 }
 
 /** Build a DOM Range for [start, end) character offsets into `root`'s text. */
@@ -469,6 +559,7 @@ const MessagePartView = memo(function MessagePartView({
         <CollapsibleBlock
           label={`🔧 ${part.tool}`}
           preview={previewInput(part.input)}
+          skipFindContent
         >
           <div className="px-3 pb-3 pt-1">
             <CodeBody text={inputJson} />
@@ -650,15 +741,28 @@ export const MessageList = memo(function MessageList({
     if (el && followingBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [visible]);
 
+  // Show a "jump to latest" button once the user scrolls a screenful-ish up.
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       followingBottomRef.current = distance < 20;
+      setShowScrollDown(distance > SCROLL_DOWN_THRESHOLD_PX);
     };
+    onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
+  }, [items.length]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    followingBottomRef.current = true;
+    setShowScrollDown(false);
   }, []);
 
   // Selection → comment popover (within a single text part). Timing (when the
@@ -760,6 +864,93 @@ export const MessageList = memo(function MessageList({
     []
   );
 
+  /* ── In-view find (⌘F) ──────────────────────────────────────── */
+
+  // The transcript is plain rendered DOM (not virtualized), so we search the
+  // concatenated visible text and paint matches with the CSS Custom Highlight
+  // API — no DOM splitting, every match found.
+  const [findDomText, setFindDomText] = useState("");
+  const find = useTextFind(findDomText);
+  const [findReveal, setFindReveal] = useState(0);
+  // Text-node segments captured alongside `findDomText`, so a match offset maps
+  // back to a DOM Range (and tool-call args excluded via `data-find-skip`).
+  const findSegsRef = useRef<FindSeg[]>([]);
+
+  // (Re)snapshot the transcript text whenever find is open and the content
+  // settles, so offsets line up with what's currently on screen.
+  useEffect(() => {
+    if (!find.open) {
+      setFindDomText("");
+      findSegsRef.current = [];
+      return;
+    }
+    const el = parentRef.current;
+    if (!el) return;
+    const { text, segs } = collectFindable(el);
+    findSegsRef.current = segs;
+    setFindDomText(text);
+  }, [find.open, items, deferredMessages]);
+
+  // Paint all matches; the active one gets the stronger highlight.
+  useEffect(() => {
+    const hl = getFindHighlights();
+    if (!hl) return;
+    hl.match.clear();
+    hl.current.clear();
+    if (!find.open) return;
+    find.matches.forEach((m, i) => {
+      const r = rangeFromSegs(findSegsRef.current, m.start, m.end);
+      if (r) (i === find.current ? hl.current : hl.match).add(r);
+    });
+  }, [find.open, find.matches, find.current, findDomText]);
+
+  // Center the active match in the viewport as the user steps through.
+  useEffect(() => {
+    if (!find.open || find.current < 0) return;
+    const root = parentRef.current;
+    const m = find.matches[find.current];
+    if (!root || !m) return;
+    const r = rangeFromSegs(findSegsRef.current, m.start, m.end);
+    const rect = r?.getBoundingClientRect();
+    if (!rect) return;
+    const pr = root.getBoundingClientRect();
+    if (rect.top < pr.top || rect.bottom > pr.bottom) {
+      root.scrollTop += rect.top - pr.top - pr.height / 2 + rect.height / 2;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [find.open, find.current, find.matches]);
+
+  // Clear the painted highlights when this component unmounts.
+  useEffect(() => {
+    return () => {
+      const hl = getFindHighlights();
+      hl?.match.clear();
+      hl?.current.clear();
+    };
+  }, []);
+
+  // ⌘F opens the find widget while this pane is the visible one.
+  useEffect(() => {
+    if (!visible) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "f"
+      ) {
+        e.preventDefault();
+        const sel = window.getSelection()?.toString() ?? "";
+        find.show(sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined);
+        setFindReveal((n) => n + 1);
+      } else if (e.key === "Escape" && find.open) {
+        find.close();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [visible, find]);
+
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -770,6 +961,8 @@ export const MessageList = memo(function MessageList({
 
   return (
     <>
+      <div className="relative h-full">
+      <FindWidget find={find} revealTrigger={findReveal} />
       <div ref={parentRef} className="h-full overflow-auto py-3">
         {items.map((m, idx) => {
           const partMap = annotationsByMessage.get(m.uuid);
@@ -836,6 +1029,28 @@ export const MessageList = memo(function MessageList({
             </div>
           );
         })}
+      </div>
+      {showScrollDown && (
+        <button
+          onClick={scrollToBottom}
+          title="Scroll to latest"
+          aria-label="Scroll to latest"
+          className="absolute bottom-4 right-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] shadow-lg transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
       </div>
 
       {pending && (

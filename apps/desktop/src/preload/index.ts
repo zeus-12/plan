@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { SessionEvent } from "../main/session-watcher";
-import type { PlansEvent } from "../shared-types";
+import type { PlansEvent, SearchOptions } from "../shared-types";
 
 const electronAPI = {
   listProjects: () => ipcRenderer.invoke("projects:list"),
@@ -37,6 +37,8 @@ const electronAPI = {
     ipcRenderer.invoke("files:read", encoded, relPath),
   projectFilePath: (encoded: string, relPath: string) =>
     ipcRenderer.invoke("files:path", encoded, relPath),
+  searchProjectFiles: (encoded: string, query: string, opts: SearchOptions) =>
+    ipcRenderer.invoke("files:search", encoded, query, opts),
 
   onWatcherEvent: (cb: (e: SessionEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, e: SessionEvent) =>
@@ -120,6 +122,8 @@ const electronAPI = {
   terminalSendKeys: (id: string, keys: string[]) =>
     ipcRenderer.send("terminal:sendKeys", id, keys),
   terminalStatus: (id: string) => ipcRenderer.invoke("terminal:status", id),
+  terminalInputState: (id: string) =>
+    ipcRenderer.invoke("terminal:inputState", id),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", id, cols, rows),
   terminalKill: (id: string) => ipcRenderer.send("terminal:kill", id),

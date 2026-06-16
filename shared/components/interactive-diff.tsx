@@ -31,7 +31,9 @@ import {
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import { useShikiReady } from "../lib/shiki";
 import { useCommentSelection } from "../lib/use-comment-selection";
+import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
+import { FindWidget } from "./find-widget";
 
 /* ── Constants ────────────────────────────────────────────── */
 
@@ -97,6 +99,12 @@ interface Props {
     onRevert: (range: HunkRange) => void;
     onUnstage: (range: HunkRange) => void;
   };
+  /**
+   * Enable the in-view ⌘F find widget. Default true. Set false when several
+   * diffs are mounted at once (e.g. hidden desktop tabs) so only the visible one
+   * responds to ⌘F.
+   */
+  findEnabled?: boolean;
 }
 
 export interface HunkRange {
@@ -252,6 +260,7 @@ export function InteractiveDiff({
   onRemoveAnnotation,
   onMergeChange,
   hunkActions,
+  findEnabled = true,
 }: Props) {
   const mergeEnabled = !!onMergeChange;
   const hunkActionsEnabled = !!hunkActions;
@@ -314,6 +323,100 @@ export function InteractiveDiff({
     () => buildSplitRows(expandedFiltered),
     [expandedFiltered]
   );
+
+  /* ── In-view find (⌘F) ─────────────────────────────────────── */
+
+  // Searchable text = every diff line's content (both sides), newline-joined.
+  // `findLineStarts[i]` is dLines[i]'s start offset in that text, so a match
+  // offset maps back to a line + line-local range.
+  const findText = useMemo(
+    () => dLines.map((l) => l.content).join("\n"),
+    [dLines]
+  );
+  const findLineStarts = useMemo(() => {
+    const arr = new Array<number>(dLines.length);
+    let acc = 0;
+    for (let i = 0; i < dLines.length; i++) {
+      arr[i] = acc;
+      acc += dLines[i].content.length + 1;
+    }
+    return arr;
+  }, [dLines]);
+
+  const find = useTextFind(findText);
+  const [findReveal, setFindReveal] = useState(0);
+
+  const findLineOfOffset = useCallback(
+    (offset: number): number => {
+      let lo = 0;
+      let hi = findLineStarts.length - 1;
+      let ans = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (findLineStarts[mid] <= offset) {
+          ans = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return ans;
+    },
+    [findLineStarts]
+  );
+
+  // dLines index → its find matches as line-local ranges (+ which is current).
+  const findByLine = useMemo(() => {
+    const map = new Map<number, { s: number; e: number; current: boolean }[]>();
+    if (!find.open) return map;
+    for (let i = 0; i < find.matches.length; i++) {
+      const m = find.matches[i];
+      const li = findLineOfOffset(m.start);
+      const ls = findLineStarts[li];
+      const contentLen = dLines[li]?.content.length ?? 0;
+      const entry = {
+        s: m.start - ls,
+        e: Math.min(m.end - ls, contentLen),
+        current: i === find.current,
+      };
+      const arr = map.get(li);
+      if (arr) arr.push(entry);
+      else map.set(li, [entry]);
+    }
+    return map;
+  }, [find.open, find.matches, find.current, findLineStarts, findLineOfOffset, dLines]);
+
+  // ⌘F opens the find widget for this diff (seeded with any selection).
+  useEffect(() => {
+    if (!findEnabled) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "f"
+      ) {
+        e.preventDefault();
+        const sel = window.getSelection()?.toString() ?? "";
+        find.show(sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined);
+        setFindReveal((n) => n + 1);
+      } else if (e.key === "Escape" && find.open) {
+        find.close();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [findEnabled, find]);
+
+  // Scroll the active match into view as the user steps through (not virtualized,
+  // so locate its row by data-dline and let the browser scroll it centered).
+  useEffect(() => {
+    if (!find.open || find.current < 0) return;
+    const m = find.matches[find.current];
+    if (!m) return;
+    const li = findLineOfOffset(m.start);
+    const el = contentRef.current?.querySelector(`[data-dline="${li}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "auto" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [find.open, find.current, find.matches]);
 
   /* ── Syntax highlighting (per source line) ─────────────────── */
 
@@ -689,7 +792,12 @@ export function InteractiveDiff({
 
   /* ── Highlights ─────────────────────────────────────────── */
 
-  type Hl = { s: number; e: number; kind: "ann" | "pending"; annId?: string };
+  type Hl = {
+    s: number;
+    e: number;
+    kind: "ann" | "pending" | "find" | "find-current";
+    annId?: string;
+  };
 
   // `side` is the column being rendered in split view. A context (unchanged)
   // line shares one DiffLine.idx across both columns, so without this filter a
@@ -724,6 +832,11 @@ export function InteractiveDiff({
         e: Math.min(pending.data.endOffset, le) - ls,
         kind: "pending",
       });
+    }
+
+    // Find matches are line-local already and apply to both columns.
+    for (const f of findByLine.get(lineIdx) ?? []) {
+      out.push({ s: f.s, e: f.e, kind: f.current ? "find-current" : "find" });
     }
 
     return out.sort((a, b) => a.s - b.s);
@@ -811,19 +924,26 @@ export function InteractiveDiff({
 
       const isAnn = annHl?.kind === "ann";
       const isPending = annHl?.kind === "pending";
+      const isFind = annHl?.kind === "find";
+      const isFindCurrent = annHl?.kind === "find-current";
       const hovered = isAnn && hoveredAnnId === annHl?.annId;
 
-      const wantsBg = isAnn || isPending || (wordSeg && wordSeg.changed);
+      const wantsBg =
+        isAnn || isPending || isFind || isFindCurrent || (wordSeg && wordSeg.changed);
       const background =
-        hovered
-          ? "var(--highlight-bg-hover)"
-          : isAnn
-            ? "var(--highlight-bg)"
-            : isPending
-              ? "var(--selection-bg)"
-              : wordSeg && wordSeg.changed && wordBgVar
-                ? wordBgVar
-                : undefined;
+        isFindCurrent
+          ? "var(--find-current-bg, rgba(249,115,22,0.6))"
+          : isFind
+            ? "var(--find-match-bg, rgba(234,179,8,0.32))"
+            : hovered
+              ? "var(--highlight-bg-hover)"
+              : isAnn
+                ? "var(--highlight-bg)"
+                : isPending
+                  ? "var(--selection-bg)"
+                  : wordSeg && wordSeg.changed && wordBgVar
+                    ? wordBgVar
+                    : undefined;
 
       const classNames: string[] = [];
       if (synTok?.className) classNames.push(synTok.className);
@@ -833,6 +953,8 @@ export function InteractiveDiff({
 
       const style: React.CSSProperties & Record<string, string | undefined> = {};
       if (background) style.background = background;
+      if (isFindCurrent)
+        style.outline = "1px solid var(--find-current-border, #f59e0b)";
       if (synTok?.lightColor) style["--shiki-light"] = synTok.lightColor;
       if (synTok?.darkColor) style["--shiki-dark"] = synTok.darkColor;
       if (synTok?.italic) style.fontStyle = "italic";
@@ -1283,6 +1405,14 @@ export function InteractiveDiff({
 
   return (
     <div>
+      {/* Sticky, zero-height anchor so the find widget stays pinned to the top-
+          right of the scroll viewport (works inside the desktop pane and the web
+          page alike). FindWidget renders nothing while closed. */}
+      {findEnabled && (
+        <div className="sticky top-0 z-30 h-0">
+          <FindWidget find={find} revealTrigger={findReveal} />
+        </div>
+      )}
       {renderSettingsBar()}
 
       <div

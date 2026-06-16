@@ -19,8 +19,9 @@ import { PlansList } from "./plans-list";
 import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { SearchPanel } from "./search-panel";
 
-export type WorkTab = "diffs" | "chat" | "plans" | "files";
+export type WorkTab = "diffs" | "chat" | "plans" | "files" | "search";
 
 interface Props {
   tab: WorkTab;
@@ -73,6 +74,13 @@ interface Props {
   projectFilesLoading: boolean;
   selectedProjectFile: string | null;
   onSelectProjectFile: (path: string) => void;
+  /** Open a project-wide search hit: relative path + 1-based line + char range. */
+  onOpenSearchResult: (
+    path: string,
+    line: number,
+    colStart: number,
+    colEnd: number
+  ) => void;
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
@@ -180,6 +188,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   projectFilesLoading,
   selectedProjectFile,
   onSelectProjectFile,
+  onOpenSearchResult,
   encoded,
   terminals,
   activeTerminalId,
@@ -192,10 +201,16 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   // Local UI state — independent of the dock and ⌘J.
   const [paneCollapsed, setPaneCollapsed] = useState(false);
 
-  // ⌘1 / ⌘2 / ⌘3 → swap tabs (match the visual order: Chat, Diffs, Plans)
+  // ⌘1‑⌘5 → swap tabs (match the visual order); ⌘⇧F → Search (VS Code binding).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        onTabChange("search");
+        return;
+      }
+      if (e.shiftKey) return;
       if (e.key === "1") {
         e.preventDefault();
         onTabChange("chat");
@@ -206,6 +221,9 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         e.preventDefault();
         onTabChange("files");
       } else if (e.key === "4") {
+        e.preventDefault();
+        onTabChange("search");
+      } else if (e.key === "5") {
         e.preventDefault();
         onTabChange("plans");
       }
@@ -259,6 +277,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="diffs">Diffs</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
+              <TabsTrigger value="search">Search</TabsTrigger>
               <TabsTrigger value="plans" className="relative">
                 Plans
                 {plansBadge > 0 && (
@@ -384,6 +403,18 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               activeFilePath={activeFilePath}
               onSelect={onSelectProjectFile}
               loading={projectFilesLoading}
+            />
+          </TabsContent>
+
+          <TabsContent
+            value="search"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            <SearchPanel
+              encoded={encoded}
+              active={tab === "search"}
+              onOpenResult={onOpenSearchResult}
             />
           </TabsContent>
         </SidebarContent>

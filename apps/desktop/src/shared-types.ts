@@ -59,6 +59,38 @@ export interface FileView {
   binary: boolean;
 }
 
+/** Match options for the project-wide Search tab (mirrors VS Code's toggles). */
+export interface SearchOptions {
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+}
+
+/** One matching line within a file (a single line can hold several matches). */
+export interface SearchMatch {
+  /** 1-based line number. */
+  line: number;
+  /** The raw line text (for the result preview). */
+  text: string;
+  /** Char-offset ranges of every match within `text`. */
+  ranges: { start: number; end: number }[];
+}
+
+export interface SearchFileResult {
+  /** Project-relative POSIX path. */
+  path: string;
+  matches: SearchMatch[];
+}
+
+export interface SearchResult {
+  files: SearchFileResult[];
+  totalMatches: number;
+  /** True when a cap (files scanned or matches collected) cut the results off. */
+  truncated: boolean;
+  /** Set when the query is an invalid regex; `files` is then empty. */
+  error?: string;
+}
+
 export interface ProjectEntry {
   encoded: string;
   cwd: string;

@@ -24,6 +24,8 @@ interface Props {
   onRemoveAnnotation: (id: string) => void;
   /** Clear this plan's comments when the compared text changes (offsets shift). */
   onResetAnnotations: () => void;
+  /** True while the Plans pane is the visible one — gates the ⌘F find widget. */
+  active?: boolean;
 }
 
 function basename(filePath: string): string {
@@ -38,6 +40,7 @@ export function PlanViewer({
   onUpdateAnnotation,
   onRemoveAnnotation,
   onResetAnnotations,
+  active = true,
 }: Props) {
   const [settings, updateSettings] = useDiffSettings();
 
@@ -133,6 +136,7 @@ export function PlanViewer({
           newText={rightText}
           settings={settings}
           onSettingsChange={updateSettings}
+          findEnabled={active}
           isFirstVersion={isFirstVersion}
           language={language}
           annotations={annotations}

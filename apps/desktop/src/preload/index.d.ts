@@ -11,6 +11,8 @@ import type {
   GitStatusResult,
   GitOpResult,
   DiscoveredRepo,
+  SearchOptions,
+  SearchResult,
 } from "../shared-types";
 
 interface ElectronAPI {
@@ -43,6 +45,11 @@ interface ElectronAPI {
     encoded: string,
     relPath: string
   ) => Promise<string | null>;
+  searchProjectFiles: (
+    encoded: string,
+    query: string,
+    opts: SearchOptions
+  ) => Promise<SearchResult>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
   onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;
@@ -100,6 +107,12 @@ interface ElectronAPI {
   terminalStatus: (
     id: string
   ) => Promise<{ running: boolean; process: string | null }>;
+  terminalInputState: (
+    id: string
+  ) => Promise<{
+    state: "input" | "selection" | "unknown";
+    lines: string[];
+  }>;
   terminalResize: (id: string, cols: number, rows: number) => void;
   terminalKill: (id: string) => void;
   terminalList: () => Promise<{ id: string; cwd: string; pid: number }[]>;

@@ -50,6 +50,12 @@ import { osNotify, pushToast } from "../lib/toast-store";
  * first terminal spawn need to treat them specially.
  */
 const NEW_SESSION_IDS = new Set<string>();
+
+// EXPERIMENTAL input-box/menu detection: when true, fires a toast + devtools log
+// on every detected state change so the heuristic's accuracy can be validated.
+// Off now that "Needs input" is reliable — flip back on to re-tune the regexes.
+const DEBUG_INPUT_DETECT = false;
+
 import type { SessionListItem } from "./session-list";
 import type { FileEntry, RepoFileGroup } from "./file-list";
 
@@ -1464,6 +1470,78 @@ export function ProjectWorkspace({
     selectedSessionId ? `${chatPrefix}${selectedSessionId}` : null
   );
 
+  // ── EXPERIMENTAL: input-box vs. selection-menu detection ─────────────
+  // Heuristic read of the chat terminal's rendered screen (a headless emulator
+  // in main scans the bottom rows for Claude's TUI box). "selection" means a
+  // numbered approval/plan/question menu is up — there's NO free-text box, so
+  // sending a message + Enter would mis-navigate the menu. This is a guess, not
+  // a protocol; DEBUG_INPUT_DETECT (module scope) toasts accuracy for tuning.
+  const [inputState, setInputState] = useState<
+    "input" | "selection" | "unknown"
+  >("unknown");
+  const lastDetectRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!chatTerminalReady || !selectedSessionId) {
+      setInputState("unknown");
+      lastDetectRef.current = null;
+      return;
+    }
+    const tid = `${chatPrefix}${selectedSessionId}`;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await window.electronAPI.terminalInputState(tid);
+        if (!alive) return;
+        setInputState(res.state);
+        if (DEBUG_INPUT_DETECT && res.state !== lastDetectRef.current) {
+          lastDetectRef.current = res.state;
+          // Full grid tail to devtools (toasts truncate) so the glyphs that
+          // drove the classification can be inspected and the regexes tuned.
+          console.debug(`[input-detect] ${res.state}\n` + res.lines.join("\n"));
+          pushToast(
+            {
+              text: `[detect] ${res.state} — ${
+                res.lines.slice(-3).join(" ⏎ ") || "(empty)"
+              }`,
+            },
+            6_000
+          );
+        }
+      } catch {
+        if (alive) setInputState("unknown");
+      }
+    };
+    void poll();
+    const interval = setInterval(poll, 1_500);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, [chatTerminalReady, selectedSessionId, chatPrefix]);
+
+  // A selection menu only matters while Claude is the live process and isn't
+  // mid-render (working ⇒ the frame is transient). This is what gates the
+  // composer + the "needs input" hint.
+  const awaitingSelection =
+    agentLive && !chatWorking && inputState === "selection";
+
+  // Auto-reveal the terminal when a menu appears so the user can respond —
+  // only once per transition into the selection state (not on every poll).
+  const autoRevealedRef = useRef(false);
+  useEffect(() => {
+    if (awaitingSelection && !autoRevealedRef.current) {
+      autoRevealedRef.current = true;
+      revealChatTerminal(selectedSessionId!);
+      pushToast({
+        text: "Claude may be waiting on a menu selection — respond in the terminal.",
+        actionLabel: "Open terminal",
+        onAction: () => revealChatTerminal(selectedSessionId!),
+      });
+    } else if (!awaitingSelection) {
+      autoRevealedRef.current = false;
+    }
+  }, [awaitingSelection, selectedSessionId, revealChatTerminal]);
+
   // Conversation turns (user messages that aren't tool results) — far more
   // meaningful than raw transcript entry count, and free to compute.
   const turnCount = useMemo(
@@ -1888,31 +1966,42 @@ export function ProjectWorkspace({
                     {selectedSessionId &&
                       (chatTerminalReady ? (
                         <span
-                          className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1"
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-md border px-2 py-1",
+                            awaitingSelection
+                              ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
+                              : "border-[var(--border)]"
+                          )}
                           title={
-                            !agentLive
-                              ? "Terminal is open, but no Claude process detected — ⌘J to view"
-                              : chatWorking
-                                ? "Claude is working in this chat — ⌘J to view"
-                                : "Claude is connected and idle in this chat — ⌘J to view"
+                            awaitingSelection
+                              ? "Claude may be waiting on a menu selection (no text box) — ⌘J to respond"
+                              : !agentLive
+                                ? "Terminal is open, but no Claude process detected — ⌘J to view"
+                                : chatWorking
+                                  ? "Claude is working in this chat — ⌘J to view"
+                                  : "Claude is connected and idle in this chat — ⌘J to view"
                           }
                         >
                           <span
                             className={cn(
                               "h-1.5 w-1.5 rounded-full",
-                              !agentLive
-                                ? "bg-[var(--text-tertiary)]"
-                                : chatWorking
-                                  ? "animate-pulse bg-emerald-500"
-                                  : "bg-emerald-500"
+                              awaitingSelection
+                                ? "animate-pulse bg-amber-500"
+                                : !agentLive
+                                  ? "bg-[var(--text-tertiary)]"
+                                  : chatWorking
+                                    ? "animate-pulse bg-emerald-500"
+                                    : "bg-emerald-500"
                             )}
                           />
                           <span>
-                            {!agentLive
-                              ? "Terminal"
-                              : chatWorking
-                                ? "Working"
-                                : "Claude"}
+                            {awaitingSelection
+                              ? "Needs input"
+                              : !agentLive
+                                ? "Terminal"
+                                : chatWorking
+                                  ? "Working"
+                                  : "Claude"}
                           </span>
                         </span>
                       ) : (
@@ -1956,6 +2045,8 @@ export function ProjectWorkspace({
                     inactive={!chatTerminalReady}
                     onStart={handleResumeChat}
                     onSend={handleSendChat}
+                    blocked={awaitingSelection}
+                    onBlocked={() => revealChatTerminal(selectedSessionId)}
                     autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
                   />
                 )}
@@ -1976,6 +2067,7 @@ export function ProjectWorkspace({
                     onUpdateAnnotation={updatePlanAnnotation}
                     onRemoveAnnotation={removePlanAnnotation}
                     onResetAnnotations={resetPlanAnnotations}
+                    active={openKind === "plans"}
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
