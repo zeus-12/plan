@@ -17,14 +17,12 @@ import { cn } from "@plan/shared/lib/utils";
 import type {
   ProjectEntry,
   ParsedSession,
-  Plan,
   GitFileStatus,
   DiscoveredRepo,
 } from "../../shared-types";
 import { MiddleSidebar, type WorkTab } from "./middle-sidebar";
 import { FileDiffViewer } from "./file-diff-viewer";
 import { MessageList, type ChatAnnotation } from "./message-list";
-import { PlanViewer } from "./plan-viewer";
 import { FileViewer } from "./file-viewer";
 import { CommandPalette, type PaletteItem } from "./command-palette";
 import { FileIcon } from "./file-icon";
@@ -198,8 +196,6 @@ export function ProjectWorkspace({
     setAnnotationsByFile,
     chatAnnotations,
     setChatAnnotations,
-    annotationsByPlan,
-    setAnnotationsByPlan,
     annotationsByProjectFile,
     setAnnotationsByProjectFile,
   } = useProjectAnnotations(project.encoded);
@@ -326,12 +322,6 @@ export function ProjectWorkspace({
   const aggregatedDiffAnnotations = useMemo(
     () => Object.values(annotationsByFile).flat(),
     [annotationsByFile],
-  );
-
-  // Plan comments across all plans — combined into the same compose buffer.
-  const aggregatedPlanAnnotations = useMemo(
-    () => Object.values(annotationsByPlan).flat(),
-    [annotationsByPlan],
   );
 
   // Read-only file-viewer comments across all files — same compose buffer.
@@ -613,49 +603,6 @@ export function ProjectWorkspace({
     refreshSelectedSession,
   ]);
 
-  // ── Plans state (global, not project-scoped) ─────────────────
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlanPath, setSelectedPlanPath] = useState<string | null>(null);
-
-  const refreshPlans = useCallback(async () => {
-    const list = await window.electronAPI.listPlans();
-    setPlans(list);
-  }, []);
-
-  useEffect(() => {
-    refreshPlans();
-    return window.electronAPI.onPlansEvent(() => {
-      refreshPlans();
-    });
-  }, [refreshPlans]);
-
-  const handleSelectPlan = useCallback(
-    async (filePath: string) => {
-      setSelectedPlanPath(filePath);
-      setOpenKind("plans");
-      await window.electronAPI.markPlanRead(filePath);
-      // Re-pull so the unread badge clears immediately.
-      refreshPlans();
-    },
-    [refreshPlans],
-  );
-
-  const selectedPlan = useMemo(
-    () => plans.find((p) => p.filePath === selectedPlanPath) ?? null,
-    [plans, selectedPlanPath],
-  );
-
-  const handleSetPlanArchived = useCallback(
-    async (filePath: string, archived: boolean) => {
-      await window.electronAPI.setPlanArchived(filePath, archived);
-      // Don't keep an archived plan open in the viewer.
-      if (archived)
-        setSelectedPlanPath((cur) => (cur === filePath ? null : cur));
-      refreshPlans();
-    },
-    [refreshPlans],
-  );
-
   // ── Project files (Files tab + ⌘P) ───────────────────────────
   // Indexed lazily the first time the Files tab (or ⌘P) is used, then cached
   // for this project mount. The list is also the source for the ⌘P finder.
@@ -896,67 +843,6 @@ export function ProjectWorkspace({
     return () => window.removeEventListener("keydown", handler);
   }, [indexProjectFiles, loadAllChats]);
 
-  // ── Plan annotation handlers (keyed by plan filePath in the shared store,
-  //    so plan comments join the same compose buffer as code + chat) ────────
-  const planAnnotations = useMemo<Annotation[]>(
-    () => (selectedPlanPath ? (annotationsByPlan[selectedPlanPath] ?? []) : []),
-    [annotationsByPlan, selectedPlanPath],
-  );
-  const addPlanAnnotation = useCallback(
-    (
-      selectedText: string,
-      startOffset: number,
-      endOffset: number,
-      comment: string,
-      side: "left" | "right",
-    ) => {
-      if (!selectedPlanPath) return;
-      setAnnotationsByPlan((prev) => ({
-        ...prev,
-        [selectedPlanPath]: [
-          ...(prev[selectedPlanPath] ?? []),
-          {
-            id: crypto.randomUUID(),
-            selectedText,
-            startOffset,
-            endOffset,
-            comment,
-            side,
-          },
-        ],
-      }));
-    },
-    [selectedPlanPath, setAnnotationsByPlan],
-  );
-  const updatePlanAnnotation = useCallback(
-    (id: string, comment: string) => {
-      if (!selectedPlanPath) return;
-      setAnnotationsByPlan((prev) => ({
-        ...prev,
-        [selectedPlanPath]: (prev[selectedPlanPath] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a,
-        ),
-      }));
-    },
-    [selectedPlanPath, setAnnotationsByPlan],
-  );
-  const removePlanAnnotation = useCallback(
-    (id: string) => {
-      if (!selectedPlanPath) return;
-      setAnnotationsByPlan((prev) => ({
-        ...prev,
-        [selectedPlanPath]: (prev[selectedPlanPath] ?? []).filter(
-          (a) => a.id !== id,
-        ),
-      }));
-    },
-    [selectedPlanPath, setAnnotationsByPlan],
-  );
-  const resetPlanAnnotations = useCallback(() => {
-    if (!selectedPlanPath) return;
-    setAnnotationsByPlan((prev) => ({ ...prev, [selectedPlanPath]: [] }));
-  }, [selectedPlanPath, setAnnotationsByPlan]);
-
   // ── Project-file (read-only viewer) annotation handlers ──────
   const projectFileAnnotations = useMemo<Annotation[]>(
     () =>
@@ -1037,7 +923,6 @@ export function ProjectWorkspace({
   const totalComments =
     aggregatedDiffAnnotations.length +
     aggregatedChatAnnotations.length +
-    aggregatedPlanAnnotations.length +
     aggregatedProjectFileAnnotations.length;
   const composedMessage = useMemo(() => {
     const parts: string[] = [];
@@ -1057,16 +942,6 @@ export function ProjectWorkspace({
           }),
       );
     }
-    if (aggregatedPlanAnnotations.length > 0) {
-      parts.push(
-        "On the plan:\n\n" +
-          generateMessage(aggregatedPlanAnnotations, {
-            intro: "",
-            leftLabel: "the previous version",
-            rightLabel: "the current version",
-          }),
-      );
-    }
     if (aggregatedChatAnnotations.length > 0) {
       parts.push(
         "On the conversation:\n\n" +
@@ -1076,7 +951,6 @@ export function ProjectWorkspace({
     return parts.join("\n\n");
   }, [
     aggregatedDiffAnnotations,
-    aggregatedPlanAnnotations,
     aggregatedChatAnnotations,
     aggregatedProjectFileAnnotations,
   ]);
@@ -1565,7 +1439,6 @@ export function ProjectWorkspace({
       setOpenKind("chat");
       setAnnotationsByFile({});
       setChatAnnotations([]);
-      setAnnotationsByPlan({});
       setAnnotationsByProjectFile({});
       requestAnimationFrame(() => {
         chatInputRef.current?.append(text);
@@ -1575,30 +1448,27 @@ export function ProjectWorkspace({
     [
       setAnnotationsByFile,
       setChatAnnotations,
-      setAnnotationsByPlan,
       setAnnotationsByProjectFile,
     ],
   );
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
-  // plans, and chat. Gated behind a confirmation since it can't be undone.
+  // and chat. Gated behind a confirmation since it can't be undone.
   const handleClearComments = useCallback(async () => {
     const ok = await confirm({
       title: "Clear all comments?",
       description:
-        "This permanently removes every comment you've added across files, diffs, plans, and the chat. This can't be undone.",
+        "This permanently removes every comment you've added across files, diffs, and the chat. This can't be undone.",
       confirmLabel: "Clear comments",
     });
     if (!ok) return;
     setAnnotationsByFile({});
     setChatAnnotations([]);
-    setAnnotationsByPlan({});
     setAnnotationsByProjectFile({});
   }, [
     confirm,
     setAnnotationsByFile,
     setChatAnnotations,
-    setAnnotationsByPlan,
     setAnnotationsByProjectFile,
   ]);
 
@@ -2022,6 +1892,7 @@ export function ProjectWorkspace({
                   {session ? (
                     <MessageList
                       messages={session.messages}
+                      encoded={project.encoded}
                       annotations={chatAnnotations}
                       onAddAnnotation={addChatAnnotation}
                       onUpdateAnnotation={updateChatAnnotation}
@@ -2049,32 +1920,6 @@ export function ProjectWorkspace({
                     onBlocked={() => revealChatTerminal(selectedSessionId)}
                     autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
                   />
-                )}
-              </div>
-
-              <div
-                className={cn(
-                  "flex min-h-0 flex-1 flex-col",
-                  openKind !== "plans" && "hidden",
-                )}
-              >
-                {selectedPlan ? (
-                  <PlanViewer
-                    key={selectedPlan.filePath}
-                    plan={selectedPlan}
-                    annotations={planAnnotations}
-                    onAddAnnotation={addPlanAnnotation}
-                    onUpdateAnnotation={updatePlanAnnotation}
-                    onRemoveAnnotation={removePlanAnnotation}
-                    onResetAnnotations={resetPlanAnnotations}
-                    active={openKind === "plans"}
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                    {plans.length === 0
-                      ? "Drop a markdown file into ~/.claude/plans/ to see it here."
-                      : "Select a plan"}
-                  </div>
                 )}
               </div>
 
@@ -2200,10 +2045,6 @@ export function ProjectWorkspace({
           onRenameSession={handleRenameRequest}
           onNewChat={handleNewChat}
           sessionsLoading={sessionsLoading}
-          plans={plans}
-          selectedPlan={openKind === "plans" ? selectedPlanPath : null}
-          onSelectPlan={handleSelectPlan}
-          onSetPlanArchived={handleSetPlanArchived}
           projectFiles={projectFiles}
           projectFilesLoading={projectFilesLoading}
           selectedProjectFile={

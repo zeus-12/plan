@@ -1,4 +1,13 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  shell,
+} from "electron";
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
@@ -37,17 +46,6 @@ import {
 } from "./project-files";
 import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
-import { startPlansWatcher, stopPlansWatcher } from "./plans-watcher";
-import {
-  flushWrites as flushPlansWrites,
-  getPlans,
-  loadPlans,
-  markPlanRead,
-  recordNewPlan,
-  recordPlanChange,
-  removePlan,
-  setPlanArchived,
-} from "./plans-store";
 import {
   setTerminalCallbacks,
   openTerminal,
@@ -100,12 +98,17 @@ let switcherRegistered = false;
 
 function registerSwitcherShortcuts() {
   if (switcherRegistered) return;
-  const a = globalShortcut.register("Control+Tab", () => sendSwitcherCycle(false));
+  const a = globalShortcut.register("Control+Tab", () =>
+    sendSwitcherCycle(false),
+  );
   const b = globalShortcut.register("Control+Shift+Tab", () =>
-    sendSwitcherCycle(true)
+    sendSwitcherCycle(true),
   );
   switcherRegistered = a || b;
-  console.log("[switcher] globalShortcut registered:", { ctrlTab: a, ctrlShiftTab: b });
+  console.log("[switcher] globalShortcut registered:", {
+    ctrlTab: a,
+    ctrlShiftTab: b,
+  });
 }
 
 function unregisterSwitcherShortcuts() {
@@ -290,7 +293,9 @@ async function sessionMeta(filePath: string, mtimeMs: number) {
   return meta;
 }
 
-async function listSessionsForProject(encoded: string): Promise<SessionListEntry[]> {
+async function listSessionsForProject(
+  encoded: string,
+): Promise<SessionListEntry[]> {
   const dir = join(CLAUDE_PROJECTS_DIR, encoded);
   try {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -370,35 +375,42 @@ async function listAllProjects(): Promise<ProjectEntry[]> {
         mtimeMs: await latestActivity(encoded),
         archived: archived.has(encoded),
       };
-    })
+    }),
   );
 }
 
 function registerIpc() {
   ipcMain.handle("projects:list", async () => listAllProjects());
 
-  ipcMain.handle("projects:addManual", async (event): Promise<ProjectEntry | null> => {
-    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined;
-    const res = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
-      title: "Add project",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    if (res.canceled || res.filePaths.length === 0) return null;
-    const cwd = res.filePaths[0];
-    await addManualCwd(cwd);
-    return { encoded: encodeCwd(cwd), cwd, mtimeMs: 0, archived: false };
-  });
+  ipcMain.handle(
+    "projects:addManual",
+    async (event): Promise<ProjectEntry | null> => {
+      const win =
+        BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined;
+      const res = await dialog.showOpenDialog(
+        win ?? new BrowserWindow({ show: false }),
+        {
+          title: "Add project",
+          properties: ["openDirectory", "createDirectory"],
+        },
+      );
+      if (res.canceled || res.filePaths.length === 0) return null;
+      const cwd = res.filePaths[0];
+      await addManualCwd(cwd);
+      return { encoded: encodeCwd(cwd), cwd, mtimeMs: 0, archived: false };
+    },
+  );
 
   ipcMain.handle(
     "projects:setArchived",
     async (_event, encoded: string, archived: boolean) => {
       await setArchived(encoded, archived);
       return { ok: true };
-    }
+    },
   );
 
   ipcMain.handle("projects:listSessions", async (_e, encoded: string) =>
-    listSessionsForProject(encoded)
+    listSessionsForProject(encoded),
   );
 
   ipcMain.handle(
@@ -406,7 +418,7 @@ function registerIpc() {
     async (_e, sessionId: string, archived: boolean) => {
       await setSessionArchived(sessionId, archived);
       return { ok: true };
-    }
+    },
   );
 
   ipcMain.handle(
@@ -414,19 +426,23 @@ function registerIpc() {
     async (_e, sessionId: string, name: string) => {
       await setSessionName(sessionId, name);
       return { ok: true };
-    }
+    },
   );
 
   ipcMain.handle(
     "session:read",
-    async (_e, encoded: string, sessionId: string): Promise<ParsedSession | null> => {
+    async (
+      _e,
+      encoded: string,
+      sessionId: string,
+    ): Promise<ParsedSession | null> => {
       const filePath = join(CLAUDE_PROJECTS_DIR, encoded, `${sessionId}.jsonl`);
       try {
         return await readSessionFile(filePath);
       } catch {
         return null;
       }
-    }
+    },
   );
 
   ipcMain.handle(
@@ -435,7 +451,7 @@ function registerIpc() {
       const base = await resolveProjectCwd(encoded);
       const cwd = subPath ? join(base, subPath) : base;
       return getWorkingTreeDiff(cwd);
-    }
+    },
   );
 
   ipcMain.handle(
@@ -445,8 +461,8 @@ function registerIpc() {
       encoded: string,
       oldPath: string | null,
       newPath: string | null,
-      subPath: string = ""
-    ) => getFileContents(encoded, oldPath, newPath, subPath)
+      subPath: string = "",
+    ) => getFileContents(encoded, oldPath, newPath, subPath),
   );
   ipcMain.handle(
     "project:fileView",
@@ -455,18 +471,18 @@ function registerIpc() {
       encoded: string,
       path: string,
       mode: "staged" | "unstaged",
-      subPath: string = ""
-    ) => getFileView(encoded, path, mode, subPath)
+      subPath: string = "",
+    ) => getFileView(encoded, path, mode, subPath),
   );
 
   ipcMain.handle("files:list", async (_e, encoded: string) =>
-    listProjectFiles(encoded)
+    listProjectFiles(encoded),
   );
   ipcMain.handle("files:read", async (_e, encoded: string, relPath: string) =>
-    readProjectFile(encoded, relPath)
+    readProjectFile(encoded, relPath),
   );
   ipcMain.handle("files:path", async (_e, encoded: string, relPath: string) =>
-    resolveProjectFilePath(encoded, relPath)
+    resolveProjectFilePath(encoded, relPath),
   );
   ipcMain.handle(
     "files:search",
@@ -483,73 +499,68 @@ function registerIpc() {
           error: err instanceof Error ? err.message : String(err),
         };
       }
-    }
+    },
   );
 
   ipcMain.handle("repos:list", async (_e, encoded: string) =>
-    discoverRepos(encoded)
-  );
-
-  ipcMain.handle("plans:list", async () => getPlans());
-  ipcMain.handle("plans:markRead", async (_e, filePath: string) => {
-    markPlanRead(filePath);
-    return { ok: true };
-  });
-  ipcMain.handle(
-    "plans:setArchived",
-    async (_e, filePath: string, archived: boolean) => {
-      setPlanArchived(filePath, archived);
-      return { ok: true };
-    }
+    discoverRepos(encoded),
   );
 
   // Git
-  ipcMain.handle("git:branch", async (_e, encoded: string, subPath: string = "") =>
-    getBranch(encoded, subPath)
+  ipcMain.handle(
+    "git:branch",
+    async (_e, encoded: string, subPath: string = "") =>
+      getBranch(encoded, subPath),
   );
-  ipcMain.handle("git:status", async (_e, encoded: string, subPath: string = "") =>
-    getStatus(encoded, subPath)
+  ipcMain.handle(
+    "git:status",
+    async (_e, encoded: string, subPath: string = "") =>
+      getStatus(encoded, subPath),
   );
   ipcMain.handle(
     "git:stage",
     async (_e, encoded: string, path: string, subPath: string = "") =>
-      stageFile(encoded, path, subPath)
+      stageFile(encoded, path, subPath),
   );
   ipcMain.handle(
     "git:unstage",
     async (_e, encoded: string, path: string, subPath: string = "") =>
-      unstageFile(encoded, path, subPath)
+      unstageFile(encoded, path, subPath),
   );
   ipcMain.handle(
     "git:discard",
     async (_e, encoded: string, path: string, subPath: string = "") =>
-      discardFile(encoded, path, subPath)
+      discardFile(encoded, path, subPath),
   );
-  ipcMain.handle("git:stageAll", async (_e, encoded: string, subPath: string = "") =>
-    stageAll(encoded, subPath)
+  ipcMain.handle(
+    "git:stageAll",
+    async (_e, encoded: string, subPath: string = "") =>
+      stageAll(encoded, subPath),
   );
   ipcMain.handle(
     "git:unstageAll",
     async (_e, encoded: string, subPath: string = "") =>
-      unstageAll(encoded, subPath)
+      unstageAll(encoded, subPath),
   );
   ipcMain.handle(
     "git:discardAll",
     async (_e, encoded: string, subPath: string = "") =>
-      discardAll(encoded, subPath)
+      discardAll(encoded, subPath),
   );
   ipcMain.handle(
     "git:stashAll",
     async (_e, encoded: string, subPath: string = "") =>
-      stashAll(encoded, subPath)
+      stashAll(encoded, subPath),
   );
-  ipcMain.handle("git:push", async (_e, encoded: string, subPath: string = "") =>
-    gitPush(encoded, subPath)
+  ipcMain.handle(
+    "git:push",
+    async (_e, encoded: string, subPath: string = "") =>
+      gitPush(encoded, subPath),
   );
   ipcMain.handle(
     "git:commit",
     async (_e, encoded: string, message: string, subPath: string = "") =>
-      gitCommit(encoded, message, subPath)
+      gitCommit(encoded, message, subPath),
   );
   ipcMain.handle(
     "git:applyPatch",
@@ -558,8 +569,8 @@ function registerIpc() {
       encoded: string,
       patch: string,
       mode: "stage" | "unstage" | "discard" | "apply",
-      subPath: string = ""
-    ) => applyPatch(encoded, patch, { mode }, subPath)
+      subPath: string = "",
+    ) => applyPatch(encoded, patch, { mode }, subPath),
   );
 
   // Terminal ptys (keyed by terminal id; cwd resolved from encoded)
@@ -571,26 +582,24 @@ function registerIpc() {
       encoded: string,
       cols: number,
       rows: number,
-      initialCommand?: string
-    ) => openTerminal(id, encoded, cols, rows, initialCommand)
+      initialCommand?: string,
+    ) => openTerminal(id, encoded, cols, rows, initialCommand),
   );
   ipcMain.on("terminal:input", (_e, id: string, data: string) =>
-    writeTerminal(id, data)
+    writeTerminal(id, data),
   );
   ipcMain.on("terminal:submit", (_e, id: string, text: string) =>
-    submitToTerminal(id, text)
+    submitToTerminal(id, text),
   );
   ipcMain.on("terminal:sendKeys", (_e, id: string, keys: string[]) =>
-    sendKeys(id, keys)
+    sendKeys(id, keys),
   );
   ipcMain.handle("terminal:status", (_e, id: string) => terminalStatus(id));
   ipcMain.handle("terminal:inputState", (_e, id: string) =>
-    detectInputState(id)
+    detectInputState(id),
   );
-  ipcMain.on(
-    "terminal:resize",
-    (_e, id: string, cols: number, rows: number) =>
-      resizeTerminal(id, cols, rows)
+  ipcMain.on("terminal:resize", (_e, id: string, cols: number, rows: number) =>
+    resizeTerminal(id, cols, rows),
   );
   ipcMain.on("terminal:kill", (_e, id: string) => killTerminal(id));
   ipcMain.handle("terminal:list", () => listTerminals());
@@ -602,16 +611,13 @@ function registerIpc() {
     async (_e, data: Uint8Array, ext: string) => {
       try {
         const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext : "png";
-        const file = join(
-          tmpdir(),
-          `plan-paste-${randomUUID()}.${safeExt}`
-        );
+        const file = join(tmpdir(), `plan-paste-${randomUUID()}.${safeExt}`);
         await writeFile(file, Buffer.from(data));
         return file;
       } catch {
         return null;
       }
-    }
+    },
   );
 }
 
@@ -639,29 +645,6 @@ function bridgeTerminal() {
   });
 }
 
-async function bridgePlansWatcher() {
-  await loadPlans();
-  await startPlansWatcher({
-    onNewFile(filePath, content) {
-      recordNewPlan(filePath, content);
-      sendPlansEvent({ kind: "new-plan", filePath });
-    },
-    onFileChanged(filePath, content) {
-      recordPlanChange(filePath, content);
-      sendPlansEvent({ kind: "plan-changed", filePath });
-    },
-    onFileRemoved(filePath) {
-      removePlan(filePath);
-      sendPlansEvent({ kind: "plan-removed", filePath });
-    },
-  });
-}
-
-function sendPlansEvent(e: { kind: string; filePath: string }) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("plans:event", e);
-}
-
 // ── App lifecycle ──────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
@@ -681,7 +664,6 @@ app.whenReady().then(async () => {
     void startWatching(p.encoded);
   }
   void startRootWatch();
-  void bridgePlansWatcher();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -696,11 +678,9 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", async () => {
+app.on("before-quit", () => {
   stopAll();
   killAllTerminals();
-  await stopPlansWatcher();
-  await flushPlansWrites();
 });
 
 app.on("will-quit", () => {

@@ -60,8 +60,12 @@ function samePart(a: MessagePart, b: MessagePart): boolean {
       return a.text === (b as { text: string }).text;
     case "tool_use": {
       const tb = b as Extract<MessagePart, { kind: "tool_use" }>;
-      // Same id ⇒ same call (append-only log); input never mutates.
-      return a.id === tb.id && a.tool === tb.tool;
+      // Same id ⇒ same call, but input is NOT immutable while streaming: Claude
+      // writes a tool_use line with an empty/partial `input`, then rewrites the
+      // same line (same id) once the full input is assembled. Comparing only
+      // id+tool would hold the stale empty version forever — e.g. an
+      // ExitPlanMode card stuck blank because its `plan` arrived in the rewrite.
+      return a.id === tb.id && a.tool === tb.tool && sameInput(a.input, tb.input);
     }
     case "tool_result": {
       const tb = b as Extract<MessagePart, { kind: "tool_result" }>;
@@ -71,5 +75,19 @@ function samePart(a: MessagePart, b: MessagePart): boolean {
         a.isError === tb.isError
       );
     }
+  }
+}
+
+/**
+ * Structural equality for a tool_use's `input`. Reads of the same JSONL produce
+ * stable key order, so a string compare is exact; steady-state inputs serialize
+ * identically and keep the old object (no extra re-render).
+ */
+function sameInput(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
   }
 }

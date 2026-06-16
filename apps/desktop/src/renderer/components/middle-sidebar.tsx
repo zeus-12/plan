@@ -12,16 +12,15 @@ import {
   TabsTrigger,
 } from "@plan/shared/components/ui/tabs";
 import { cn } from "@plan/shared/lib/utils";
-import type { Plan, DiscoveredRepo } from "../../shared-types";
+import type { DiscoveredRepo } from "../../shared-types";
 import { FileList, type RepoFileGroup } from "./file-list";
 import { SessionList, type SessionListItem } from "./session-list";
-import { PlansList } from "./plans-list";
 import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { SearchPanel } from "./search-panel";
 
-export type WorkTab = "diffs" | "chat" | "plans" | "files" | "search";
+export type WorkTab = "diffs" | "chat" | "files" | "search";
 
 interface Props {
   tab: WorkTab;
@@ -65,11 +64,6 @@ interface Props {
   onNewChat: () => void;
   sessionsLoading: boolean;
 
-  plans: Plan[];
-  selectedPlan: string | null;
-  onSelectPlan: (filePath: string) => void;
-  onSetPlanArchived: (filePath: string, archived: boolean) => void;
-
   projectFiles: string[];
   projectFilesLoading: boolean;
   selectedProjectFile: string | null;
@@ -90,10 +84,6 @@ interface Props {
   onNewTerminal: () => void;
   onSelectTerminal: (id: string) => void;
   onCloseTerminal: (id: string) => void;
-}
-
-function totalUnread(plans: Plan[]): number {
-  return plans.reduce((s, p) => s + (p.archived ? 0 : p.unread), 0);
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -180,10 +170,6 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onRenameSession,
   onNewChat,
   sessionsLoading,
-  plans,
-  selectedPlan,
-  onSelectPlan,
-  onSetPlanArchived,
   projectFiles,
   projectFilesLoading,
   selectedProjectFile,
@@ -223,9 +209,6 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       } else if (e.key === "4") {
         e.preventDefault();
         onTabChange("search");
-      } else if (e.key === "5") {
-        e.preventDefault();
-        onTabChange("plans");
       }
     };
     window.addEventListener("keydown", handler);
@@ -260,7 +243,6 @@ export const MiddleSidebar = memo(function MiddleSidebar({
     return () => window.removeEventListener("keydown", handler);
   }, [sidebar, terminals.length, onNewTerminal]);
 
-  const plansBadge = totalUnread(plans);
   const stagedGroups = repoGroups.filter((g) => g.staged.length > 0);
   const multiRepo = repos.length > 1;
 
@@ -278,14 +260,6 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               <TabsTrigger value="diffs">Diffs</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="search">Search</TabsTrigger>
-              <TabsTrigger value="plans" className="relative">
-                Plans
-                {plansBadge > 0 && (
-                  <span className="ml-1.5 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[9px] font-semibold text-[var(--bg)]">
-                    {plansBadge}
-                  </span>
-                )}
-              </TabsTrigger>
             </TabsList>
           </div>
         </SidebarHeader>
@@ -376,19 +350,6 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               onRename={onRenameSession}
               onNewChat={onNewChat}
               loading={sessionsLoading}
-            />
-          </TabsContent>
-
-          <TabsContent
-            value="plans"
-            forceMount
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-          >
-            <PlansList
-              plans={plans}
-              selected={selectedPlan}
-              onSelect={onSelectPlan}
-              onSetArchived={onSetPlanArchived}
             />
           </TabsContent>
 

@@ -6,8 +6,6 @@ import type {
   SessionEvent,
   FileContents,
   FileView,
-  Plan,
-  PlansEvent,
   GitStatusResult,
   GitOpResult,
   DiscoveredRepo,
@@ -62,14 +60,6 @@ interface ElectronAPI {
     archived: boolean
   ) => Promise<{ ok: true }>;
   renameSession: (sessionId: string, name: string) => Promise<{ ok: true }>;
-
-  listPlans: () => Promise<Plan[]>;
-  markPlanRead: (filePath: string) => Promise<{ ok: true }>;
-  setPlanArchived: (
-    filePath: string,
-    archived: boolean
-  ) => Promise<{ ok: true }>;
-  onPlansEvent: (cb: (e: PlansEvent) => void) => () => void;
 
   getBranch: (encoded: string, subPath?: string) => Promise<string | null>;
   getGitStatus: (encoded: string, subPath?: string) => Promise<GitStatusResult>;

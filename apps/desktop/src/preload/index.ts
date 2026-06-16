@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { SessionEvent } from "../main/session-watcher";
-import type { PlansEvent, SearchOptions } from "../shared-types";
+import type { SearchOptions } from "../shared-types";
 
 const electronAPI = {
   listProjects: () => ipcRenderer.invoke("projects:list"),
@@ -63,19 +63,6 @@ const electronAPI = {
     ipcRenderer.invoke("sessions:setArchived", sessionId, archived),
   renameSession: (sessionId: string, name: string) =>
     ipcRenderer.invoke("sessions:rename", sessionId, name),
-
-  // Plans
-  listPlans: () => ipcRenderer.invoke("plans:list"),
-  markPlanRead: (filePath: string) =>
-    ipcRenderer.invoke("plans:markRead", filePath),
-  setPlanArchived: (filePath: string, archived: boolean) =>
-    ipcRenderer.invoke("plans:setArchived", filePath, archived),
-  onPlansEvent: (cb: (e: PlansEvent) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, e: PlansEvent) =>
-      cb(e);
-    ipcRenderer.on("plans:event", handler);
-    return () => ipcRenderer.removeListener("plans:event", handler);
-  },
 
   // Git
   getBranch: (encoded: string, subPath: string = "") =>

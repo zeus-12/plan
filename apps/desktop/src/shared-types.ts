@@ -117,28 +117,6 @@ export interface SessionEvent {
   filePath?: string;
 }
 
-export interface PlanVersion {
-  id: string;
-  text: string;
-  createdAt: number;
-}
-
-export interface Plan {
-  filePath: string;
-  versions: PlanVersion[];
-  unread: number;
-  updatedAt: number;
-  /** Hidden from the active list until unarchived. */
-  archived: boolean;
-}
-
-export type PlansEventKind = "new-plan" | "plan-changed" | "plan-removed";
-
-export interface PlansEvent {
-  kind: PlansEventKind;
-  filePath: string;
-}
-
 export interface GitFileStatus {
   path: string;
   staged: boolean;

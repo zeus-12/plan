@@ -46,6 +46,9 @@ export interface ChatAnnotation {
 
 interface Props {
   messages: ConversationMessage[];
+  /** Project key — lets plan cards reach the shared annotation store for
+   *  diff comments (keyed there by the plan file path). */
+  encoded: string;
   annotations: ChatAnnotation[];
   onAddAnnotation: (
     messageUuid: string,
@@ -102,6 +105,43 @@ function previewInput(input: unknown): string {
   } catch {
     return "";
   }
+}
+
+// ── Plan-file detection ─────────────────────────────────────────────
+// Claude presents a plan by writing it to ~/.claude/plans/<slug>.md (a real
+// Write tool call that executes — and lands in the transcript — immediately),
+// then calls ExitPlanMode. ExitPlanMode is gated behind the user's approval, so
+// its content shows up late/empty; the Write does NOT. So we source the inline
+// plan card from the plan file's Write/Edit ops, reconstructed from the
+// transcript, and hide the gated ExitPlanMode block entirely.
+const PLANS_PATH_MARKER = "/.claude/plans/";
+
+function asStr(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+/** The plans-dir path a Write/Edit/MultiEdit targets, or null if not one. */
+function planFilePath(p: MessagePart): string | null {
+  if (p.kind !== "tool_use") return null;
+  if (p.tool !== "Write" && p.tool !== "Edit" && p.tool !== "MultiEdit")
+    return null;
+  const fp = (p.input as { file_path?: unknown } | null)?.file_path;
+  return typeof fp === "string" && fp.includes(PLANS_PATH_MARKER) ? fp : null;
+}
+
+/** Apply one Edit op exactly as the Edit tool does (first occurrence, or all). */
+function applyEdit(
+  content: string,
+  oldStr: string,
+  newStr: string,
+  replaceAll: boolean
+): string {
+  if (!oldStr) return content;
+  if (replaceAll) return content.split(oldStr).join(newStr);
+  const idx = content.indexOf(oldStr);
+  return idx === -1
+    ? content
+    : content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
 }
 
 /**
@@ -460,6 +500,8 @@ interface MessagePartViewProps {
   planVersions: PlanVersionInfo[];
   /** This part's index into `planVersions`, or -1 if it isn't a plan. */
   planVersionIndex: number;
+  /** Project key — for the plan card's diff comments (shared annotation store). */
+  encoded: string;
 }
 
 /** Memoized: a keystroke elsewhere must not re-render every markdown block. */
@@ -475,6 +517,7 @@ const MessagePartView = memo(function MessagePartView({
   onSendKeys,
   planVersions,
   planVersionIndex,
+  encoded,
 }: MessagePartViewProps) {
   switch (part.kind) {
     case "text": {
@@ -527,15 +570,18 @@ const MessagePartView = memo(function MessagePartView({
           );
         }
       }
-      // ExitPlanMode renders as a clean inline Plan card, not a raw tool block.
-      // The body goes through the same annotation-aware markdown path as normal
-      // assistant text, so selecting it comments via the existing chat flow.
-      if (part.tool === "ExitPlanMode" && planVersionIndex >= 0) {
+      // The plan renders as a clean inline Plan card (anchored on the plan-file
+      // Write), not a raw tool block. The body goes through the same
+      // annotation-aware markdown path as normal assistant text, so selecting it
+      // comments via the existing chat flow.
+      if (planVersionIndex >= 0) {
         const planText = planVersions[planVersionIndex]?.text ?? "";
         return (
           <PlanCard
             versions={planVersions}
             versionIndex={planVersionIndex}
+            encoded={encoded}
+            planPath={planFilePath(part)}
             body={
               <MarkdownText
                 text={planText}
@@ -593,6 +639,7 @@ const MessagePartView = memo(function MessagePartView({
   prev.onSendKeys === next.onSendKeys &&
   prev.planVersions === next.planVersions &&
   prev.planVersionIndex === next.planVersionIndex &&
+  prev.encoded === next.encoded &&
   sameRange(prev.pendingRange, next.pendingRange) &&
   sameResult(prev.result, next.result));
 
@@ -622,6 +669,7 @@ const EMPTY_PLAN_VERSIONS: PlanVersionInfo[] = [];
  */
 export const MessageList = memo(function MessageList({
   messages,
+  encoded,
   annotations,
   onAddAnnotation,
   onUpdateAnnotation,
@@ -662,22 +710,94 @@ export const MessageList = memo(function MessageList({
     [deferredMessages]
   );
 
-  // Every ExitPlanMode tool_use is one plan revision; in transcript order they
-  // are the plan's full version history. Map each plan part to its index in
-  // that sequence so its PlanCard can diff against earlier versions.
-  const { planVersions, planVersionByPart } = useMemo(() => {
+  // The inline plan card is sourced from the plan FILE Claude writes to
+  // ~/.claude/plans/ (see planFilePath): each Write is a new revision, and
+  // Edits/MultiEdits fold into the latest revision's text — all reconstructed
+  // from the transcript so the plan shows the instant the Write lands, not when
+  // ExitPlanMode is approved. `byPart` maps a Write part → its version index
+  // (where the card renders); `hidden` is the Edit/MultiEdit/ExitPlanMode parts
+  // the card subsumes (rendered as nothing). When a session has no plan-file
+  // writes we fall back to ExitPlanMode's own content — the only signal left.
+  const { planVersions, planVersionByPart, hiddenParts } = useMemo(() => {
     const versions: PlanVersionInfo[] = [];
     const byPart = new Map<string, number>();
+    const hidden = new Set<string>();
+
+    const hasPlanWrites = deferredMessages.some((m) =>
+      m.parts.some(
+        (p) => p.kind === "tool_use" && p.tool === "Write" && planFilePath(p)
+      )
+    );
+
+    if (!hasPlanWrites) {
+      for (const m of deferredMessages) {
+        m.parts.forEach((p, i) => {
+          if (p.kind !== "tool_use" || p.tool !== "ExitPlanMode") return;
+          const text = parsePlanInput(p.input);
+          if (text === null) return;
+          byPart.set(`${m.uuid}:${i}`, versions.length);
+          versions.push({ text, timestamp: m.timestamp });
+        });
+      }
+      return {
+        planVersions: versions,
+        planVersionByPart: byPart,
+        hiddenParts: hidden,
+      };
+    }
+
+    const content = new Map<string, string>(); // path → current reconstructed text
+    const lastVersion = new Map<string, number>(); // path → its latest version idx
     for (const m of deferredMessages) {
       m.parts.forEach((p, i) => {
-        if (p.kind !== "tool_use" || p.tool !== "ExitPlanMode") return;
-        const text = parsePlanInput(p.input);
-        if (text === null) return;
-        byPart.set(`${m.uuid}:${i}`, versions.length);
-        versions.push({ text, timestamp: m.timestamp });
+        const key = `${m.uuid}:${i}`;
+        if (p.kind === "tool_use" && p.tool === "ExitPlanMode") {
+          hidden.add(key);
+          return;
+        }
+        const path = planFilePath(p);
+        if (!path || p.kind !== "tool_use") return;
+        const input = (p.input ?? {}) as Record<string, unknown>;
+        if (p.tool === "Write") {
+          const text = asStr(input.content);
+          content.set(path, text);
+          byPart.set(key, versions.length);
+          lastVersion.set(path, versions.length);
+          versions.push({ text, timestamp: m.timestamp });
+          return;
+        }
+        // Edit / MultiEdit refine the file → update the latest revision in place.
+        let text = content.get(path) ?? "";
+        if (p.tool === "Edit") {
+          text = applyEdit(
+            text,
+            asStr(input.old_string),
+            asStr(input.new_string),
+            input.replace_all === true
+          );
+        } else {
+          const edits = Array.isArray(input.edits) ? input.edits : [];
+          for (const e of edits) {
+            const eo = (e ?? {}) as Record<string, unknown>;
+            text = applyEdit(
+              text,
+              asStr(eo.old_string),
+              asStr(eo.new_string),
+              eo.replace_all === true
+            );
+          }
+        }
+        content.set(path, text);
+        const vi = lastVersion.get(path);
+        if (vi !== undefined) versions[vi] = { ...versions[vi], text };
+        hidden.add(key);
       });
     }
-    return { planVersions: versions, planVersionByPart: byPart };
+    return {
+      planVersions: versions,
+      planVersionByPart: byPart,
+      hiddenParts: hidden,
+    };
   }, [deferredMessages]);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
 
@@ -991,8 +1111,10 @@ export const MessageList = memo(function MessageList({
                 )}
               >
                 {m.parts.map((p, i) => {
-                  const planVersionIndex =
-                    planVersionByPart.get(`${m.uuid}:${i}`) ?? -1;
+                  const partKey = `${m.uuid}:${i}`;
+                  // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
+                  if (hiddenParts.has(partKey)) return null;
+                  const planVersionIndex = planVersionByPart.get(partKey) ?? -1;
                   return (
                   <MessagePartView
                     key={i}
@@ -1022,6 +1144,7 @@ export const MessageList = memo(function MessageList({
                       planVersionIndex >= 0 ? planVersions : EMPTY_PLAN_VERSIONS
                     }
                     planVersionIndex={planVersionIndex}
+                    encoded={encoded}
                   />
                   );
                 })}
