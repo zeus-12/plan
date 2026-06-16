@@ -1,4 +1,5 @@
 import type { IPty } from "node-pty";
+import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { execFile } from "child_process";
 import { resolveProjectCwd } from "./claude-projects";
 
@@ -7,6 +8,18 @@ export interface TerminalChunk {
   data: string;
 }
 
+/**
+ * What the bottom of the terminal screen looks like right now. EXPERIMENTAL and
+ * heuristic — derived by scanning the rendered grid for Claude Code's TUI
+ * signatures, not from any real protocol. Worded as a guess everywhere it's used.
+ *
+ *   "input"     — a free-text input box is present and ready (safe to type/send)
+ *   "selection" — a numbered menu is up (tool approval / plan accept / question);
+ *                 sending free text + Enter here would mis-navigate the menu
+ *   "unknown"   — couldn't classify (plain shell, Claude mid-render, etc.)
+ */
+export type TerminalInputState = "input" | "selection" | "unknown";
+
 interface Session {
   pty: IPty;
   cwd: string;
@@ -14,6 +27,10 @@ interface Session {
    *  batching to one IPC message per ~16ms keeps the renderer responsive. */
   pendingOut: string;
   flushTimer: ReturnType<typeof setTimeout> | null;
+  /** A headless emulator fed the SAME pty bytes, kept current regardless of
+   *  whether the renderer's xterm is visible — so we can read the rendered
+   *  screen (the input box vs. an approval menu) even from the diffs tab. */
+  screen: HeadlessTerminal;
 }
 
 /**
@@ -74,6 +91,7 @@ export async function openTerminal(
   if (existing) {
     try {
       existing.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
+      existing.screen.resize(Math.max(cols, 1), Math.max(rows, 1));
     } catch {
       /* resize on a dead pty */
     }
@@ -97,8 +115,23 @@ export async function openTerminal(
       cwd,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     });
-    const session: Session = { pty, cwd, pendingOut: "", flushTimer: null };
+    const screen = new HeadlessTerminal({
+      cols: Math.max(cols, 1),
+      rows: Math.max(rows, 1),
+      // No DOM here — writing to a headless emulator is cheap, so we feed it
+      // every byte immediately (uncoalesced) to keep its grid frame-accurate.
+      allowProposedApi: true,
+      scrollback: 200,
+    });
+    const session: Session = {
+      pty,
+      cwd,
+      pendingOut: "",
+      flushTimer: null,
+      screen,
+    };
     pty.onData((data) => {
+      session.screen.write(data);
       session.pendingOut += data;
       if (session.flushTimer) return;
       session.flushTimer = setTimeout(() => {
@@ -111,6 +144,11 @@ export async function openTerminal(
     pty.onExit(() => {
       if (session.flushTimer) clearTimeout(session.flushTimer);
       if (session.pendingOut) onData?.({ id, data: session.pendingOut });
+      try {
+        session.screen.dispose();
+      } catch {
+        /* already disposed */
+      }
       sessions.delete(id);
       onExit?.(id);
     });
@@ -216,8 +254,11 @@ export function submitToTerminal(id: string, text: string) {
 }
 
 export function resizeTerminal(id: string, cols: number, rows: number) {
+  const s = sessions.get(id);
+  if (!s) return;
   try {
-    sessions.get(id)?.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
+    s.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
+    s.screen.resize(Math.max(cols, 1), Math.max(rows, 1));
   } catch {
     /* ignore */
   }
@@ -232,11 +273,58 @@ export function killTerminal(id: string) {
   } catch {
     // already gone
   }
+  try {
+    s.screen.dispose();
+  } catch {
+    /* already disposed */
+  }
   sessions.delete(id);
 }
 
 export function killAllTerminals() {
   for (const enc of [...sessions.keys()]) killTerminal(enc);
+}
+
+/** The visible screen of terminal `id` as plain text rows (trailing ws trimmed). */
+function readScreen(id: string): string[] {
+  const s = sessions.get(id);
+  if (!s) return [];
+  const buf = s.screen.buffer.active;
+  const rows = s.screen.rows;
+  const out: string[] = [];
+  for (let i = 0; i < rows; i++) {
+    const line = buf.getLine(buf.baseY + i);
+    out.push(line ? line.translateToString(true) : "");
+  }
+  return out;
+}
+
+// Claude Code's TUI selection menus (tool approval, plan accept, AskUserQuestion)
+// render numbered options with a ❯ pointer on the highlighted one, inside the
+// bordered box, e.g. "│ ❯ 1. Yes". The free-text composer renders the box with a
+// "> " prompt, e.g. "│ > ". These are heuristics on the rendered glyphs — not a
+// real protocol — so callers must word any UI as a guess ("may be…").
+const SELECTION_RE = /❯\s*\d+\.|[│|]\s*❯/;
+const INPUT_BOX_RE = /[│|]\s*>\s/;
+
+/**
+ * EXPERIMENTAL, heuristic. Classify the bottom of terminal `id`'s screen as a
+ * free-text input box, a selection menu, or unknown. Returns the matched lines
+ * too, so the renderer can surface them for debugging/validation.
+ */
+export function detectInputState(
+  id: string
+): { state: TerminalInputState; lines: string[] } {
+  const all = readScreen(id);
+  // Only the bottom chunk matters (the box sits at the foot of the frame), and
+  // ignoring the top avoids matching menu-like text in scrollback history.
+  const tail = all.slice(-16);
+  const nonEmpty = tail.filter((l) => l.trim().length > 0);
+  const text = nonEmpty.join("\n");
+  let state: TerminalInputState = "unknown";
+  if (SELECTION_RE.test(text)) state = "selection";
+  else if (INPUT_BOX_RE.test(text)) state = "input";
+  return { state, lines: nonEmpty.slice(-12) };
 }
 
 export interface TerminalInfo {

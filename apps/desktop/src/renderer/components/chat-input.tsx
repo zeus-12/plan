@@ -22,6 +22,12 @@ interface Props {
   onStart?: () => void;
   /** Focus the textarea when this session becomes the composer's session. */
   autoFocus?: boolean;
+  /** EXPERIMENTAL: Claude appears to be on a selection menu (no text box), so
+   *  sending free text would mis-navigate it. Send is blocked; Enter reveals
+   *  the terminal instead. The draft is kept so nothing is lost. */
+  blocked?: boolean;
+  /** Invoked when the user tries to send while blocked (reveals the terminal). */
+  onBlocked?: () => void;
 }
 
 interface Attachment {
@@ -48,7 +54,10 @@ const draftKey = (sid: string) => `plan.draft.${sid}`;
  * every attachment has a real path — the paths are what actually get sent.
  */
 export const ChatInput = forwardRef<ChatInputHandle, Props>(
-  function ChatInput({ sessionId, onSend, inactive, onStart, autoFocus }, ref) {
+  function ChatInput(
+    { sessionId, onSend, inactive, onStart, autoFocus, blocked, onBlocked },
+    ref
+  ) {
     const [value, setValue] = useState(
       () => window.localStorage.getItem(draftKey(sessionId)) ?? ""
     );
@@ -131,10 +140,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     const pendingSaves = attachments.some((a) => a.path === null);
     const canSend =
       !inactive &&
+      !blocked &&
       !pendingSaves &&
       (value.trim().length > 0 || attachments.length > 0);
 
     const send = () => {
+      if (blocked) {
+        onBlocked?.();
+        return;
+      }
       if (inactive || pendingSaves) return;
       const text = value.trim();
       const paths = attachments
@@ -188,6 +202,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
 
     return (
       <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
+        {blocked && (
+          <button
+            onClick={onBlocked}
+            className="mb-2 flex w-full items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
+          >
+            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
+            <span>
+              Claude may be on a menu (no text box) — respond in the terminal,
+              not here.
+            </span>
+            <span className="ml-auto shrink-0">
+              <Kbd keys={["⌘", "J"]} />
+            </span>
+          </button>
+        )}
         <div className="flex flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] transition-colors focus-within:border-[var(--border-strong)]">
           <textarea
             ref={innerRef}
