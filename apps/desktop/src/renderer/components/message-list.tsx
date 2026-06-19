@@ -64,6 +64,9 @@ interface Props {
   visible?: boolean;
   /** Whether the chat's terminal is live (enables answering questions). */
   terminalReady?: boolean;
+  /** Claude is actively emitting output right now — shows a typing indicator
+   *  below the last message (observed from the pty stream, not a guess). */
+  working?: boolean;
   /** Send raw keystrokes to the chat's terminal (drives TUI selectors). */
   onSendKeys?: (keys: string[]) => void;
 }
@@ -676,6 +679,7 @@ export const MessageList = memo(function MessageList({
   onRemoveAnnotation,
   visible = true,
   terminalReady = false,
+  working = false,
   onSendKeys,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -851,7 +855,9 @@ export const MessageList = memo(function MessageList({
       followingBottomRef.current = true;
     }
     if (followingBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [sessionAnchorKey, items.length, deferredMessages]);
+    // `working` is a dep so the typing indicator appearing/disappearing keeps us
+    // anchored to the bottom when following.
+  }, [sessionAnchorKey, items.length, deferredMessages, working]);
 
   // Becoming visible again (pane was display:none): layout was skipped while
   // hidden, so re-anchor to the bottom if we were following it.
@@ -1152,6 +1158,7 @@ export const MessageList = memo(function MessageList({
             </div>
           );
         })}
+        {working && <TypingIndicator />}
       </div>
       {showScrollDown && (
         <button
@@ -1201,6 +1208,27 @@ export const MessageList = memo(function MessageList({
     </>
   );
 });
+
+/**
+ * iMessage-style "Claude is working" typing bubble shown below the last message.
+ * Three dots bouncing on staggered delays. No text nodes, so it doesn't disturb
+ * the transcript's offset space (annotations / ⌘F find).
+ */
+function TypingIndicator() {
+  return (
+    <div className="px-4 pt-1 pb-2" aria-label="Claude is working">
+      <div className="inline-flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--text-tertiary)]"
+            style={{ animationDelay: `${i * 150}ms`, animationDuration: "1s" }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function ancestorWithAttr(node: Node, attr: string): HTMLElement | null {
   let el: HTMLElement | null =
