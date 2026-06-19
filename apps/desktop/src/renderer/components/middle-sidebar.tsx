@@ -19,6 +19,7 @@ import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { SearchPanel } from "./search-panel";
+import { usePersistentNumber } from "../lib/use-persistent-number";
 
 export type WorkTab = "diffs" | "chat" | "files" | "search";
 
@@ -186,6 +187,28 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   // Minimise the embedded terminal pane while keeping the tab strip visible.
   // Local UI state — independent of the dock and ⌘J.
   const [paneCollapsed, setPaneCollapsed] = useState(false);
+  const [width, setWidth] = usePersistentNumber("plan.middleSidebar.width", 280);
+  const [termHeight, setTermHeight] = usePersistentNumber(
+    "plan.middleSidebar.termHeight",
+    288 // current h-72
+  );
+
+  const startTermResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = termHeight;
+    const onMove = (ev: PointerEvent) => {
+      // Drag up grows the terminal (it's pinned to the bottom).
+      const next = Math.min(Math.max(startH - (ev.clientY - startY), 120), 700);
+      setTermHeight(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   // ⌘1‑⌘5 → swap tabs (match the visual order); ⌘⇧F → Search (VS Code binding).
   useEffect(() => {
@@ -247,7 +270,13 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   const multiRepo = repos.length > 1;
 
   return (
-    <Sidebar side="right" className="w-[280px]">
+    <Sidebar
+      side="right"
+      width={width}
+      onWidthChange={setWidth}
+      minWidth={220}
+      maxWidth={520}
+    >
       <Tabs
         value={tab}
         onValueChange={(v) => onTabChange(v as WorkTab)}
@@ -446,15 +475,23 @@ export const MiddleSidebar = memo(function MiddleSidebar({
           </div>
         </div>
         {/* Embedded terminal pane: the active shell renders right here, sized
-            to this bottom section only. All opened shells stay mounted
-            (hidden) so their scrollback survives tab switches and minimise. */}
+            to this bottom section only (drag the top edge to resize). All opened
+            shells stay mounted (hidden) so scrollback survives tab switches. */}
         {terminals.length > 0 && (
           <div
             className={cn(
-              "relative border-t border-[var(--border)] transition-all duration-200",
-              paneCollapsed ? "h-0 border-t-0" : "h-72"
+              "relative border-t border-[var(--border)]",
+              paneCollapsed && "border-t-0"
             )}
+            style={{ height: paneCollapsed ? 0 : termHeight }}
           >
+            {!paneCollapsed && (
+              <div
+                onPointerDown={startTermResize}
+                title="Drag to resize"
+                className="absolute inset-x-0 top-0 z-20 h-1 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
+              />
+            )}
             {terminals.map((t) => {
               const active = t.id === activeTerminalId;
               return (

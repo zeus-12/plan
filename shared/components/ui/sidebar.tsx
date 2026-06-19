@@ -114,34 +114,85 @@ export function SidebarProvider({
 
 export interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
   side?: "left" | "right";
+  /** Controlled pixel width (when open). Pass with `onWidthChange` to make the
+   *  sidebar drag-resizable. Omit to size via a `w-*` class on `className`. */
+  width?: number;
+  onWidthChange?: (w: number) => void;
+  minWidth?: number;
+  maxWidth?: number;
 }
 
 /**
- * A collapsible column. Width animates between collapsed (0) and a width
- * controlled by the caller via `w-*` utility classes on its container.
+ * A collapsible column. Width animates between collapsed (0) and either a
+ * `w-*` class (static) or a controlled `width` px that the user can drag-resize.
  */
 export function Sidebar({
   className,
   children,
   side = "left",
+  width,
+  onWidthChange,
+  minWidth = 200,
+  maxWidth = 520,
   ...rest
 }: SidebarProps) {
   const { open } = useSidebar();
+  const [resizing, setResizing] = useState(false);
+  const resizable = width != null && !!onWidthChange;
+
+  const startResize = useCallback(
+    (e: React.PointerEvent) => {
+      if (width == null || !onWidthChange) return;
+      e.preventDefault();
+      setResizing(true);
+      const startX = e.clientX;
+      const startW = width;
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - startX;
+        // Left sidebar grows when dragged right; right sidebar grows leftward.
+        const delta = side === "left" ? dx : -dx;
+        onWidthChange(Math.min(Math.max(startW + delta, minWidth), maxWidth));
+      };
+      const onUp = () => {
+        setResizing(false);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [width, onWidthChange, side, minWidth, maxWidth]
+  );
+
   return (
     <aside
       data-state={open ? "expanded" : "collapsed"}
       data-side={side}
       className={cn(
-        "relative flex h-full shrink-0 flex-col overflow-hidden border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text)] transition-[width] duration-200 ease-out",
-        "data-[state=collapsed]:w-0",
+        "relative flex h-full shrink-0 flex-col overflow-hidden border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text)] ease-out",
+        // No width transition while dragging (it would lag the handle).
+        !resizing && "transition-[width] duration-200",
+        !resizable && "data-[state=collapsed]:w-0",
         side === "left" ? "border-r" : "border-l",
         className
       )}
+      style={resizable ? { width: open ? width : 0 } : undefined}
       {...rest}
     >
       {/* Inner is rendered at the sidebar's natural width; overflow on the
           outer aside hides it when collapsed. */}
       <div className="flex h-full min-w-0 flex-1 flex-col">{children}</div>
+      {resizable && open && (
+        <div
+          onPointerDown={startResize}
+          title="Drag to resize"
+          className={cn(
+            "absolute top-0 z-20 h-full w-1 cursor-col-resize transition-colors hover:bg-[var(--border-strong)]",
+            side === "left" ? "right-0" : "left-0",
+            resizing && "bg-[var(--accent)]"
+          )}
+        />
+      )}
     </aside>
   );
 }

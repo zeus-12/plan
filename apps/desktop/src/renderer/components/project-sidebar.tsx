@@ -10,6 +10,7 @@ import {
 } from "@plan/shared/components/ui/sidebar";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
+import { usePersistentNumber } from "../lib/use-persistent-number";
 import {
   Tooltip,
   TooltipContent,
@@ -265,8 +266,15 @@ export function ProjectSidebar({
     };
   }, [confirmTarget]);
 
+  const [width, setWidth] = usePersistentNumber("plan.projectSidebar.width", 260);
+
   return (
-    <Sidebar className="w-[260px]">
+    <Sidebar
+      width={width}
+      onWidthChange={setWidth}
+      minWidth={200}
+      maxWidth={420}
+    >
       <SidebarHeader className="h-[44px] justify-between pl-20 pr-3 pt-2 pb-2 [-webkit-app-region:drag]">
         <span className="font-[family-name:var(--font-mono)] text-sm font-semibold tracking-tight text-[var(--text)]">
           plan
