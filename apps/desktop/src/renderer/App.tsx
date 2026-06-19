@@ -159,7 +159,7 @@ function Shell() {
   });
 
   return (
-    <div className="flex h-screen w-screen flex-row bg-[var(--bg)] text-[var(--text)]">
+    <div className="flex h-screen w-full flex-row overflow-hidden bg-[var(--bg)] text-[var(--text)]">
       <ProjectSidebar
         projects={projects}
         reposByProject={reposByProject}
