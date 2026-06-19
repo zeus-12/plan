@@ -546,6 +546,59 @@ export function ProjectWorkspace({
     [refreshSessions, project.encoded],
   );
 
+  // ⌘⇧A: archive the open chat immediately (no dialog), with a short-lived
+  // "Unarchive" toast so an accidental archive can be reversed.
+  const handleArchiveCurrentChat = useCallback(() => {
+    if (openKind !== "chat" || !selectedSessionId) return;
+    const sid = selectedSessionId;
+    const active = sessions.filter((s) => !s.archived);
+    const title =
+      active.find((s) => s.sessionId === sid)?.title ?? "Untitled chat";
+    // Land on the chat that takes this one's slot (the next in the list), or the
+    // new last one if this was the tail, or nothing if it was the only chat.
+    const idx = active.findIndex((s) => s.sessionId === sid);
+    const remaining = active.filter((s) => s.sessionId !== sid);
+    const nextId =
+      remaining[idx]?.sessionId ??
+      remaining[remaining.length - 1]?.sessionId ??
+      null;
+
+    void handleSetSessionArchived(sid, true);
+    setSelectedSessionId(nextId);
+    if (nextId) setOpenKind("chat");
+
+    pushToast(
+      {
+        text: `“${title}” archived. Undo to bring it back.`,
+        actionLabel: "Unarchive",
+        onAction: () => {
+          void handleSetSessionArchived(sid, false);
+          // Undo restores the archived chat to the content pane.
+          setSelectedSessionId(sid);
+          setOpenKind("chat");
+        },
+      },
+      6000,
+    );
+  }, [openKind, selectedSessionId, sessions, handleSetSessionArchived]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "a"
+      ) {
+        if (openKind !== "chat" || !selectedSessionId) return;
+        e.preventDefault();
+        handleArchiveCurrentChat();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleArchiveCurrentChat, openKind, selectedSessionId]);
+
   const refreshSelectedSession = useCallback(async () => {
     if (!selectedSessionId) {
       setSession(null);
@@ -1899,6 +1952,7 @@ export function ProjectWorkspace({
                       onRemoveAnnotation={removeChatAnnotation}
                       visible={openKind === "chat"}
                       terminalReady={chatTerminalReady}
+                      working={chatWorking}
                       onSendKeys={handleSendKeysToChat}
                     />
                   ) : (
