@@ -1,8 +1,6 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { dirname, join } from "path";
-import { homedir } from "os";
+import { readPlanConfig, writePlanConfig } from "./plan-config";
 
-const PATH = join(homedir(), ".claude", "plan-desktop.json");
+const CONFIG_NAME = "projects.json";
 
 interface Stored {
   manualCwds: string[];
@@ -18,7 +16,8 @@ let cache: Stored | null = null;
 async function load(): Promise<Stored> {
   if (cache) return cache;
   try {
-    const raw = await readFile(PATH, "utf-8");
+    const raw = await readPlanConfig(CONFIG_NAME);
+    if (raw === null) throw new Error("no config");
     const parsed = JSON.parse(raw) as Partial<Stored>;
     cache = {
       manualCwds: Array.isArray(parsed.manualCwds)
@@ -61,8 +60,7 @@ function scheduleWrite() {
   writeTimer = setTimeout(async () => {
     if (!cache) return;
     try {
-      await mkdir(dirname(PATH), { recursive: true });
-      await writeFile(PATH, JSON.stringify(cache, null, 2), "utf-8");
+      await writePlanConfig(CONFIG_NAME, JSON.stringify(cache, null, 2));
     } catch {
       // ignore — best-effort persistence
     }
