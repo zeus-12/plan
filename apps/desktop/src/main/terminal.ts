@@ -300,12 +300,16 @@ function readScreen(id: string): string[] {
 }
 
 // Claude Code's TUI selection menus (tool approval, plan accept, AskUserQuestion)
-// render numbered options with a ❯ pointer on the highlighted one, inside the
-// bordered box, e.g. "│ ❯ 1. Yes". The free-text composer renders the box with a
-// "> " prompt, e.g. "│ > ". These are heuristics on the rendered glyphs — not a
-// real protocol — so callers must word any UI as a guess ("may be…").
-const SELECTION_RE = /❯\s*\d+\.|[│|]\s*❯/;
-const INPUT_BOX_RE = /[│|]\s*>\s/;
+// render NUMBERED options with a ❯ pointer on the highlighted one, e.g.
+// "❯ 1. Yes". The free-text composer renders the box with a bare prompt — which
+// in current builds is ALSO a "❯" (or "> "), e.g. "│ ❯ ". So the ONLY reliable
+// difference is the digit: a chevron followed by "<number>." is a menu; a
+// chevron with no number is just the input prompt. Matching a bare chevron here
+// (as an earlier version did) misreads the normal composer as a menu — don't.
+// These are heuristics on rendered glyphs, not a protocol — word any UI as a
+// guess ("may be…").
+const SELECTION_RE = /❯\s*\d+[.)]/;
+const INPUT_BOX_RE = /[│|]\s*[>❯]\s/;
 
 /**
  * EXPERIMENTAL, heuristic. Classify the bottom of terminal `id`'s screen as a

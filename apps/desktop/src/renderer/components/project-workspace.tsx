@@ -1446,11 +1446,12 @@ export function ProjectWorkspace({
     };
   }, [chatTerminalReady, selectedSessionId, chatPrefix]);
 
-  // A selection menu only matters while Claude is the live process and isn't
-  // mid-render (working ⇒ the frame is transient). This is what gates the
-  // composer + the "needs input" hint.
-  const awaitingSelection =
-    agentLive && !chatWorking && inputState === "selection";
+  // A rendered selection menu IS the "waiting for you" signal — it must win
+  // over the output-recency "working" heuristic, NOT be gated by it: Claude
+  // keeps repainting the prompt (cursor blink / box redraw) while it waits, so
+  // `chatWorking` stays true the whole time the menu is up. We only require the
+  // agent process to be live (a stray menu in a dead shell isn't actionable).
+  const awaitingSelection = agentLive && inputState === "selection";
 
   // Auto-reveal the terminal when a menu appears so the user can respond —
   // only once per transition into the selection state (not on every poll).
