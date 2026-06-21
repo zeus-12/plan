@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   SidebarProvider,
   useSidebar,
@@ -11,6 +17,7 @@ import { SwitcherOverlay } from "./components/switcher-overlay";
 import { SessionsDashboard } from "./components/sessions-dashboard";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
 import { requestSessionNav } from "./lib/session-nav-store";
+import { getMruVersion, orderByMru, recordUse, subscribeMru } from "./lib/mru-store";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
@@ -134,26 +141,39 @@ function Shell() {
     []
   );
 
-  // Ctrl+Tab: cycle projects in a modal, commit on Ctrl-release. Ordered
-  // most-recently-active first (same recency signal the sidebar sorts by), so
-  // the current project sits at top and the first Tab lands on the one below.
-  // Archived projects are excluded — you can't switch to one you've hidden.
-  const projectsByRecency = useMemo(
+  // Ctrl+` : cycle projects in a modal, commit on Ctrl-release (Shift reverses).
+  // Ordered most-recently-USED first (Alt-Tab style) so the current project
+  // sits at top and the first tap lands on the one you were last in. Before any
+  // project has been used this session it falls back to mtime recency. Archived
+  // projects are excluded — you can't switch to one you've hidden.
+  const activeProjects = useMemo(
     () =>
       projects
         .filter((p) => !p.archived)
         .sort((a, b) => b.mtimeMs - a.mtimeMs),
     [projects]
   );
+  const mruVersion = useSyncExternalStore(
+    subscribeMru,
+    getMruVersion,
+    getMruVersion
+  );
+  const projectsByMru = useMemo(
+    () => orderByMru("projects", activeProjects, (p) => p.encoded),
+    [activeProjects, mruVersion]
+  );
+  useEffect(() => {
+    if (selectedEncoded) recordUse("projects", selectedEncoded);
+  }, [selectedEncoded]);
   const projectIndex = Math.max(
     0,
-    projectsByRecency.findIndex((p) => p.encoded === selectedEncoded)
+    projectsByMru.findIndex((p) => p.encoded === selectedEncoded)
   );
   const projectSwitcher = useTabSwitcher({
     id: "projects",
-    enabled: projectsByRecency.length > 1,
-    requireShift: false,
-    items: projectsByRecency,
+    enabled: projectsByMru.length > 1,
+    triggerCode: "Backquote",
+    items: projectsByMru,
     currentIndex: projectIndex,
     onCommit: (p) => setSelectedEncoded(p.encoded),
   });
@@ -196,7 +216,7 @@ function Shell() {
         <SwitcherOverlay
           title="Projects"
           index={projectSwitcher.index}
-          items={projectsByRecency.map((p) => ({
+          items={projectsByMru.map((p) => ({
             key: p.encoded,
             label: projectShortName(p),
             sub: p.cwd,

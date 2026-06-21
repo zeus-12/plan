@@ -49,7 +49,9 @@ interface ElectronAPI {
     opts: SearchOptions
   ) => Promise<SearchResult>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
-  onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => () => void;
+  onSwitcherCycle: (
+    cb: (e: { key: string; shift: boolean }) => void
+  ) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;
   setProjectArchived: (
     encoded: string,

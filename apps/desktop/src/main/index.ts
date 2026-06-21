@@ -82,9 +82,9 @@ let mainWindow: BrowserWindow | null = null;
 
 // ── Menu ───────────────────────────────────────────────────────────
 
-function sendSwitcherCycle(shift: boolean) {
+function sendSwitcherCycle(key: string, shift: boolean) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("switcher:cycle", { shift });
+  mainWindow.webContents.send("switcher:cycle", { key, shift });
 }
 
 // Ctrl+Tab / Ctrl+Shift+Tab via OS-level hotkeys. This is the dependable way
@@ -99,10 +99,10 @@ let switcherRegistered = false;
 function registerSwitcherShortcuts() {
   if (switcherRegistered) return;
   const a = globalShortcut.register("Control+Tab", () =>
-    sendSwitcherCycle(false),
+    sendSwitcherCycle("Tab", false),
   );
   const b = globalShortcut.register("Control+Shift+Tab", () =>
-    sendSwitcherCycle(true),
+    sendSwitcherCycle("Tab", true),
   );
   switcherRegistered = a || b;
   console.log("[switcher] globalShortcut registered:", {
@@ -216,22 +216,22 @@ function createMainWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  // Ctrl+Tab / Ctrl+Shift+Tab switcher. Chromium swallows plain Ctrl+Tab
-  // before the page's keydown sees it, and a macOS menu accelerator for Tab is
-  // unreliable (often consumed by AppKit without firing). before-input-event is
-  // the dependable interception point: it fires before the page, so we cancel
-  // the keystroke and forward a cycle to the renderer, which owns the modal and
-  // commits when the user releases Ctrl.
+  // Ctrl+Tab (sessions) / Ctrl+` (projects) switcher; Shift reverses direction.
+  // Chromium swallows plain Ctrl+Tab before the page's keydown sees it, and a
+  // macOS menu accelerator for Tab is unreliable (often consumed by AppKit
+  // without firing). before-input-event is the dependable interception point:
+  // it fires before the page, so we cancel the keystroke and forward a cycle to
+  // the renderer, which owns the modal and commits when the user releases Ctrl.
   win.webContents.on("before-input-event", (event, input) => {
     if (
       input.type === "keyDown" &&
-      input.key === "Tab" &&
+      (input.code === "Tab" || input.code === "Backquote") &&
       input.control &&
       !input.meta &&
       !input.alt
     ) {
       event.preventDefault();
-      sendSwitcherCycle(input.shift);
+      sendSwitcherCycle(input.code, input.shift);
     }
   });
 

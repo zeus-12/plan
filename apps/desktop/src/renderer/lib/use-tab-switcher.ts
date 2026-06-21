@@ -1,22 +1,28 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
 /**
- * macOS-style Ctrl+Tab switcher, centralized.
+ * macOS/Windows-style modifier-held switcher, centralized.
  *
- * Hold Ctrl and tap Tab to cycle a modal highlight forward (Ctrl+Shift+Tab
- * back). The highlight commits ONLY when Ctrl is released — holding Ctrl keeps
- * the modal open indefinitely, however long the pause between taps. Escape
- * cancels; losing window focus cancels too (so it can't get stuck).
+ * Hold Ctrl and tap a trigger key to cycle a modal highlight; the highlight
+ * commits ONLY when Ctrl is released — holding Ctrl keeps the modal open
+ * indefinitely, however long the pause between taps. Shift reverses direction
+ * for that tap. Escape cancels; losing window focus cancels too (so it can't
+ * get stuck).
  *
- * Two channels coexist — projects (Ctrl+Tab) and sessions (Ctrl+Shift+Tab) —
- * but there is a SINGLE window listener and a SINGLE active-state, so there's
- * no effect-ordering race or stuck-lock between component instances: on the
- * opening keystroke we pick the enabled channel whose `requireShift` matches.
+ * Two channels coexist — sessions (Ctrl+Tab) and projects (Ctrl+`) — but there
+ * is a SINGLE window listener and a SINGLE active-state, so there's no
+ * effect-ordering race or stuck-lock between component instances: on the
+ * opening keystroke we pick the enabled channel whose trigger key matches.
+ *
+ * Items are expected in already-resolved display order (see mru-store), with
+ * the current item first; the first forward tap therefore lands on index 1,
+ * the most-recently-used OTHER item.
  */
 
 interface Channel {
   id: string;
-  requireShift: boolean;
+  /** KeyboardEvent.code that opens this channel, e.g. "Tab" | "Backquote". */
+  triggerCode: string;
   isEnabled: () => boolean;
   getItems: () => unknown[];
   getCurrentIndex: () => number;
@@ -46,17 +52,17 @@ function close(commit: boolean) {
   emit();
 }
 
-// Ctrl+Tab can arrive twice — once from the renderer keydown and once from
+// A keystroke can arrive twice — once from the renderer keydown and once from
 // main's IPC forward (which exists because Chromium swallows Ctrl+Tab before
 // the page sees it). Coalesce bursts so a single keystroke steps exactly once.
 let lastCycleAt = 0;
 
 /**
- * Advance the switcher one step. `shift` only chooses the channel on the
- * opening keystroke (Shift → sessions); it never reverses direction — every
- * tap moves forward (down the list).
+ * Advance the switcher one step. `code` selects the channel on the opening
+ * keystroke; `dir` is the step direction (1 forward / -1 backward, chosen by
+ * Shift) and applies to every tap, so a held gesture can mix directions.
  */
-function cycle(shift: boolean) {
+function cycle(code: string, dir: 1 | -1) {
   const now = performance.now();
   if (now - lastCycleAt < 40) return;
   lastCycleAt = now;
@@ -68,29 +74,36 @@ function cycle(shift: boolean) {
     }
     active = {
       id: active.id,
-      index: step(active.index, ch.getItems().length, 1),
+      index: step(active.index, ch.getItems().length, dir),
     };
     emit();
     return;
   }
   const ch = channels.find(
-    (c) => c.isEnabled() && c.requireShift === shift && c.getItems().length > 0
+    (c) =>
+      c.isEnabled() && c.triggerCode === code && c.getItems().length > 0,
   );
   if (!ch) return;
   active = {
     id: ch.id,
-    index: step(ch.getCurrentIndex(), ch.getItems().length, 1),
+    index: step(ch.getCurrentIndex(), ch.getItems().length, dir),
   };
   emit();
 }
 
 function onKeyDown(e: KeyboardEvent) {
   // Renderer-side path. Chromium swallows plain Ctrl+Tab so this mostly catches
-  // Ctrl+Shift+Tab; the main-process IPC forward (see install) covers Ctrl+Tab.
-  // cycle() dedupes if both deliver the same keystroke.
-  if (e.code === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) {
+  // Ctrl+Shift+Tab and the Ctrl+` (Backquote) project combos; the main-process
+  // IPC forward (see install) covers the swallowed Ctrl+Tab. cycle() dedupes if
+  // both deliver the same keystroke.
+  if (
+    (e.code === "Tab" || e.code === "Backquote") &&
+    e.ctrlKey &&
+    !e.metaKey &&
+    !e.altKey
+  ) {
     e.preventDefault();
-    cycle(e.shiftKey);
+    cycle(e.code, e.shiftKey ? -1 : 1);
     return;
   }
   if (active && e.key === "Escape") {
@@ -99,8 +112,8 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-// Releasing the held modifier commits instantly, like the macOS app switcher.
-// (Shift is excluded — it only selects the channel.)
+// Releasing the held modifier commits instantly, like the OS app switcher.
+// (Shift is excluded — it only sets the step direction.)
 function onKeyUp(e: KeyboardEvent) {
   if (active && (e.key === "Control" || e.key === "Meta" || e.key === "Alt"))
     close(true);
@@ -118,7 +131,9 @@ function install() {
   });
   // Cycling is driven from main via IPC — Chromium swallows Ctrl+Tab before the
   // page sees it, so main intercepts (before-input-event) and forwards here.
-  window.electronAPI?.onSwitcherCycle?.((e) => cycle(e.shift));
+  window.electronAPI?.onSwitcherCycle?.((e) =>
+    cycle(e.key, e.shift ? -1 : 1),
+  );
 }
 
 function subscribe(l: () => void) {
@@ -131,9 +146,9 @@ function subscribe(l: () => void) {
 interface Options<T> {
   id: string;
   enabled: boolean;
-  /** false: Ctrl+Tab · true: Ctrl+Shift+Tab. */
-  requireShift: boolean;
-  /** Items in display order (commit cycles through this exact order). */
+  /** KeyboardEvent.code that opens this channel: "Tab" or "Backquote". */
+  triggerCode: string;
+  /** Items in display order — MRU-ordered, current item first. */
   items: T[];
   /** Index of the active item — the cycle's starting point. */
   currentIndex: number;
@@ -153,7 +168,7 @@ export function useTabSwitcher<T>(opts: Options<T>): {
   useEffect(() => {
     const ch: Channel = {
       id: opts.id,
-      requireShift: opts.requireShift,
+      triggerCode: opts.triggerCode,
       isEnabled: () => ref.current.enabled,
       getItems: () => ref.current.items as unknown[],
       getCurrentIndex: () => ref.current.currentIndex,
@@ -167,12 +182,12 @@ export function useTabSwitcher<T>(opts: Options<T>): {
         emit();
       }
     };
-  }, [opts.id, opts.requireShift]);
+  }, [opts.id, opts.triggerCode]);
 
   const index = useSyncExternalStore(
     subscribe,
     () => (active && active.id === opts.id ? active.index : -1),
-    () => -1
+    () => -1,
   );
 
   return { active: index >= 0, index: index < 0 ? 0 : index };

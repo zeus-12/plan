@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { generateMessage, type Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { MessageOutput } from "@plan/shared/components/message-output";
@@ -38,6 +45,12 @@ import { RenameSessionDialog } from "./rename-session-dialog";
 import { ThemeMenu } from "./theme-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
+import {
+  getMruVersion,
+  orderByMru,
+  recordUse,
+  subscribeMru,
+} from "../lib/mru-store";
 import { Toasts } from "./toasts";
 import { mergeSession } from "../lib/merge-session";
 import { osNotify, pushToast } from "../lib/toast-store";
@@ -1747,21 +1760,37 @@ export function ProjectWorkspace({
     connectAndShowChat,
   ]);
 
-  // Ctrl+Shift+Tab: cycle this project's chat sessions in a modal, committing
-  // on Ctrl-release. Lands you on the Chat tab. Archived chats are excluded.
+  // Ctrl+Tab: cycle this project's chat sessions in a modal, committing on
+  // Ctrl-release (Shift reverses). Lands you on the Chat tab. Ordered
+  // most-recently-USED first (Alt-Tab style), per project, so the first tap
+  // lands on the chat you were last in; before any chat is used this session it
+  // keeps the default order. Archived chats are excluded.
   const activeSessions = useMemo(
     () => sessions.filter((s) => !s.archived),
     [sessions],
   );
+  const mruScope = `sessions:${project.encoded}`;
+  const mruVersion = useSyncExternalStore(
+    subscribeMru,
+    getMruVersion,
+    getMruVersion,
+  );
+  const sessionsByMru = useMemo(
+    () => orderByMru(mruScope, activeSessions, (s) => s.sessionId),
+    [mruScope, activeSessions, mruVersion],
+  );
+  useEffect(() => {
+    if (selectedSessionId) recordUse(mruScope, selectedSessionId);
+  }, [mruScope, selectedSessionId]);
   const sessionIndex = Math.max(
     0,
-    activeSessions.findIndex((s) => s.sessionId === selectedSessionId),
+    sessionsByMru.findIndex((s) => s.sessionId === selectedSessionId),
   );
   const sessionSwitcher = useTabSwitcher({
     id: "sessions",
-    enabled: activeSessions.length > 1,
-    requireShift: true,
-    items: activeSessions,
+    enabled: sessionsByMru.length > 1,
+    triggerCode: "Tab",
+    items: sessionsByMru,
     currentIndex: sessionIndex,
     onCommit: (s) => {
       setSelectedSessionId(s.sessionId);
@@ -1799,7 +1828,7 @@ export function ProjectWorkspace({
         <SwitcherOverlay
           title="Chat sessions"
           index={sessionSwitcher.index}
-          items={activeSessions.map((s) => ({
+          items={sessionsByMru.map((s) => ({
             key: s.sessionId,
             label: s.title ?? "Untitled chat",
             sub: `${s.messageCount} message${s.messageCount === 1 ? "" : "s"}`,

@@ -47,11 +47,14 @@ const electronAPI = {
     return () => ipcRenderer.removeListener("watcher:event", handler);
   },
 
-  // Ctrl+Tab (projects) / Ctrl+Shift+Tab (sessions), forwarded from main since
-  // Chromium swallows Ctrl+Tab before the page sees it.
-  onSwitcherCycle: (cb: (e: { shift: boolean }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, e: { shift: boolean }) =>
-      cb(e);
+  // Ctrl+Tab (sessions) / Ctrl+` (projects) cycles, forwarded from main since
+  // Chromium swallows Ctrl+Tab before the page sees it. `key` is the
+  // KeyboardEvent.code of the trigger; `shift` reverses direction.
+  onSwitcherCycle: (cb: (e: { key: string; shift: boolean }) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      e: { key: string; shift: boolean },
+    ) => cb(e);
     ipcRenderer.on("switcher:cycle", handler);
     return () => ipcRenderer.removeListener("switcher:cycle", handler);
   },
