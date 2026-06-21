@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { Annotation, MessageOptions } from "../lib/store";
 import { generateMessage } from "../lib/store";
+import { Kbd } from "./ui/kbd";
 
 interface MessageOutputProps {
   annotations: Annotation[];
@@ -20,6 +21,12 @@ interface MessageOutputProps {
   onSend?: (message: string) => void;
   sendLabel?: string;
   /**
+   * When true, the send button claims ⌘⏎ as a global shortcut and shows the
+   * hint on the button. Callers set this only while their own input box is
+   * blurred, so the chord doesn't compete with the box's own ⌘⏎.
+   */
+  shortcutEnabled?: boolean;
+  /**
    * When provided, renders a "Clear" reset button (top-right). The handler is
    * expected to confirm with the user before discarding the comments.
    */
@@ -34,6 +41,7 @@ export function MessageOutput({
   count,
   onSend,
   sendLabel = "Send to terminal",
+  shortcutEnabled = false,
   onClear,
 }: MessageOutputProps) {
   const [copied, setCopied] = useState(false);
@@ -90,12 +98,26 @@ export function MessageOutput({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function handleSend() {
+  const handleSend = useCallback(() => {
     if (!onSend) return;
     onSend(message);
     setSent(true);
     setTimeout(() => setSent(false), 2000);
-  }
+  }, [onSend, message]);
+
+  // Claim ⌘⏎ for the send button while the caller's input box is blurred. We
+  // skip it mid-edit so the textarea's own ⌘⏎ (save) keeps priority.
+  useEffect(() => {
+    if (!onSend || !shortcutEnabled || isEditing) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleSend();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onSend, shortcutEnabled, isEditing, handleSend]);
 
   if (!baseMessage && !customMessage) return null;
 
@@ -164,13 +186,20 @@ export function MessageOutput({
           {onSend && (
             <button
               onClick={handleSend}
-              className="rounded-md px-4 py-1.5 font-[family-name:var(--font-mono)] text-xs font-medium transition-all"
+              className="flex items-center gap-1.5 rounded-md px-4 py-1.5 font-[family-name:var(--font-mono)] text-xs font-medium transition-all"
               style={{
                 background: sent ? "var(--diff-add-bar)" : "var(--accent)",
                 color: sent ? "#fff" : "var(--bg)",
               }}
             >
-              {sent ? "Sent ✓" : sendLabel}
+              {sent ? (
+                "Sent ✓"
+              ) : (
+                <>
+                  {sendLabel}
+                  {shortcutEnabled && <Kbd keys={["⌘", "⏎"]} />}
+                </>
+              )}
             </button>
           )}
         </div>

@@ -52,6 +52,9 @@ interface Props {
   blocked?: boolean;
   /** Invoked when the user tries to send while blocked (reveals the terminal). */
   onBlocked?: () => void;
+  /** Reports the composer's focus state so siblings can adjust their own
+   *  shortcuts (e.g. the compose buffer only claims ⌘⏎ when this is blurred). */
+  onFocusChange?: (focused: boolean) => void;
 }
 
 interface Attachment {
@@ -102,6 +105,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       autoFocus,
       blocked,
       onBlocked,
+      onFocusChange,
     },
     ref,
   ) {
@@ -132,6 +136,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       lastSentRef.current = null;
       return clearAttachments;
     }, [sessionId, clearAttachments]);
+
+    // Browsers don't reliably fire `blur` when the editor unmounts (tab switch,
+    // session change), so tell the parent the composer is gone — otherwise it
+    // would keep treating a non-existent box as focused.
+    useEffect(() => () => onFocusChange?.(false), [onFocusChange]);
 
     const removeAttachment = useCallback((id: string) => {
       setAttachments((prev) => {
@@ -304,8 +313,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
               <FocusPlugin
                 autoFocus={!!autoFocus}
                 sessionId={sessionId}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
+                onFocus={() => {
+                  setFocused(true);
+                  onFocusChange?.(true);
+                }}
+                onBlur={() => {
+                  setFocused(false);
+                  onFocusChange?.(false);
+                }}
               />
               <FileMentionPlugin projectEncoded={projectEncoded} />
               <SkillMentionPlugin projectEncoded={projectEncoded} />

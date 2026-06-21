@@ -570,6 +570,9 @@ export function ProjectWorkspace({
   // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
   // itself lives inside ChatInput so keystrokes don't re-render the workspace.
   const chatInputRef = useRef<ChatInputHandle>(null);
+  // Whether the chat composer holds focus — the compose buffer only claims ⌘⏎
+  // (and shows the hint) while it's blurred, so the chord never fights the box.
+  const [chatInputFocused, setChatInputFocused] = useState(false);
 
   // Session ids that currently have an open chat tab — drives transcript loads.
   const chatSessionIds = useMemo(
@@ -2245,6 +2248,7 @@ export function ProjectWorkspace({
                       blocked={awaitingSelection}
                       onBlocked={() => revealChatTerminal(selectedSessionId)}
                       autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
+                      onFocusChange={setChatInputFocused}
                     />
                   )}
                 </div>
@@ -2262,6 +2266,7 @@ export function ProjectWorkspace({
                   count={totalComments}
                   onSend={handleAddToChat}
                   sendLabel="Add to chat"
+                  shortcutEnabled={!chatInputFocused}
                   onClear={handleClearComments}
                 />
               </div>
