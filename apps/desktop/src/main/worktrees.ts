@@ -75,7 +75,7 @@ export interface CreateWorktreeInput {
  */
 export async function createWorktree(
   encoded: string,
-  input: CreateWorktreeInput
+  input: CreateWorktreeInput,
 ): Promise<WorktreeRecord> {
   const name = input.name.trim();
   const branch = input.branch.trim();
@@ -102,7 +102,14 @@ export async function createWorktree(
         : rootPath;
       // -b creates the branch; fails loudly if it already exists, which is the
       // safe default (the user picks a fresh branch name).
-      await git(repo.path, ["worktree", "add", "-b", branch, checkoutPath, base]);
+      await git(repo.path, [
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        checkoutPath,
+        base,
+      ]);
       created.push({ subPath: repo.subPath, path: checkoutPath, branch, base });
     }
   } catch (err) {
@@ -111,7 +118,7 @@ export async function createWorktree(
       const source = repos.find((r) => r.subPath === c.subPath);
       if (source) {
         await git(source.path, ["worktree", "remove", "--force", c.path]).catch(
-          () => {}
+          () => {},
         );
       }
     }
@@ -139,7 +146,7 @@ export async function removeWorktree(id: string): Promise<void> {
     const source = repos.find((s) => s.subPath === r.subPath);
     if (source) {
       await git(source.path, ["worktree", "remove", "--force", r.path]).catch(
-        () => {}
+        () => {},
       );
     }
   }
@@ -150,7 +157,7 @@ export async function removeWorktree(id: string): Promise<void> {
 /** Run `gh` in `cwd`; never throws — non-zero exit is captured for the caller. */
 async function gh(
   cwd: string,
-  args: string[]
+  args: string[],
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await execFileP("gh", args, {
@@ -182,7 +189,7 @@ function firstUrl(s: string): string | undefined {
  */
 export async function createWorktreePr(
   id: string,
-  input: CreatePrInput
+  input: CreatePrInput,
 ): Promise<CreatePrResult> {
   const rec = await getWorktreeRecord(id);
   if (!rec) throw new Error("Worktree not found.");
@@ -243,7 +250,11 @@ export async function createWorktreePr(
       body,
     ]);
     if (created.ok) {
-      repos.push({ subPath: repo.subPath, label, url: firstUrl(created.stdout) });
+      repos.push({
+        subPath: repo.subPath,
+        label,
+        url: firstUrl(created.stdout),
+      });
       continue;
     }
 
@@ -275,7 +286,9 @@ export async function createWorktreePr(
   return { repos };
 }
 
-export async function listWorktrees(encoded: string): Promise<WorktreeRecord[]> {
+export async function listWorktrees(
+  encoded: string,
+): Promise<WorktreeRecord[]> {
   const records = await listWorktreeRecords(encoded);
   // Re-seed the cwd cache after a restart so content ops resolve immediately.
   for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
