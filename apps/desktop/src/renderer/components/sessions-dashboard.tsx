@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
-import { Button } from "@plan/shared/components/ui/button";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 
 interface TerminalInfo {
@@ -200,18 +199,16 @@ function SessionRow({
           {parsed.kind === "chat" ? "claude" : "shell"} · pid {pid}
         </span>
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
+      <button
         onClick={(e) => {
           // Don't also trigger the row's open handler.
           e.stopPropagation();
           onKill();
         }}
-        className="text-red-500 hover:text-red-600"
+        className="shrink-0 cursor-pointer rounded-md bg-red-500 px-3 py-1.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-white transition-colors hover:bg-red-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
       >
         Kill
-      </Button>
+      </button>
     </div>
   );
 }

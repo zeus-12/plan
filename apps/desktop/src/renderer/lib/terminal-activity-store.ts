@@ -20,6 +20,7 @@ const TICK_MS = 400;
 const lastDataAt = new Map<string, number>();
 const listeners = new Set<() => void>();
 let unsubData: (() => void) | null = null;
+let unsubExit: (() => void) | null = null;
 let ticker: ReturnType<typeof setInterval> | null = null;
 
 function emit() {
@@ -32,6 +33,11 @@ function ensureStarted() {
     lastDataAt.set(chunk.id, Date.now());
     emit();
   });
+  // A pty that exits is no longer "working" or "idle" — it's gone. Drop it so
+  // the done-notifier doesn't mistake a kill for a finished reply.
+  unsubExit = window.electronAPI.onTerminalExit((id) => {
+    if (lastDataAt.delete(id)) emit();
+  });
   // Absence of data fires no event, so tick to let "working" decay to idle.
   ticker = setInterval(emit, TICK_MS);
 }
@@ -40,6 +46,8 @@ function maybeStop() {
   if (listeners.size > 0) return;
   unsubData?.();
   unsubData = null;
+  unsubExit?.();
+  unsubExit = null;
   if (ticker) clearInterval(ticker);
   ticker = null;
 }
@@ -51,6 +59,19 @@ function subscribe(listener: () => void) {
     listeners.delete(listener);
     maybeStop();
   };
+}
+
+/**
+ * Subscribe to activity ticks (data arrival + the decay tick) without binding
+ * to a single id — the done-notifier scans every live pty on each tick.
+ */
+export function subscribeActivity(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
+/** Ids of every pty we've seen output from and haven't seen exit. */
+export function knownTerminalIds(): string[] {
+  return [...lastDataAt.keys()];
 }
 
 /** Whether terminal `id` emitted output within the working window. */
