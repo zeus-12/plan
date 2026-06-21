@@ -39,6 +39,8 @@ import { FindWidget } from "./find-widget";
 
 // Stable empty per-line token array used while highlighting is deferred.
 const EMPTY_LINE_TOKENS: SyntaxToken[][] = [];
+// Stable empty list for the searchable visible-line set while find is closed.
+const EMPTY_VISIBLE_LINES: DiffLine[] = [];
 const LINE_HEIGHT_PX = 22;
 const SEPARATOR_HEIGHT_PX = 32;
 const COMMENT_TRUNCATE_LEN = 55;
@@ -326,25 +328,47 @@ export function InteractiveDiff({
 
   /* ── In-view find (⌘F) ─────────────────────────────────────── */
 
-  // Searchable text = every diff line's content (both sides), newline-joined.
-  // `findLineStarts[i]` is dLines[i]'s start offset in that text, so a match
-  // offset maps back to a line + line-local range.
-  const findText = useMemo(
-    () => dLines.map((l) => l.content).join("\n"),
-    [dLines]
+  // Only currently-visible lines are searchable: hidden regions ("N unchanged
+  // lines") and collapsed separators are excluded until the user expands them.
+  // The searchable text is each visible line's content, newline-joined; the
+  // provider runs lazily (only while find is open) so expand/collapse and
+  // "show only changes" cost nothing when nobody is searching. Opening find — or
+  // revealing/hiding lines while it's open — changes expandedFiltered, so the
+  // match list and the widget's count recompute the moment the view changes.
+  const buildFindText = useCallback(() => {
+    const parts: string[] = [];
+    for (const it of expandedFiltered) {
+      if (it.type !== "separator") parts.push(it.content);
+    }
+    return parts.join("\n");
+  }, [expandedFiltered]);
+
+  const find = useTextFind(buildFindText);
+  const [findReveal, setFindReveal] = useState(0);
+
+  // Visible lines + their offsets back the match→row mapping below. Both are
+  // gated on find.open (empty otherwise) so they cost nothing until searching,
+  // and both walk expandedFiltered skipping separators in the same order as
+  // buildFindText, so offsets line up exactly. `findLineStarts[i]` is
+  // visibleLines[i]'s start offset in the searchable text.
+  const visibleLines = useMemo(
+    () =>
+      find.open
+        ? expandedFiltered.filter(
+            (it): it is DiffLine => it.type !== "separator"
+          )
+        : EMPTY_VISIBLE_LINES,
+    [find.open, expandedFiltered]
   );
   const findLineStarts = useMemo(() => {
-    const arr = new Array<number>(dLines.length);
+    const arr = new Array<number>(visibleLines.length);
     let acc = 0;
-    for (let i = 0; i < dLines.length; i++) {
+    for (let i = 0; i < visibleLines.length; i++) {
       arr[i] = acc;
-      acc += dLines[i].content.length + 1;
+      acc += visibleLines[i].content.length + 1;
     }
     return arr;
-  }, [dLines]);
-
-  const find = useTextFind(findText);
-  const [findReveal, setFindReveal] = useState(0);
+  }, [visibleLines]);
 
   const findLineOfOffset = useCallback(
     (offset: number): number => {
@@ -363,26 +387,33 @@ export function InteractiveDiff({
     [findLineStarts]
   );
 
-  // dLines index → its find matches as line-local ranges (+ which is current).
+  // dLines index → its find matches as line-local ranges, each tagged with its
+  // global match index `i`. Match offsets index into visibleLines; map each back
+  // to its dLines `idx`, which is the key rendering looks up (and the data-dline
+  // used for scrolling). Deliberately independent of find.current: stepping
+  // next/prev only moves the cursor, so this map stays referentially stable and
+  // the active match is resolved at render time by comparing `i` to find.current.
   const findByLine = useMemo(() => {
-    const map = new Map<number, { s: number; e: number; current: boolean }[]>();
+    const map = new Map<number, { s: number; e: number; i: number }[]>();
     if (!find.open) return map;
     for (let i = 0; i < find.matches.length; i++) {
       const m = find.matches[i];
-      const li = findLineOfOffset(m.start);
-      const ls = findLineStarts[li];
-      const contentLen = dLines[li]?.content.length ?? 0;
+      const vi = findLineOfOffset(m.start);
+      const line = visibleLines[vi];
+      if (!line) continue;
+      const ls = findLineStarts[vi];
+      const contentLen = line.content.length;
       const entry = {
         s: m.start - ls,
         e: Math.min(m.end - ls, contentLen),
-        current: i === find.current,
+        i,
       };
-      const arr = map.get(li);
+      const arr = map.get(line.idx);
       if (arr) arr.push(entry);
-      else map.set(li, [entry]);
+      else map.set(line.idx, [entry]);
     }
     return map;
-  }, [find.open, find.matches, find.current, findLineStarts, findLineOfOffset, dLines]);
+  }, [find.open, find.matches, findLineStarts, findLineOfOffset, visibleLines]);
 
   // ⌘F opens the find widget for this diff (seeded with any selection).
   useEffect(() => {
@@ -412,7 +443,8 @@ export function InteractiveDiff({
     if (!find.open || find.current < 0) return;
     const m = find.matches[find.current];
     if (!m) return;
-    const li = findLineOfOffset(m.start);
+    const li = visibleLines[findLineOfOffset(m.start)]?.idx;
+    if (li == null) return;
     const el = contentRef.current?.querySelector(`[data-dline="${li}"]`);
     el?.scrollIntoView({ block: "center", behavior: "auto" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -834,9 +866,15 @@ export function InteractiveDiff({
       });
     }
 
-    // Find matches are line-local already and apply to both columns.
+    // Find matches are line-local already and apply to both columns. The active
+    // match (find.current) is resolved here so the map can stay stable across
+    // next/prev stepping.
     for (const f of findByLine.get(lineIdx) ?? []) {
-      out.push({ s: f.s, e: f.e, kind: f.current ? "find-current" : "find" });
+      out.push({
+        s: f.s,
+        e: f.e,
+        kind: f.i === find.current ? "find-current" : "find",
+      });
     }
 
     return out.sort((a, b) => a.s - b.s);

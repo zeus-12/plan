@@ -70,12 +70,18 @@ export interface TextFind {
 }
 
 /**
- * State machine for an in-view find widget over a known `text`. Surfaces own
+ * State machine for an in-view find widget over some `source` text. Surfaces own
  * how to paint {@link TextFind.matches} and scroll {@link TextFind.current} into
  * view; this hook owns the query, options, match list, and cursor. Matching runs
  * off a deferred query so typing stays smooth on large files.
+ *
+ * `source` may be a string or a `() => string` provider. The provider is only
+ * invoked while the widget is open, so callers whose searchable text is
+ * expensive to assemble (e.g. joining thousands of diff lines) pay nothing until
+ * the user actually opens find. Pass a memoized callback so its identity only
+ * changes when the underlying text does.
  */
-export function useTextFind(text: string): TextFind {
+export function useTextFind(source: string | (() => string)): TextFind {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<FindOptions>({
@@ -84,6 +90,13 @@ export function useTextFind(text: string): TextFind {
     regex: false,
   });
   const [current, setCurrent] = useState(0);
+
+  // Only materialize the searchable text while open; closed find does no work
+  // even as the underlying content (source identity) changes.
+  const text = useMemo(
+    () => (open ? (typeof source === "function" ? source() : source) : ""),
+    [open, source]
+  );
 
   const deferredQuery = useDeferredValue(query);
   const matches = useMemo(
