@@ -98,6 +98,8 @@ interface Props {
   runCommand?: string;
   /** Optional build command run before the Run command. */
   buildCommand?: string;
+  /** When true, Claude sessions start with `--enable-auto-mode`. */
+  autoMode?: boolean;
   /** Persist the Run/build command to the project (parent-keyed defaults). */
   onSaveRunConfig: (runCommand: string, buildCommand: string) => Promise<void> | void;
 }
@@ -186,6 +188,7 @@ export function ProjectWorkspace({
   onSelectProject,
   runCommand,
   buildCommand,
+  autoMode,
   onSaveRunConfig,
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
@@ -1217,9 +1220,10 @@ export function ProjectWorkspace({
     const sid = tid.slice(chatPrefix.length);
     // Brand-new chats start claude with a pre-chosen session id (nothing to
     // resume yet); existing ones resume their transcript.
+    const flags = autoMode ? " --enable-auto-mode" : "";
     return NEW_SESSION_IDS.has(sid)
-      ? `claude --session-id ${sid}`
-      : `claude --resume ${sid}`;
+      ? `claude --session-id ${sid}${flags}`
+      : `claude --resume ${sid}${flags}`;
   };
 
   // The dock (⌘J) mirrors the selected chat's Claude instance — on the Diffs
@@ -2230,6 +2234,7 @@ export function ProjectWorkspace({
                     <ChatInput
                       ref={chatInputRef}
                       sessionId={selectedSessionId}
+                      projectEncoded={project.encoded}
                       inactive={!chatTerminalReady}
                       onStart={handleResumeChat}
                       onSend={handleSendChat}

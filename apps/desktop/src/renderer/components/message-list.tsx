@@ -229,8 +229,38 @@ function CodeBody({
 let annHighlight: Highlight | null = null;
 let pendingHighlight: Highlight | null = null;
 
+// The `::highlight()` rules live here, injected once at runtime, rather than in
+// the shared globals.css: Turbopack's CSS parser (used by the web build that
+// also imports that stylesheet) rejects the `::highlight()` pseudo-element.
+// Theme CSS variables still resolve via the normal cascade. (Custom highlights
+// support only a few paint properties — background, underline, color.)
+let highlightStylesInjected = false;
+function ensureHighlightStyles(): void {
+  if (highlightStylesInjected) return;
+  highlightStylesInjected = true;
+  const style = document.createElement("style");
+  style.textContent = `
+::highlight(chat-annotation) {
+  background-color: var(--highlight-bg);
+  text-decoration: underline;
+  text-decoration-color: var(--text-tertiary);
+  text-decoration-thickness: 1.5px;
+}
+::highlight(chat-annotation-pending) {
+  background-color: var(--selection-bg);
+}
+::highlight(chat-find) {
+  background-color: var(--find-match-bg, rgba(234, 179, 8, 0.32));
+}
+::highlight(chat-find-current) {
+  background-color: var(--find-current-bg, rgba(249, 115, 22, 0.6));
+}`;
+  document.head.appendChild(style);
+}
+
 function getHighlights(): { ann: Highlight; pending: Highlight } | null {
   if (typeof Highlight === "undefined" || !("highlights" in CSS)) return null;
+  ensureHighlightStyles();
   if (!annHighlight) {
     annHighlight = new Highlight();
     pendingHighlight = new Highlight();
@@ -246,6 +276,7 @@ let findCurrentHighlight: Highlight | null = null;
 
 function getFindHighlights(): { match: Highlight; current: Highlight } | null {
   if (typeof Highlight === "undefined" || !("highlights" in CSS)) return null;
+  ensureHighlightStyles();
   if (!findHighlight) {
     findHighlight = new Highlight();
     findCurrentHighlight = new Highlight();

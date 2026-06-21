@@ -1,11 +1,33 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
 } from "react";
+import {
+  $createParagraphNode,
+  $getRoot,
+  $getSelection,
+  $isRangeSelection,
+  COMMAND_PRIORITY_HIGH,
+  COMMAND_PRIORITY_LOW,
+  KEY_ENTER_COMMAND,
+  PASTE_COMMAND,
+  UNDO_COMMAND,
+  type LexicalEditor,
+} from "lexical";
+import { LexicalComposer } from "@lexical/react/LexicalComposer";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
+import { ContentEditable } from "@lexical/react/LexicalContentEditable";
+import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
+import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { Kbd } from "@plan/shared/components/ui/kbd";
+import { ReferenceNode } from "./reference-node";
+import { FileMentionPlugin, SkillMentionPlugin } from "./mention-plugins";
+import { isMentionMenuOpen } from "./mention-menu-state";
 
 export interface ChatInputHandle {
   focus: () => void;
@@ -16,11 +38,13 @@ export interface ChatInputHandle {
 interface Props {
   /** Session this composer belongs to — keys the persisted draft. */
   sessionId: string;
+  /** Project id — sources the `@` file list and `/` skill list. */
+  projectEncoded: string;
   onSend: (text: string, imagePaths: string[]) => void;
   /** No live terminal yet — clicking the box starts one (see onStart). */
   inactive?: boolean;
   onStart?: () => void;
-  /** Focus the textarea when this session becomes the composer's session. */
+  /** Focus the editor when this session becomes the composer's session. */
   autoFocus?: boolean;
   /** EXPERIMENTAL: Claude appears to be on a selection menu (no text box), so
    *  sending free text would mis-navigate it. Send is blocked; Enter reveals
@@ -42,144 +66,135 @@ const MIN_HEIGHT = 72;
 const MAX_HEIGHT = 260;
 const draftKey = (sid: string) => `plan.draft.${sid}`;
 
+/** Validate then return a stored draft for use as Lexical's initial state. */
+function readDraft(sid: string): string | undefined {
+  const raw = window.localStorage.getItem(draftKey(sid));
+  if (!raw) return undefined;
+  try {
+    JSON.parse(raw);
+    return raw;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Message composer. Enter sends, Shift+Enter inserts a newline.
  *
- * The text state lives HERE, not in the workspace — so a keystroke re-renders
- * only this small component instead of the whole project tree. Drafts persist
- * per session with debounced localStorage writes.
+ * Built on a Lexical contenteditable so `@file` / `/skill` references render as
+ * atomic, clickable chips (see {@link ReferenceNode}) while still serializing to
+ * the plain `@path` / `/name` text the Claude Code TUI consumes. The editor
+ * state lives HERE so a keystroke re-renders only this small component; drafts
+ * (chips included) persist per session with debounced localStorage writes.
  *
- * Pasted images appear as chips instantly (the preview is the pasted blob);
- * the temp-file save runs in the background and Send stays disabled until
- * every attachment has a real path — the paths are what actually get sent.
+ * Pasted images appear as chips instantly (the preview is the pasted blob); the
+ * temp-file save runs in the background and Send stays disabled until every
+ * attachment has a real path — the paths are what actually get sent.
  */
 export const ChatInput = forwardRef<ChatInputHandle, Props>(
   function ChatInput(
-    { sessionId, onSend, inactive, onStart, autoFocus, blocked, onBlocked },
-    ref
+    {
+      sessionId,
+      projectEncoded,
+      onSend,
+      inactive,
+      onStart,
+      autoFocus,
+      blocked,
+      onBlocked,
+    },
+    ref,
   ) {
-    const [value, setValue] = useState(
-      () => window.localStorage.getItem(draftKey(sessionId)) ?? ""
-    );
-    const [focused, setFocused] = useState(false);
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [preview, setPreview] = useState<Attachment | null>(null);
-    const innerRef = useRef<HTMLTextAreaElement | null>(null);
-    const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // Last message sent from THIS session's composer — ⌘Z restores it into an
-    // empty box so an accidental send (or lost text) can be recovered verbatim.
+    const [focused, setFocused] = useState(false);
+    const [isEmpty, setIsEmpty] = useState(
+      () => readDraft(sessionId) === undefined,
+    );
+
+    const editorRef = useRef<LexicalEditor | null>(null);
+    // Last message sent from THIS session's composer (serialized editor state) —
+    // ⌘Z restores it, chips and all, into an empty box so an accidental send
+    // (or lost text) can be recovered verbatim.
     const lastSentRef = useRef<string | null>(null);
 
-    const clearAttachments = () => {
+    const clearAttachments = useCallback(() => {
       setAttachments((prev) => {
         prev.forEach((a) => URL.revokeObjectURL(a.previewUrl));
         return [];
       });
       setPreview(null);
-    };
+    }, []);
 
-    // Attachments belong to one conversation — drop them on session switch
-    // and on unmount (revoking the preview object URLs).
-    useEffect(() => clearAttachments, [sessionId]);
-
-    // Swap drafts when the session changes. The undo buffer is per-session, so
-    // drop it — ⌘Z must never restore another conversation's message.
+    // Attachments belong to one conversation — drop them on session switch and
+    // on unmount; reset the undo buffer so ⌘Z never restores another chat's text.
     useEffect(() => {
-      setValue(window.localStorage.getItem(draftKey(sessionId)) ?? "");
       lastSentRef.current = null;
-    }, [sessionId]);
+      return clearAttachments;
+    }, [sessionId, clearAttachments]);
 
-    // Focus on session swap when asked (e.g. a brand-new chat) — driven by the
-    // commit lifecycle, not a rAF race against React's render.
-    useEffect(() => {
-      if (autoFocus) innerRef.current?.focus();
-    }, [sessionId, autoFocus]);
-
-    // Debounced draft persistence.
-    useEffect(() => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        if (value) window.localStorage.setItem(draftKey(sessionId), value);
-        else window.localStorage.removeItem(draftKey(sessionId));
-      }, 300);
-      return () => {
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-      };
-    }, [value, sessionId]);
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus: () => innerRef.current?.focus(),
-        append: (text: string) =>
-          setValue((prev) => (prev.trim() ? `${prev}\n\n${text}` : text)),
-      }),
-      []
-    );
-
-    // Auto-size to content within [MIN_HEIGHT, MAX_HEIGHT].
-    useEffect(() => {
-      const el = innerRef.current;
-      if (!el) return;
-      el.style.height = "auto";
-      el.style.height = `${Math.min(
-        Math.max(el.scrollHeight, MIN_HEIGHT),
-        MAX_HEIGHT
-      )}px`;
-    }, [value]);
-
-    const removeAttachment = (id: string) => {
+    const removeAttachment = useCallback((id: string) => {
       setAttachments((prev) => {
         const target = prev.find((a) => a.id === id);
         if (target) URL.revokeObjectURL(target.previewUrl);
         return prev.filter((a) => a.id !== id);
       });
       setPreview((p) => (p?.id === id ? null : p));
-    };
+    }, []);
 
     const pendingSaves = attachments.some((a) => a.path === null);
     const canSend =
       !inactive &&
       !blocked &&
       !pendingSaves &&
-      (value.trim().length > 0 || attachments.length > 0);
+      (!isEmpty || attachments.length > 0);
 
-    const send = () => {
+    // Refs the editor's command handlers read so they always see latest state
+    // without re-registering on every render.
+    const attachmentsRef = useRef(attachments);
+    attachmentsRef.current = attachments;
+    const pendingSavesRef = useRef(pendingSaves);
+    pendingSavesRef.current = pendingSaves;
+
+    const send = useCallback(() => {
       if (blocked) {
         onBlocked?.();
         return;
       }
-      if (inactive || pendingSaves) return;
-      const text = value.trim();
-      const imagePaths = attachments
+      if (inactive || pendingSavesRef.current) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      const text = editor
+        .getEditorState()
+        .read(() => $getRoot().getTextContent())
+        .trim();
+      const imagePaths = attachmentsRef.current
         .map((a) => a.path)
         .filter((p): p is string => p !== null);
       if (!text && imagePaths.length === 0) return;
       // Image paths are sent separately (not folded into the text) so the
-      // terminal can type them as a real path the way a direct paste does —
-      // bundling them into the bracketed paste left the message unsent.
+      // terminal can type them as a real path the way a direct paste does.
       onSend(text, imagePaths);
-      // Snapshot the raw text so ⌘Z can bring it back verbatim.
-      lastSentRef.current = value;
-      setValue("");
+      // Snapshot the full editor state so ⌘Z can bring it back verbatim.
+      lastSentRef.current = JSON.stringify(editor.getEditorState().toJSON());
+      editor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const p = $createParagraphNode();
+        root.append(p);
+        p.selectEnd();
+      });
       clearAttachments();
       window.localStorage.removeItem(draftKey(sessionId));
-    };
+    }, [blocked, inactive, onBlocked, onSend, sessionId, clearAttachments]);
+
+    const sendRef = useRef(send);
+    sendRef.current = send;
 
     // Pasted images: chip appears IMMEDIATELY (object URL of the blob); the
-    // temp-file write happens in the background. Text pastes are untouched.
-    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (inactive) return;
-      const images = Array.from(e.clipboardData?.items ?? []).filter((it) =>
-        it.type.startsWith("image/")
-      );
-      if (images.length === 0) return;
-      e.preventDefault();
-      for (const item of images) {
-        // Must be read synchronously — DataTransferItems die with the event.
-        const file = item.getAsFile();
-        if (!file) continue;
-        const ext = item.type.split("/")[1] || "png";
+    // temp-file write happens in the background.
+    const addImage = useCallback(
+      (file: File, ext: string) => {
         const id = crypto.randomUUID();
         const previewUrl = URL.createObjectURL(file);
         setAttachments((prev) => [...prev, { id, previewUrl, path: null }]);
@@ -189,7 +204,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
             const path = await window.electronAPI.saveTempImage(buf, ext);
             if (path) {
               setAttachments((prev) =>
-                prev.map((a) => (a.id === id ? { ...a, path } : a))
+                prev.map((a) => (a.id === id ? { ...a, path } : a)),
               );
             } else {
               removeAttachment(id);
@@ -198,8 +213,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
             removeAttachment(id);
           }
         })();
-      }
-    };
+      },
+      [removeAttachment],
+    );
+    const addImageRef = useRef(addImage);
+    addImageRef.current = addImage;
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        focus: () => editorRef.current?.focus(),
+        append: (text: string) => {
+          const editor = editorRef.current;
+          editor?.update(() => {
+            const root = $getRoot();
+            const had = root.getTextContent().length > 0;
+            root.selectEnd();
+            const sel = $getSelection();
+            if ($isRangeSelection(sel)) {
+              sel.insertText((had ? "\n\n" : "") + text);
+            }
+          });
+          editor?.focus();
+        },
+      }),
+      [],
+    );
+
+    const placeholder = inactive
+      ? "Click here to connect this chat to Claude…"
+      : "What would you like to make?  @ files · / skills";
 
     return (
       <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
@@ -219,45 +262,56 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
           </button>
         )}
         <div className="flex flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] transition-colors focus-within:border-[var(--border-strong)]">
-          <textarea
-            ref={innerRef}
-            value={value}
-            readOnly={inactive}
-            placeholder={
-              inactive
-                ? "Click here to connect this chat to Claude…"
-                : "What would you like to make?"
-            }
-            onClick={inactive ? onStart : undefined}
-            onChange={(e) => setValue(e.target.value)}
-            onPaste={handlePaste}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-                return;
-              }
-              // ⌘Z / Ctrl+Z in an EMPTY box restores the last sent message.
-              // When the box has text, fall through to the browser's own undo.
-              if (
-                (e.metaKey || e.ctrlKey) &&
-                !e.shiftKey &&
-                e.key.toLowerCase() === "z" &&
-                value === "" &&
-                lastSentRef.current
-              ) {
-                e.preventDefault();
-                setValue(lastSentRef.current);
-                lastSentRef.current = null;
-              }
-            }}
-            style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
-            className={`w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-relaxed text-[var(--text)] outline-none placeholder:text-[var(--text-tertiary)] ${
-              inactive ? "cursor-pointer" : ""
-            }`}
-          />
+          <div
+            className="relative"
+            onMouseDown={inactive ? onStart : undefined}
+          >
+            <LexicalComposer
+              initialConfig={{
+                namespace: "chat-input",
+                nodes: [ReferenceNode],
+                editorState: readDraft(sessionId),
+                editable: !inactive,
+                onError: (e) => console.error("[chat-input] lexical:", e),
+                theme: {},
+              }}
+            >
+              <PlainTextPlugin
+                contentEditable={
+                  <ContentEditable
+                    aria-placeholder={placeholder}
+                    placeholder={
+                      <div className="pointer-events-none absolute left-3 top-2.5 select-none text-[13px] leading-relaxed text-[var(--text-tertiary)]">
+                        {placeholder}
+                      </div>
+                    }
+                    spellCheck={false}
+                    style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
+                    className={`w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-relaxed text-[var(--text)] outline-none ${
+                      inactive ? "cursor-pointer" : ""
+                    }`}
+                  />
+                }
+                placeholder={null}
+                ErrorBoundary={LexicalErrorBoundary}
+              />
+              <HistoryPlugin />
+              <EditorRefPlugin editorRef={editorRef} />
+              <EditablePlugin inactive={!!inactive} />
+              <DraftPlugin sessionId={sessionId} onEmptyChange={setIsEmpty} />
+              <CommandsPlugin sendRef={sendRef} lastSentRef={lastSentRef} />
+              <ImagePastePlugin addImageRef={addImageRef} inactive={!!inactive} />
+              <FocusPlugin
+                autoFocus={!!autoFocus}
+                sessionId={sessionId}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+              />
+              <FileMentionPlugin projectEncoded={projectEncoded} />
+              <SkillMentionPlugin projectEncoded={projectEncoded} />
+            </LexicalComposer>
+          </div>
+
           {/* Bottom row: attachment chips (left) · ⌘L hint + send (right). */}
           <div className="flex items-end justify-between gap-2 px-2 pb-1.5">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -342,8 +396,219 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
         )}
       </div>
     );
-  }
+  },
 );
+
+/* ── Lexical plugins (each small + single-purpose) ─────────────────── */
+
+function EditorRefPlugin({
+  editorRef,
+}: {
+  editorRef: React.MutableRefObject<LexicalEditor | null>;
+}) {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    editorRef.current = editor;
+    return () => {
+      if (editorRef.current === editor) editorRef.current = null;
+    };
+  }, [editor, editorRef]);
+  return null;
+}
+
+function EditablePlugin({ inactive }: { inactive: boolean }) {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    editor.setEditable(!inactive);
+  }, [editor, inactive]);
+  return null;
+}
+
+/** Load the draft on session switch; persist (debounced) on every change. */
+function DraftPlugin({
+  sessionId,
+  onEmptyChange,
+}: {
+  sessionId: string;
+  onEmptyChange: (empty: boolean) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const firstSession = useRef(true);
+
+  // initialConfig.editorState already loaded the first session's draft; only
+  // swap when the session actually changes.
+  useEffect(() => {
+    if (firstSession.current) {
+      firstSession.current = false;
+      return;
+    }
+    const raw = readDraft(sessionId);
+    if (raw) {
+      try {
+        editor.setEditorState(editor.parseEditorState(raw));
+        onEmptyChange(false);
+        return;
+      } catch {
+        // fall through to a clean slate
+      }
+    }
+    editor.update(() => {
+      const root = $getRoot();
+      root.clear();
+      root.append($createParagraphNode());
+    });
+    onEmptyChange(true);
+  }, [editor, sessionId, onEmptyChange]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unregister = editor.registerUpdateListener(({ editorState }) => {
+      const empty = editorState.read(
+        () => $getRoot().getTextContent().trim().length === 0,
+      );
+      onEmptyChange(empty);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (empty) window.localStorage.removeItem(draftKey(sessionId));
+        else
+          window.localStorage.setItem(
+            draftKey(sessionId),
+            JSON.stringify(editorState.toJSON()),
+          );
+      }, 300);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unregister();
+    };
+  }, [editor, sessionId, onEmptyChange]);
+
+  return null;
+}
+
+/** Enter→send, Shift+Enter→newline, and ⌘Z-in-empty-box→restore-last-sent. */
+function CommandsPlugin({
+  sendRef,
+  lastSentRef,
+}: {
+  sendRef: React.MutableRefObject<() => void>;
+  lastSentRef: React.MutableRefObject<string | null>;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const unEnter = editor.registerCommand<KeyboardEvent | null>(
+      KEY_ENTER_COMMAND,
+      (e) => {
+        // A mention menu is open — let the typeahead handle Enter (select).
+        if (isMentionMenuOpen()) return false;
+        if (e?.shiftKey) {
+          e.preventDefault();
+          editor.update(() => {
+            const sel = $getSelection();
+            if ($isRangeSelection(sel)) sel.insertLineBreak();
+          });
+          return true;
+        }
+        e?.preventDefault();
+        sendRef.current();
+        return true;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+
+    const unUndo = editor.registerCommand(
+      UNDO_COMMAND,
+      () => {
+        const snap = lastSentRef.current;
+        if (!snap) return false;
+        const empty = editor
+          .getEditorState()
+          .read(() => $getRoot().getTextContent().trim().length === 0);
+        if (!empty) return false;
+        try {
+          editor.setEditorState(editor.parseEditorState(snap));
+          lastSentRef.current = null;
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+
+    return () => {
+      unEnter();
+      unUndo();
+    };
+  }, [editor, sendRef, lastSentRef]);
+
+  return null;
+}
+
+/** Intercept image pastes; let everything else flow to Lexical as plain text. */
+function ImagePastePlugin({
+  addImageRef,
+  inactive,
+}: {
+  addImageRef: React.MutableRefObject<(file: File, ext: string) => void>;
+  inactive: boolean;
+}) {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    return editor.registerCommand<ClipboardEvent>(
+      PASTE_COMMAND,
+      (event) => {
+        if (inactive) return false;
+        const items = Array.from(event.clipboardData?.items ?? []).filter(
+          (it) => it.type.startsWith("image/"),
+        );
+        if (items.length === 0) return false; // text paste → Lexical handles it
+        event.preventDefault();
+        for (const item of items) {
+          // Must read synchronously — DataTransferItems die with the event.
+          const file = item.getAsFile();
+          if (!file) continue;
+          const ext = item.type.split("/")[1] || "png";
+          addImageRef.current(file, ext);
+        }
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+  }, [editor, inactive, addImageRef]);
+  return null;
+}
+
+function FocusPlugin({
+  autoFocus,
+  sessionId,
+  onFocus,
+  onBlur,
+}: {
+  autoFocus: boolean;
+  sessionId: string;
+  onFocus: () => void;
+  onBlur: () => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    if (autoFocus) editor.focus();
+  }, [editor, autoFocus, sessionId]);
+  useEffect(() => {
+    return editor.registerRootListener((root, prev) => {
+      if (prev) {
+        prev.removeEventListener("focus", onFocus);
+        prev.removeEventListener("blur", onBlur);
+      }
+      if (root) {
+        root.addEventListener("focus", onFocus);
+        root.addEventListener("blur", onBlur);
+      }
+    });
+  }, [editor, onFocus, onBlur]);
+  return null;
+}
 
 function SendIcon() {
   return (

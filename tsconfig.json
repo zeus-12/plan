@@ -14,6 +14,12 @@
   "references": [
     { "path": "shared" },
     { "path": "apps/web" },
-    { "path": "apps/desktop" }
+    { "path": "apps/desktop" },
+    // The desktop app's main/preload process is a separate tsconfig; list it so
+    // the editor owns src/main/** with the right project (resolving @types/node
+    // etc.) instead of an inferred project. This solution file is editor-only —
+    // the per-package `tsc -p` typecheck scripts never load it, so the
+    // non-composite reference is fine here (it would error under `tsc -p`).
+    { "path": "apps/desktop/tsconfig.node.json" }
   ]
 }

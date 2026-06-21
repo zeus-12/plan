@@ -16,6 +16,7 @@ import type {
   CreateWorktreeInput,
   CreatePrInput,
   CreatePrResult,
+  SkillInfo,
 } from "../shared-types";
 
 interface ElectronAPI {
@@ -61,6 +62,7 @@ interface ElectronAPI {
     encoded: string,
     relPath: string
   ) => Promise<string | null>;
+  listSkills: (encoded: string) => Promise<SkillInfo[]>;
   searchProjectFiles: (
     encoded: string,
     query: string,

@@ -16,6 +16,7 @@
     "pack:dmg": "electron-vite build && electron-builder --mac dmg"
   },
   "dependencies": {
+    "@lexical/react": "^0.45.0",
     "@plan/shared": "workspace:*",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-collapsible": "^1.1.12",
@@ -34,7 +35,9 @@
     "cmdk": "^1.1.1",
     "diff": "^8.0.3",
     "fuse.js": "^7.4.2",
+    "lexical": "^0.45.0",
     "lowlight": "^3.3.0",
+    "lucide-react": "^1.21.0",
     "node-pty": "^1.1.0",
     "prettier": "^3.8.3",
     "react-resizable-panels": "^2.1.9",
@@ -47,6 +50,7 @@
     "@electron/rebuild": "^4.0.4",
     "@tailwindcss/postcss": "^4",
     "@types/diff": "^7.0.2",
+    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
