@@ -16,7 +16,7 @@ import { ProjectWorkspace } from "./components/project-workspace";
 import { SwitcherOverlay } from "./components/switcher-overlay";
 import { SessionsDashboard } from "./components/sessions-dashboard";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
-import { requestSessionNav } from "./lib/session-nav-store";
+import { openProjectTab, makeChatTab } from "./lib/tabs-store";
 import { getMruVersion, orderByMru, recordUse, subscribeMru } from "./lib/mru-store";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
@@ -131,11 +131,11 @@ function Shell() {
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const navigateToSession = useCallback(
     (encoded: string, sessionId: string) => {
-      // Persist the target so the workspace selects it on (re)mount when we
-      // switch project; notify the store for the already-open-project case.
-      window.localStorage.setItem(`plan.session.${encoded}`, sessionId);
+      // Open (or focus) the chat as a tab in the target worktree. This persists
+      // to the tabs store, so it works whether that worktree is already mounted
+      // (the store emit re-renders it) or not (it's read on mount).
+      openProjectTab(encoded, makeChatTab(sessionId));
       setSelectedEncoded(encoded);
-      requestSessionNav(encoded, sessionId);
       setDashboardOpen(false);
     },
     []

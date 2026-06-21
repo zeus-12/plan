@@ -38,8 +38,20 @@ import { useConfirm } from "./confirm-dialog";
 import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
 import { useProjectAnnotations } from "../lib/annotation-store";
 import { useProjectTerminals, useTerminalHeight } from "../lib/terminal-store";
+import {
+  useProjectTabs,
+  getProjectTabs,
+  openProjectTab,
+  closeProjectTab,
+  replaceProjectTab,
+  makeChatTab,
+  makeDiffTab,
+  makeFileTab,
+  chatTabId,
+  type Tab,
+} from "../lib/tabs-store";
+import { TabBar } from "./tab-bar";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
-import { useSessionNavTarget } from "../lib/session-nav-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { ThemeMenu } from "./theme-menu";
@@ -169,15 +181,62 @@ export function ProjectWorkspace({
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
-  // VSCode model: `tab` chooses which LIST shows in the right sidebar; the main
-  // content pane is driven by `openKind` instead. Switching tabs never changes
-  // the content — only clicking an item (which sets openKind) does.
+  // VSCode model: `tab` chooses which LIST shows in the right sidebar. The main
+  // content pane is a set of open tabs (chat / diff / file), scoped to this
+  // worktree and persisted — see tabs-store. Everything the content pane needs
+  // (`openKind` + the per-kind selection) is DERIVED from the active tab below,
+  // so the tab list is the single source of truth.
   const [tab, setTab] = useState<WorkTab>("chat");
-  const [openKind, setOpenKind] = useState<WorkTab>("chat");
-  // The file currently of interest — a selected diff or an open project file.
-  // Shared across the Diffs and Files tabs so each highlights it. The path is
-  // project-relative (repo subPath prefixed) to compare across both lists.
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const {
+    tabs,
+    activeId,
+    openTab,
+    closeTab,
+    closeActive,
+    setActive,
+  } = useProjectTabs(project.encoded);
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeId) ?? null,
+    [tabs, activeId],
+  );
+  const openKind: WorkTab | null =
+    activeTab?.kind === "chat"
+      ? "chat"
+      : activeTab?.kind === "diff"
+        ? "diffs"
+        : activeTab?.kind === "file"
+          ? "files"
+          : null;
+  const selectedSessionId =
+    activeTab?.kind === "chat" ? activeTab.sessionId : null;
+  const selectedFile = useMemo(
+    () =>
+      activeTab?.kind === "diff"
+        ? {
+            subPath: activeTab.subPath,
+            path: activeTab.path,
+            staged: activeTab.staged,
+          }
+        : null,
+    [activeTab],
+  );
+  const selectedProjectFile =
+    activeTab?.kind === "file" ? activeTab.path : null;
+  // The file currently of interest — the open diff or file. Shared across the
+  // Diffs and Files sidebar lists so each highlights it. Project-relative
+  // (repo subPath prefixed) to compare across both lists.
+  const activeFilePath =
+    activeTab?.kind === "file"
+      ? activeTab.path
+      : activeTab?.kind === "diff"
+        ? activeTab.subPath
+          ? `${activeTab.subPath}/${activeTab.path}`
+          : activeTab.path
+        : null;
+  const openChatTab = useCallback(
+    (sid: string) => openTab(makeChatTab(sid)),
+    [openTab],
+  );
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   // ── Files state (per-repo) ───────────────────────────────────
@@ -197,15 +256,11 @@ export function ProjectWorkspace({
   // placeholder — that swap unmounts the list and resets its scroll.
   const loadedRef = useRef(false);
   /**
-   * Selected file — identified by repo (subPath), path, and which stage we're
-   * viewing (staged vs unstaged), since a partially-staged file appears in both
-   * sections and each shows a different diff.
+   * The selected diff (`selectedFile`) is derived from the active tab near the
+   * top of the component — a diff is identified by repo (subPath), path, and
+   * which stage we're viewing (staged vs unstaged), since a partially-staged
+   * file appears in both sections and each shows a different diff.
    */
-  const [selectedFile, setSelectedFile] = useState<{
-    subPath: string;
-    path: string;
-    staged: boolean;
-  } | null>(null);
   // Comments persist per-project across first-sidebar switches (the workspace
   // is keyed by `encoded` and remounts on switch). Both the diff annotations
   // (keyed by "subPath::path") and the chat annotations come from this store.
@@ -249,22 +304,31 @@ export function ProjectWorkspace({
       );
       const next = new Map(entries);
       setFilesByRepo(next);
-      setSelectedFile((current) => {
-        // We DON'T auto-pick a first file — content only opens on explicit
-        // click, so switching to the Diffs tab never changes the main pane.
-        if (!current) return null;
+      // Reconcile open diff tabs against fresh git status. We DON'T auto-open
+      // anything — content only opens on explicit click — but an already-open
+      // diff tab must follow its file: close it once the file is no longer
+      // changed (committed/discarded), and flip its staged side when the file
+      // moves across sections (staging the open diff), so it never goes blank.
+      for (const t of getProjectTabs(project.encoded).tabs) {
+        if (t.kind !== "diff") continue;
         const status = next
-          .get(current.subPath)
-          ?.status.find((s) => s.path === current.path);
-        if (!status) return null; // file no longer changed (committed/discarded)
-        // Keep showing the file if our side still has it.
-        if (current.staged ? status.staged : status.unstaged) return current;
-        // Staging/unstaging the open file moves it across sides — follow it so
-        // the content pane keeps showing that file instead of going blank.
-        if (current.staged ? status.unstaged : status.staged)
-          return { ...current, staged: !current.staged };
-        return null;
-      });
+          .get(t.subPath)
+          ?.status.find((s) => s.path === t.path);
+        if (!status) {
+          closeProjectTab(project.encoded, t.id);
+          continue;
+        }
+        if (t.staged ? status.staged : status.unstaged) continue;
+        if (t.staged ? status.unstaged : status.staged) {
+          replaceProjectTab(
+            project.encoded,
+            t.id,
+            makeDiffTab(t.subPath, t.path, !t.staged),
+          );
+        } else {
+          closeProjectTab(project.encoded, t.id);
+        }
+      }
     } finally {
       loadedRef.current = true;
       setFilesLoading(false);
@@ -467,38 +531,39 @@ export function ProjectWorkspace({
   );
 
   useEffect(() => {
-    // Comments are intentionally NOT cleared here — they persist per project
-    // (see useProjectAnnotations) so switching projects doesn't lose them.
-    setSelectedFile(null);
+    // Comments and open tabs are intentionally NOT cleared here — they persist
+    // per worktree (see useProjectAnnotations / useProjectTabs) so switching
+    // projects doesn't lose them.
     refreshDiff();
   }, [refreshDiff]);
 
   // ── Sessions state ───────────────────────────────────────────
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    () =>
-      typeof window === "undefined"
-        ? null
-        : window.localStorage.getItem(`plan.session.${project.encoded}`),
+  // Parsed transcripts for every OPEN chat tab, keyed by session id, so each
+  // chat tab keeps a live, mounted MessageList (its scroll survives switching
+  // tabs). The watcher refreshes whichever open transcripts change. The active
+  // chat tab's transcript is exposed as `session` for the status/notify logic.
+  const [transcripts, setTranscripts] = useState<Map<string, ParsedSession>>(
+    new Map(),
   );
-  const [session, setSession] = useState<ParsedSession | null>(null);
+  const session = useMemo(
+    () => (selectedSessionId ? (transcripts.get(selectedSessionId) ?? null) : null),
+    [transcripts, selectedSessionId],
+  );
   // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
   // itself lives inside ChatInput so keystrokes don't re-render the workspace.
   const chatInputRef = useRef<ChatInputHandle>(null);
 
-  // Jump to a session requested from the sessions dashboard while this project
-  // is already open (cross-project jumps are handled by the localStorage init).
-  useSessionNavTarget(project.encoded, setSelectedSessionId);
-
-  // Persist the selected session per project.
-  useEffect(() => {
-    if (selectedSessionId)
-      window.localStorage.setItem(
-        `plan.session.${project.encoded}`,
-        selectedSessionId,
-      );
-  }, [project.encoded, selectedSessionId]);
+  // Session ids that currently have an open chat tab — drives transcript loads.
+  const chatSessionIds = useMemo(
+    () => tabs.filter((t) => t.kind === "chat").map((t) => t.sessionId),
+    [tabs],
+  );
+  // Ref mirror so the (rarely re-subscribed) watcher can see the current set
+  // without re-subscribing every time a tab opens/closes.
+  const chatSessionIdsRef = useRef(chatSessionIds);
+  chatSessionIdsRef.current = chatSessionIds;
 
   const refreshSessions = useCallback(async () => {
     setSessionsLoading(true);
@@ -530,21 +595,8 @@ export function ProjectWorkspace({
           archived: s.archived,
         }));
       setSessions(enriched);
-      setSelectedSessionId((current) => {
-        // Keep brand-new chats selected even before their JSONL exists.
-        if (
-          current &&
-          (enriched.some((s) => s.sessionId === current) ||
-            NEW_SESSION_IDS.has(current))
-        )
-          return current;
-        // Prefer the most recent non-archived session.
-        return (
-          enriched.find((s) => !s.archived)?.sessionId ??
-          enriched[0]?.sessionId ??
-          null
-        );
-      });
+      // No auto-select: the content pane only shows what you've opened as a
+      // tab. A fresh worktree opens to an empty pane (click a chat to open it).
     } finally {
       setSessionsLoading(false);
     }
@@ -576,25 +628,15 @@ export function ProjectWorkspace({
     // If the open chat is already archived, unarchive it and keep it open.
     if (current.archived) {
       void handleSetSessionArchived(sid, false);
-      setSelectedSessionId(sid);
-      setOpenKind("chat");
+      openChatTab(sid);
       return;
     }
 
-    const active = sessions.filter((s) => !s.archived);
     const title = current.title ?? "Untitled chat";
-    // Land on the chat that takes this one's slot (the next in the list), or the
-    // new last one if this was the tail, or nothing if it was the only chat.
-    const idx = active.findIndex((s) => s.sessionId === sid);
-    const remaining = active.filter((s) => s.sessionId !== sid);
-    const nextId =
-      remaining[idx]?.sessionId ??
-      remaining[remaining.length - 1]?.sessionId ??
-      null;
-
+    // Archiving puts the chat away — close its tab (closeTab lands focus on a
+    // neighbouring tab on its own). Undo reopens it.
     void handleSetSessionArchived(sid, true);
-    setSelectedSessionId(nextId);
-    if (nextId) setOpenKind("chat");
+    closeTab(chatTabId(sid));
 
     pushToast(
       {
@@ -603,13 +645,19 @@ export function ProjectWorkspace({
         onAction: () => {
           void handleSetSessionArchived(sid, false);
           // Undo restores the archived chat to the content pane.
-          setSelectedSessionId(sid);
-          setOpenKind("chat");
+          openChatTab(sid);
         },
       },
       6000,
     );
-  }, [openKind, selectedSessionId, sessions, handleSetSessionArchived]);
+  }, [
+    openKind,
+    selectedSessionId,
+    sessions,
+    handleSetSessionArchived,
+    openChatTab,
+    closeTab,
+  ]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -628,20 +676,24 @@ export function ProjectWorkspace({
     return () => window.removeEventListener("keydown", handler);
   }, [handleToggleArchiveCurrentChat, openKind, selectedSessionId]);
 
-  const refreshSelectedSession = useCallback(async () => {
-    if (!selectedSessionId) {
-      setSession(null);
-      return;
-    }
-    const parsed = await window.electronAPI.readSession(
-      project.encoded,
-      selectedSessionId,
-    );
-    // Identity-preserving merge: unchanged messages keep their old objects so
-    // memoized rows skip re-rendering (otherwise every watcher tick re-renders
-    // the whole transcript's markdown).
-    setSession((prev) => mergeSession(prev, parsed));
-  }, [project.encoded, selectedSessionId]);
+  const refreshTranscript = useCallback(
+    async (sid: string) => {
+      const parsed = await window.electronAPI.readSession(project.encoded, sid);
+      // Identity-preserving merge: unchanged messages keep their old objects so
+      // memoized rows skip re-rendering (otherwise every watcher tick re-renders
+      // the whole transcript's markdown).
+      setTranscripts((prev) => {
+        const merged = mergeSession(prev.get(sid) ?? null, parsed);
+        // null = no transcript yet (e.g. a brand-new chat before its first
+        // exchange) — leave it unset so the pane shows the "new chat" hint.
+        if (!merged) return prev;
+        const next = new Map(prev);
+        next.set(sid, merged);
+        return next;
+      });
+    },
+    [project.encoded],
+  );
 
   useEffect(() => {
     // The workspace remounts per project (keyed by encoded), so initial state
@@ -649,9 +701,22 @@ export function ProjectWorkspace({
     refreshSessions();
   }, [refreshSessions]);
 
+  // Load a transcript for every open chat tab (and drop ones whose tab closed)
+  // so each chat tab's MessageList stays mounted with live content.
   useEffect(() => {
-    refreshSelectedSession();
-  }, [refreshSelectedSession]);
+    for (const sid of chatSessionIds) void refreshTranscript(sid);
+    setTranscripts((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const sid of prev.keys()) {
+        if (!chatSessionIds.includes(sid)) {
+          next.delete(sid);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [chatSessionIds, refreshTranscript]);
 
   // Watcher: re-pull what's relevant. Debounced — a streaming session fires
   // events continuously, and refreshing (git + session list + transcript) on
@@ -659,9 +724,14 @@ export function ProjectWorkspace({
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let wantSelected = false;
+    const changedSids = new Set<string>();
     const off = window.electronAPI.onWatcherEvent((e) => {
       if (e.encoded !== project.encoded) return;
-      if (e.sessionId && e.sessionId === selectedSessionId) wantSelected = true;
+      // Refresh the transcript of any OPEN chat tab whose JSONL changed.
+      if (e.sessionId && chatSessionIdsRef.current.includes(e.sessionId)) {
+        wantSelected = true;
+        changedSids.add(e.sessionId);
+      }
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
@@ -669,7 +739,8 @@ export function ProjectWorkspace({
         refreshSessions();
         if (wantSelected) {
           wantSelected = false;
-          refreshSelectedSession();
+          for (const sid of changedSids) void refreshTranscript(sid);
+          changedSids.clear();
         }
       }, 250);
     });
@@ -677,13 +748,7 @@ export function ProjectWorkspace({
       off();
       if (timer) clearTimeout(timer);
     };
-  }, [
-    project.encoded,
-    selectedSessionId,
-    refreshDiff,
-    refreshSessions,
-    refreshSelectedSession,
-  ]);
+  }, [project.encoded, refreshDiff, refreshSessions, refreshTranscript]);
 
   // ── Project files (Files tab + ⌘P) ───────────────────────────
   // Indexed lazily the first time the Files tab (or ⌘P) is used, then cached
@@ -693,9 +758,7 @@ export function ProjectWorkspace({
   // Ref (not state) so a failed attempt doesn't permanently lock indexing and
   // the callback identity stays stable (no effect loop).
   const filesRequestedRef = useRef(false);
-  const [selectedProjectFile, setSelectedProjectFile] = useState<string | null>(
-    null,
-  );
+  // `selectedProjectFile` is derived from the active tab near the top.
   // A pending "jump to this match" for the file viewer (from the Search tab).
   // `nonce` re-triggers the scroll even when the same line is clicked twice.
   const [fileReveal, setFileReveal] = useState<{
@@ -734,20 +797,17 @@ export function ProjectWorkspace({
     if (tab === "files") void indexProjectFiles();
   }, [tab, indexProjectFiles]);
 
-  const handleSelectProjectFile = useCallback((path: string) => {
-    setSelectedProjectFile(path);
-    setOpenKind("files");
-    setActiveFilePath(path);
-  }, []);
+  const handleSelectProjectFile = useCallback(
+    (path: string) => openTab(makeFileTab(path)),
+    [openTab],
+  );
 
-  // A Search-tab hit: open the file in the content pane and scroll/highlight the
-  // match. Keeps the sidebar on the Search tab (VS Code behaviour) — only the
-  // content pane changes.
+  // A Search-tab hit: open the file in a tab and scroll/highlight the match.
+  // Keeps the sidebar on the Search tab (VS Code behaviour) — only the content
+  // pane changes.
   const handleOpenSearchResult = useCallback(
     (path: string, line: number, colStart: number, colEnd: number) => {
-      setSelectedProjectFile(path);
-      setOpenKind("files");
-      setActiveFilePath(path);
+      openTab(makeFileTab(path));
       setFileReveal((prev) => ({
         path,
         line,
@@ -756,14 +816,14 @@ export function ProjectWorkspace({
         nonce: (prev?.nonce ?? 0) + 1,
       }));
     },
-    [],
+    [openTab],
   );
 
-  // Clicking a chat in the list opens its conversation in the content pane.
-  const handleSelectSession = useCallback((id: string) => {
-    setSelectedSessionId(id);
-    setOpenKind("chat");
-  }, []);
+  // Clicking a chat in the list opens its conversation in a tab.
+  const handleSelectSession = useCallback(
+    (id: string) => openChatTab(id),
+    [openChatTab],
+  );
 
   // ── Command palette: ⌘P (files) / ⌘K (switch project or chat) ──────────
   const [paletteMode, setPaletteMode] = useState<"files" | "switch" | null>(
@@ -857,22 +917,18 @@ export function ProjectWorkspace({
       badge: "chat",
       run: () => {
         if (c.projectEncoded === project.encoded) {
-          setSelectedSessionId(c.sessionId);
+          openChatTab(c.sessionId);
           setTab("chat");
-          setOpenKind("chat");
         } else {
-          // Cross-project: stash the target chat so the new workspace selects
-          // it on mount, then switch projects.
-          window.localStorage.setItem(
-            `plan.session.${c.projectEncoded}`,
-            c.sessionId,
-          );
+          // Cross-worktree: open the chat tab in the target's persisted tab set
+          // (read on mount), then switch worktrees.
+          openProjectTab(c.projectEncoded, makeChatTab(c.sessionId));
           onSelectProject(c.projectEncoded);
         }
       },
     }));
     return [...projEntries, ...chatEntries];
-  }, [projects, allChats, project.encoded, onSelectProject]);
+  }, [projects, allChats, project.encoded, onSelectProject, openChatTab]);
 
   const switchFuse = useMemo(
     () =>
@@ -926,15 +982,11 @@ export function ProjectWorkspace({
   }, [indexProjectFiles, loadAllChats]);
 
   // ── Project-file (read-only viewer) annotation handlers ──────
-  const projectFileAnnotations = useMemo<Annotation[]>(
-    () =>
-      selectedProjectFile
-        ? (annotationsByProjectFile[selectedProjectFile] ?? [])
-        : [],
-    [annotationsByProjectFile, selectedProjectFile],
-  );
+  // Parameterized by `path` because several file tabs can be open at once; each
+  // FileViewer binds these to its own path.
   const addProjectFileAnnotation = useCallback(
     (
+      path: string,
       selectedText: string,
       startOffset: number,
       endOffset: number,
@@ -942,11 +994,10 @@ export function ProjectWorkspace({
       endLine: number,
       comment: string,
     ) => {
-      if (!selectedProjectFile) return;
       setAnnotationsByProjectFile((prev) => ({
         ...prev,
-        [selectedProjectFile]: [
-          ...(prev[selectedProjectFile] ?? []),
+        [path]: [
+          ...(prev[path] ?? []),
           {
             id: crypto.randomUUID(),
             selectedText,
@@ -954,36 +1005,32 @@ export function ProjectWorkspace({
             endOffset,
             comment,
             side: "right",
-            context: { filePath: selectedProjectFile, startLine, endLine },
+            context: { filePath: path, startLine, endLine },
           },
         ],
       }));
     },
-    [selectedProjectFile, setAnnotationsByProjectFile],
+    [setAnnotationsByProjectFile],
   );
   const updateProjectFileAnnotation = useCallback(
-    (id: string, comment: string) => {
-      if (!selectedProjectFile) return;
+    (path: string, id: string, comment: string) => {
       setAnnotationsByProjectFile((prev) => ({
         ...prev,
-        [selectedProjectFile]: (prev[selectedProjectFile] ?? []).map((a) =>
+        [path]: (prev[path] ?? []).map((a) =>
           a.id === id ? { ...a, comment } : a,
         ),
       }));
     },
-    [selectedProjectFile, setAnnotationsByProjectFile],
+    [setAnnotationsByProjectFile],
   );
   const removeProjectFileAnnotation = useCallback(
-    (id: string) => {
-      if (!selectedProjectFile) return;
+    (path: string, id: string) => {
       setAnnotationsByProjectFile((prev) => ({
         ...prev,
-        [selectedProjectFile]: (prev[selectedProjectFile] ?? []).filter(
-          (a) => a.id !== id,
-        ),
+        [path]: (prev[path] ?? []).filter((a) => a.id !== id),
       }));
     },
-    [selectedProjectFile, setAnnotationsByProjectFile],
+    [setAnnotationsByProjectFile],
   );
 
   // ── Aggregated annotations ───────────────────────────────────
@@ -1077,42 +1124,59 @@ export function ProjectWorkspace({
    * so they still open in the viewer — FileDiffViewer fetches the actual
    * content itself via getFileContents.
    */
-  const selectedFileDiff = useMemo<FileDiff | null>(() => {
-    if (!selectedFile) return null;
-    const repo = filesByRepo.get(selectedFile.subPath);
-    if (!repo) return null;
-    const fromDiff = repo.files.find((f) => f.path === selectedFile.path);
-    if (fromDiff) return fromDiff;
+  // Resolve a diff for any (subPath, path) — used per diff tab in the render.
+  const getFileDiff = useCallback(
+    (subPath: string, path: string): FileDiff | null => {
+      const repo = filesByRepo.get(subPath);
+      if (!repo) return null;
+      const fromDiff = repo.files.find((f) => f.path === path);
+      if (fromDiff) return fromDiff;
 
-    // Not in the diff — synthesize from the status entry.
-    const status = repo.status.find((s) => s.path === selectedFile.path);
-    if (!status) return null;
-    const isDeleted = status.code.includes("D");
-    const isUntracked = status.code === "??";
-    const statusKind: FileDiff["status"] = isDeleted
-      ? "deleted"
-      : isUntracked
-        ? "added"
-        : "modified";
-    return {
-      path: selectedFile.path,
-      oldPath: isUntracked ? null : selectedFile.path,
-      newPath: isDeleted ? null : selectedFile.path,
-      status: statusKind,
-      body: "",
-      additions: 0,
-      deletions: 0,
-      binary: false,
-    };
-  }, [selectedFile, filesByRepo]);
+      // Not in the diff — synthesize from the status entry.
+      const status = repo.status.find((s) => s.path === path);
+      if (!status) return null;
+      const isDeleted = status.code.includes("D");
+      const isUntracked = status.code === "??";
+      const statusKind: FileDiff["status"] = isDeleted
+        ? "deleted"
+        : isUntracked
+          ? "added"
+          : "modified";
+      return {
+        path,
+        oldPath: isUntracked ? null : path,
+        newPath: isDeleted ? null : path,
+        status: statusKind,
+        body: "",
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      };
+    },
+    [filesByRepo],
+  );
 
   const handleSelectFile = useCallback(
     (subPath: string, path: string, staged: boolean) => {
-      setSelectedFile({ subPath, path, staged });
-      setOpenKind("diffs");
-      setActiveFilePath(subPath ? `${subPath}/${path}` : path);
+      openTab(makeDiffTab(subPath, path, staged));
     },
-    [],
+    [openTab],
+  );
+
+  // A tab's display title — derived from live data so a renamed chat / moved
+  // file stays current (titles are never stored on the tab itself).
+  const titleForTab = useCallback(
+    (t: Tab): string => {
+      if (t.kind === "chat") {
+        return (
+          sessions.find((s) => s.sessionId === t.sessionId)?.title ??
+          transcripts.get(t.sessionId)?.meta.title ??
+          (NEW_SESSION_IDS.has(t.sessionId) ? "New chat" : "Chat")
+        );
+      }
+      return t.path.split("/").pop() || t.path;
+    },
+    [sessions, transcripts],
   );
 
   // ── Terminals (⌘J) ───────────────────────────────────────────
@@ -1237,13 +1301,12 @@ export function ProjectWorkspace({
   // terminal regardless of where the user currently is.
   const revealChatTerminal = useCallback(
     (sid: string) => {
-      setSelectedSessionId(sid);
+      openChatTab(sid);
       setTab("chat");
-      setOpenKind("chat");
       setActiveShellId(null);
       setTerminalOpen(true);
     },
-    [setActiveShellId, setTerminalOpen],
+    [openChatTab, setActiveShellId, setTerminalOpen],
   );
 
   const armSendWatchdog = useCallback(
@@ -1300,12 +1363,11 @@ export function ProjectWorkspace({
   const handleNewChat = useCallback(() => {
     const sid = crypto.randomUUID();
     NEW_SESSION_IDS.add(sid);
-    setSelectedSessionId(sid);
+    openChatTab(sid);
     ensureOpened(`${chatPrefix}${sid}`);
     setTab("chat");
-    setOpenKind("chat");
     requestAnimationFrame(() => chatInputRef.current?.focus());
-  }, [chatPrefix, ensureOpened]);
+  }, [chatPrefix, ensureOpened, openChatTab]);
 
   // ── Activity signals (all transcript/OS facts — nothing invented) ──
 
@@ -1558,7 +1620,13 @@ export function ProjectWorkspace({
     (text: string) => {
       if (!text.trim()) return;
       setTab("chat");
-      setOpenKind("chat");
+      // Land on a chat tab so the composer exists to receive the text: keep the
+      // active chat, else focus the most recent open chat tab, else start one.
+      if (activeTab?.kind !== "chat") {
+        const lastChat = [...tabs].reverse().find((t) => t.kind === "chat");
+        if (lastChat) setActive(lastChat.id);
+        else handleNewChat();
+      }
       setAnnotationsByFile({});
       setChatAnnotations([]);
       setAnnotationsByProjectFile({});
@@ -1567,7 +1635,15 @@ export function ProjectWorkspace({
         chatInputRef.current?.focus();
       });
     },
-    [setAnnotationsByFile, setChatAnnotations, setAnnotationsByProjectFile],
+    [
+      activeTab,
+      tabs,
+      setActive,
+      handleNewChat,
+      setAnnotationsByFile,
+      setChatAnnotations,
+      setAnnotationsByProjectFile,
+    ],
   );
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
@@ -1751,6 +1827,25 @@ export function ProjectWorkspace({
     return () => window.removeEventListener("keydown", handler);
   }, [handleNewChat]);
 
+  // ⌘W closes the active content tab (no-op with nothing open — we don't fall
+  // through to closing the window, which would be a jarring surprise).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "w"
+      ) {
+        if (!activeId) return;
+        e.preventDefault();
+        closeActive();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeId, closeActive]);
+
   const startTerminalResize = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
@@ -1844,9 +1939,8 @@ export function ProjectWorkspace({
     items: sessionsByMru,
     currentIndex: sessionIndex,
     onCommit: (s) => {
-      setSelectedSessionId(s.sessionId);
+      openChatTab(s.sessionId);
       setTab("chat");
-      setOpenKind("chat");
     },
   });
 
@@ -1902,200 +1996,250 @@ export function ProjectWorkspace({
           />
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col">
-              {/* Tab panes stay MOUNTED and hide via CSS — re-mounting re-parses
-                the whole transcript / re-highlights diffs on every switch. */}
-              <div
-                className={cn(
-                  "flex min-h-0 flex-1 flex-col",
-                  openKind !== "diffs" && "hidden",
+              <TabBar
+                tabs={tabs}
+                activeId={activeId}
+                titleFor={titleForTab}
+                onActivate={setActive}
+                onClose={closeTab}
+              />
+              {/* Each open tab keeps its own MOUNTED view, hidden via CSS when
+                  inactive — so scroll position, expanded diffs and parsed
+                  transcripts survive switching tabs. */}
+              <div className="relative min-h-0 flex-1">
+                {tabs.length === 0 && (
+                  <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                    No tabs open — pick a chat, diff, or file from the sidebar.
+                  </div>
                 )}
-              >
-                <div className="min-h-0 flex-1">
-                  {selectedFile && selectedFileDiff ? (
-                    <FileDiffViewer
-                      key={`${selectedFile.subPath}::${selectedFile.path}::${selectedFile.staged ? "s" : "u"}`}
-                      encoded={project.encoded}
-                      subPath={selectedFile.subPath}
-                      file={selectedFileDiff}
-                      mode={selectedFile.staged ? "staged" : "unstaged"}
-                      active={openKind === "diffs"}
-                      annotationsByFile={annotationsByFile}
-                      setAnnotationsByFile={setAnnotationsByFile}
-                      onStage={() =>
-                        handleStageFile(selectedFile.path, selectedFile.subPath)
-                      }
-                      onUnstage={() =>
-                        handleUnstageFile(
-                          selectedFile.path,
-                          selectedFile.subPath,
-                        )
-                      }
-                      onDiscard={() =>
-                        handleDiscardFile(
-                          selectedFile.path,
-                          selectedFile.subPath,
-                        )
-                      }
-                      onChanged={refreshDiff}
-                      confirm={confirm}
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                      {repos.length > 0 ? "Select a file" : "Not a git repo"}
-                    </div>
-                  )}
-                </div>
-              </div>
 
-              <div
-                className={cn(
-                  "flex min-h-0 flex-1 flex-col",
-                  openKind !== "chat" && "hidden",
-                )}
-              >
-                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                  <span className="truncate text-[var(--text-secondary)]">
-                    {sessions.find((s) => s.sessionId === selectedSessionId)
-                      ?.title ??
-                      session?.meta.title ??
-                      selectedSessionId ??
-                      "No session"}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-3">
-                    {DEBUG_COPY_TERMINAL &&
-                      selectedSessionId &&
-                      chatTerminalReady && (
-                        <button
-                          onClick={copyTerminalDump}
-                          title="Copy the terminal's rendered text — ⌘⇧D (debug)"
-                          className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-                        >
-                          Copy terminal
-                        </button>
+                {/* Diff tabs */}
+                {tabs.map((t) => {
+                  if (t.kind !== "diff") return null;
+                  const active = t.id === activeId;
+                  const diff = getFileDiff(t.subPath, t.path);
+                  return (
+                    <div
+                      key={t.id}
+                      className={cn(
+                        "absolute inset-0 min-h-0",
+                        !active && "hidden",
                       )}
-                    <span>
-                      {session
-                        ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
-                        : ""}
+                    >
+                      {diff ? (
+                        <FileDiffViewer
+                          encoded={project.encoded}
+                          subPath={t.subPath}
+                          file={diff}
+                          mode={t.staged ? "staged" : "unstaged"}
+                          active={active}
+                          annotationsByFile={annotationsByFile}
+                          setAnnotationsByFile={setAnnotationsByFile}
+                          onStage={() => handleStageFile(t.path, t.subPath)}
+                          onUnstage={() => handleUnstageFile(t.path, t.subPath)}
+                          onDiscard={() => handleDiscardFile(t.path, t.subPath)}
+                          onChanged={refreshDiff}
+                          confirm={confirm}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                          No longer changed.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* File tabs */}
+                {tabs.map((t) => {
+                  if (t.kind !== "file") return null;
+                  const active = t.id === activeId;
+                  return (
+                    <div
+                      key={t.id}
+                      className={cn(
+                        "absolute inset-0 min-h-0",
+                        !active && "hidden",
+                      )}
+                    >
+                      <FileViewer
+                        encoded={project.encoded}
+                        path={t.path}
+                        annotations={annotationsByProjectFile[t.path] ?? []}
+                        onAddAnnotation={(
+                          selectedText,
+                          startOffset,
+                          endOffset,
+                          startLine,
+                          endLine,
+                          comment,
+                        ) =>
+                          addProjectFileAnnotation(
+                            t.path,
+                            selectedText,
+                            startOffset,
+                            endOffset,
+                            startLine,
+                            endLine,
+                            comment,
+                          )
+                        }
+                        onUpdateAnnotation={(id, comment) =>
+                          updateProjectFileAnnotation(t.path, id, comment)
+                        }
+                        onRemoveAnnotation={(id) =>
+                          removeProjectFileAnnotation(t.path, id)
+                        }
+                        active={active}
+                        revealTarget={
+                          fileReveal && fileReveal.path === t.path
+                            ? fileReveal
+                            : null
+                        }
+                      />
+                    </div>
+                  );
+                })}
+
+                {/* Chat tabs: each keeps a mounted MessageList (transcript scroll
+                    survives switching); the header + composer bind to the ACTIVE
+                    chat, since you only type into one chat at a time. */}
+                <div
+                  className={cn(
+                    "absolute inset-0 flex min-h-0 flex-col",
+                    activeTab?.kind !== "chat" && "hidden",
+                  )}
+                >
+                  <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                    <span className="truncate text-[var(--text-secondary)]">
+                      {sessions.find((s) => s.sessionId === selectedSessionId)
+                        ?.title ??
+                        session?.meta.title ??
+                        selectedSessionId ??
+                        "No session"}
                     </span>
-                    {selectedSessionId &&
-                      (chatTerminalReady ? (
-                        <span
-                          className={cn(
-                            "flex items-center gap-1.5 rounded-md border px-2 py-1",
-                            awaitingSelection
-                              ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
-                              : "border-[var(--border)]",
-                          )}
-                          title={
-                            awaitingSelection
-                              ? "Claude may be waiting on a menu selection (no text box) — ⌘J to respond"
-                              : !agentLive
-                                ? "Terminal is open, but no Claude process detected — ⌘J to view"
-                                : chatWorking
-                                  ? "Claude is working in this chat — ⌘J to view"
-                                  : "Claude is connected and idle in this chat — ⌘J to view"
-                          }
-                        >
+                    <div className="flex shrink-0 items-center gap-3">
+                      {DEBUG_COPY_TERMINAL &&
+                        selectedSessionId &&
+                        chatTerminalReady && (
+                          <button
+                            onClick={copyTerminalDump}
+                            title="Copy the terminal's rendered text — ⌘⇧D (debug)"
+                            className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+                          >
+                            Copy terminal
+                          </button>
+                        )}
+                      <span>
+                        {session
+                          ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
+                          : ""}
+                      </span>
+                      {selectedSessionId &&
+                        (chatTerminalReady ? (
                           <span
                             className={cn(
-                              "h-1.5 w-1.5 rounded-full",
+                              "flex items-center gap-1.5 rounded-md border px-2 py-1",
                               awaitingSelection
-                                ? "animate-pulse bg-amber-500"
-                                : !agentLive
-                                  ? "bg-[var(--text-tertiary)]"
-                                  : chatWorking
-                                    ? "animate-pulse bg-emerald-500"
-                                    : "bg-emerald-500",
+                                ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
+                                : "border-[var(--border)]",
                             )}
-                          />
-                          <span>
-                            {awaitingSelection
-                              ? "Needs input"
-                              : !agentLive
-                                ? "Terminal"
-                                : chatWorking
-                                  ? "Working"
-                                  : "Claude"}
+                            title={
+                              awaitingSelection
+                                ? "Claude may be waiting on a menu selection (no text box) — ⌘J to respond"
+                                : !agentLive
+                                  ? "Terminal is open, but no Claude process detected — ⌘J to view"
+                                  : chatWorking
+                                    ? "Claude is working in this chat — ⌘J to view"
+                                    : "Claude is connected and idle in this chat — ⌘J to view"
+                            }
+                          >
+                            <span
+                              className={cn(
+                                "h-1.5 w-1.5 rounded-full",
+                                awaitingSelection
+                                  ? "animate-pulse bg-amber-500"
+                                  : !agentLive
+                                    ? "bg-[var(--text-tertiary)]"
+                                    : chatWorking
+                                      ? "animate-pulse bg-emerald-500"
+                                      : "bg-emerald-500",
+                              )}
+                            />
+                            <span>
+                              {awaitingSelection
+                                ? "Needs input"
+                                : !agentLive
+                                  ? "Terminal"
+                                  : chatWorking
+                                    ? "Working"
+                                    : "Claude"}
+                            </span>
                           </span>
-                        </span>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={connectAndShowChat}
-                          title="Connect this chat to Claude (runs claude --resume) and open the terminal"
-                          className="flex items-center gap-1.5"
-                        >
-                          <span>Connect</span>
-                          <Kbd keys={["⌘", "J"]} />
-                        </Button>
-                      ))}
-                  </div>
-                </div>
-                <div className="min-h-0 flex-1">
-                  {session ? (
-                    <MessageList
-                      messages={session.messages}
-                      encoded={project.encoded}
-                      annotations={chatAnnotations}
-                      onAddAnnotation={addChatAnnotation}
-                      onUpdateAnnotation={updateChatAnnotation}
-                      onRemoveAnnotation={removeChatAnnotation}
-                      visible={openKind === "chat"}
-                      terminalReady={chatTerminalReady}
-                      working={chatWorking}
-                      onSendKeys={handleSendKeysToChat}
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                      {selectedSessionId
-                        ? "New chat — send a message to start it."
-                        : "Select a session"}
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={connectAndShowChat}
+                            title="Connect this chat to Claude (runs claude --resume) and open the terminal"
+                            className="flex items-center gap-1.5"
+                          >
+                            <span>Connect</span>
+                            <Kbd keys={["⌘", "J"]} />
+                          </Button>
+                        ))}
                     </div>
+                  </div>
+                  <div className="relative min-h-0 flex-1">
+                    {tabs.map((t) => {
+                      if (t.kind !== "chat") return null;
+                      const active = t.id === activeId;
+                      const ts = transcripts.get(t.sessionId);
+                      return (
+                        <div
+                          key={t.id}
+                          className={cn(
+                            "absolute inset-0",
+                            !active && "hidden",
+                          )}
+                        >
+                          {ts ? (
+                            <MessageList
+                              messages={ts.messages}
+                              encoded={project.encoded}
+                              annotations={chatAnnotations}
+                              onAddAnnotation={addChatAnnotation}
+                              onUpdateAnnotation={updateChatAnnotation}
+                              onRemoveAnnotation={removeChatAnnotation}
+                              visible={active && activeTab?.kind === "chat"}
+                              terminalReady={chatTerminalReady}
+                              working={chatWorking}
+                              onSendKeys={handleSendKeysToChat}
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                              {NEW_SESSION_IDS.has(t.sessionId)
+                                ? "New chat — send a message to start it."
+                                : "Loading…"}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {activeTab?.kind === "chat" && selectedSessionId && (
+                    <ChatInput
+                      ref={chatInputRef}
+                      sessionId={selectedSessionId}
+                      inactive={!chatTerminalReady}
+                      onStart={handleResumeChat}
+                      onSend={handleSendChat}
+                      blocked={awaitingSelection}
+                      onBlocked={() => revealChatTerminal(selectedSessionId)}
+                      autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
+                    />
                   )}
                 </div>
-                {selectedSessionId && (
-                  <ChatInput
-                    ref={chatInputRef}
-                    sessionId={selectedSessionId}
-                    inactive={!chatTerminalReady}
-                    onStart={handleResumeChat}
-                    onSend={handleSendChat}
-                    blocked={awaitingSelection}
-                    onBlocked={() => revealChatTerminal(selectedSessionId)}
-                    autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
-                  />
-                )}
-              </div>
-
-              <div
-                className={cn(
-                  "flex min-h-0 flex-1 flex-col",
-                  openKind !== "files" && "hidden",
-                )}
-              >
-                {selectedProjectFile ? (
-                  <FileViewer
-                    key={selectedProjectFile}
-                    encoded={project.encoded}
-                    path={selectedProjectFile}
-                    annotations={projectFileAnnotations}
-                    onAddAnnotation={addProjectFileAnnotation}
-                    onUpdateAnnotation={updateProjectFileAnnotation}
-                    onRemoveAnnotation={removeProjectFileAnnotation}
-                    active={openKind === "files"}
-                    revealTarget={
-                      fileReveal && fileReveal.path === selectedProjectFile
-                        ? fileReveal
-                        : null
-                    }
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                    Select a file
-                  </div>
-                )}
               </div>
             </div>
 

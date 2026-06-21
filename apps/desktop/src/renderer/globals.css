@@ -46,3 +46,25 @@ textarea {
 .file-editor-input::-moz-selection {
   background: color-mix(in srgb, var(--selection-bg) 70%, transparent);
 }
+
+/*
+ * Horizontal scroll strips (e.g. the content-pane tab bar): the scrollbar
+ * stays out of the way until you hover the strip, then a thin thumb fades in.
+ */
+.scrollbar-hover-x {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scrollbar-hover-x::-webkit-scrollbar {
+  height: 6px;
+}
+.scrollbar-hover-x::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+}
+.scrollbar-hover-x:hover {
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scrollbar-hover-x:hover::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+}
