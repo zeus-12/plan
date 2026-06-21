@@ -1,46 +1,22 @@
-import { useSyncExternalStore } from "react";
+import { toast } from "sonner";
 
 export interface Toast {
-  id: number;
   text: string;
   actionLabel?: string;
   onAction?: () => void;
 }
 
-let toasts: Toast[] = [];
-let nextId = 1;
-const listeners = new Set<() => void>();
-
-function emit() {
-  listeners.forEach((l) => l());
-}
-
-export function pushToast(t: Omit<Toast, "id">, ttlMs = 12_000) {
-  const toast: Toast = { ...t, id: nextId++ };
-  toasts = [...toasts, toast];
-  emit();
-  setTimeout(() => dismissToast(toast.id), ttlMs);
-}
-
-export function dismissToast(id: number) {
-  const next = toasts.filter((t) => t.id !== id);
-  if (next.length !== toasts.length) {
-    toasts = next;
-    emit();
-  }
-}
-
-export function useToasts(): Toast[] {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-    () => toasts,
-    () => toasts
-  );
+/**
+ * In-app toast. Rendered by Sonner's <Toaster> (stacking, exit animations and
+ * timing are all handled there); this is just the thin call-site adapter.
+ */
+export function pushToast(t: Toast, ttlMs = 12_000) {
+  toast(t.text, {
+    duration: ttlMs,
+    action: t.actionLabel
+      ? { label: t.actionLabel, onClick: () => t.onAction?.() }
+      : undefined,
+  });
 }
 
 /**

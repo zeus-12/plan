@@ -51,7 +51,7 @@ import {
   recordUse,
   subscribeMru,
 } from "../lib/mru-store";
-import { Toasts } from "./toasts";
+import { Toaster } from "@plan/shared/components/ui/sonner";
 import { mergeSession } from "../lib/merge-session";
 import { osNotify, pushToast } from "../lib/toast-store";
 
@@ -1806,7 +1806,7 @@ export function ProjectWorkspace({
       shortcut={{ key: "e", meta: true }}
     >
       {confirmDialog}
-      <Toasts />
+      <Toaster position="bottom-right" closeButton />
       <CommandPalette
         open={paletteMode === "files"}
         placeholder="Search files in this project…"
