@@ -1,5 +1,10 @@
 appId: com.plan.desktop
 productName: Plan
+# Include the arch so the Intel and Apple Silicon DMGs don't overwrite each other.
+artifactName: ${productName}-${version}-${arch}.dmg
+# Native modules are rebuilt explicitly (CI step / `pnpm rebuild`), so don't let
+# electron-builder rebuild them itself — that path is flaky under pnpm.
+npmRebuild: false
 directories:
   buildResources: build
   output: dist
