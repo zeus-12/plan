@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { $createTextNode, $getRoot, type TextNode } from "lexical";
+import { $createTextNode, type TextNode } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   LexicalTypeaheadMenuPlugin,
@@ -234,10 +234,9 @@ export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }
 }
 
 /**
- * `/` → fuzzy skill/command picker. Restricted to a leading slash on an
- * otherwise-empty composer, because Claude Code only treats `/name` as an
- * invocation at the very start of the message — anywhere else it's inert text,
- * and a chip there would lie about what it does.
+ * `/` → fuzzy skill/command picker. Fires after start-or-whitespace, like `@`.
+ * Claude Code's TUI executes a `/name` command even mid-message (only its own
+ * autocomplete popup is start-only), so a chip anywhere is a real invocation.
  */
 export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string }) {
   const [editor] = useLexicalComposerContext();
@@ -258,13 +257,14 @@ export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string 
     };
   }, [query, projectEncoded]);
 
-  // Runs inside editorState.read() (verified against the plugin source), so
-  // $getRoot() is safe here.
   const triggerFn = useCallback((text: string): MenuTextMatch | null => {
-    const m = /^\/([\w:-]*)$/.exec(text);
+    const m = /(^|\s)\/([\w:-]*)$/.exec(text);
     if (!m) return null;
-    if ($getRoot().getTextContent() !== m[0]) return null;
-    return { leadOffset: 0, matchingString: m[1], replaceableString: m[0] };
+    return {
+      leadOffset: m.index + m[1].length,
+      matchingString: m[2],
+      replaceableString: `/${m[2]}`,
+    };
   }, []);
 
   const onSelectOption = useCallback(
