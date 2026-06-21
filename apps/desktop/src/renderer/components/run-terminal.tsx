@@ -18,9 +18,12 @@ interface Props {
 }
 
 function PlayIcon() {
+  // Triangle fills most of the viewBox so it reads as a solid, balanced glyph
+  // next to the label rather than a thin sliver. Shifted very slightly left of
+  // center, which is where a right-pointing triangle looks optically centered.
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M8 5v14l11-7z" />
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 4l14 8-14 8z" />
     </svg>
   );
 }
@@ -176,7 +179,7 @@ export function RunTerminal({
         disabled={!hasCommand}
         title={hasCommand ? `Run: ${initialCommand}` : "Set a run command first"}
         className={cn(
-          "flex items-center gap-2 rounded-md px-4 py-2 font-[family-name:var(--font-mono)] text-[13px] font-medium transition-colors",
+          "flex items-center gap-1.5 rounded-md px-3.5 py-1.5 font-[family-name:var(--font-mono)] text-[13px] font-medium transition-colors",
           hasCommand
             ? "bg-[var(--text)] text-[var(--bg)] hover:opacity-90"
             : "cursor-not-allowed border border-[var(--border)] text-[var(--text-tertiary)]"
