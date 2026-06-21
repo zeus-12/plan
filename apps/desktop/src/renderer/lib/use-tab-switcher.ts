@@ -63,6 +63,17 @@ let lastCycleAt = 0;
  * Shift) and applies to every tap, so a held gesture can mix directions.
  */
 function cycle(code: string, dir: 1 | -1) {
+  console.log("[switcher-dbg] cycle", {
+    code,
+    dir,
+    hasActive: !!active,
+    channels: channels.map((c) => ({
+      id: c.id,
+      code: c.triggerCode,
+      enabled: c.isEnabled(),
+      n: c.getItems().length,
+    })),
+  });
   const now = performance.now();
   if (now - lastCycleAt < 40) return;
   lastCycleAt = now;
@@ -96,11 +107,25 @@ function onKeyDown(e: KeyboardEvent) {
   // Ctrl+Shift+Tab and the Ctrl+` (Backquote) project combos; the main-process
   // IPC forward (see install) covers the swallowed Ctrl+Tab. cycle() dedupes if
   // both deliver the same keystroke.
+  // Open/step whichever registered channel claims this key code (Tab, Backquote,
+  // Backslash, …). Channel-driven so adding a switcher needs no edit here.
+  // Ctrl drives every channel; Cmd also drives non-Tab channels (e.g. the
+  // Backquote project switcher) since that's the key macOS users reach for —
+  // Tab stays Ctrl-only because Cmd+Tab is the macOS app switcher.
+  if (e.code === "Backquote" || e.code === "Tab") {
+    console.log("[switcher-dbg] keydown", {
+      code: e.code,
+      ctrl: e.ctrlKey,
+      meta: e.metaKey,
+      alt: e.altKey,
+      target: (e.target as HTMLElement | null)?.tagName,
+    });
+  }
+  const mod = e.ctrlKey || (e.metaKey && e.code !== "Tab");
   if (
-    (e.code === "Tab" || e.code === "Backquote") &&
-    e.ctrlKey &&
-    !e.metaKey &&
-    !e.altKey
+    mod &&
+    !e.altKey &&
+    channels.some((c) => c.triggerCode === e.code)
   ) {
     e.preventDefault();
     cycle(e.code, e.shiftKey ? -1 : 1);
@@ -131,9 +156,14 @@ function install() {
   });
   // Cycling is driven from main via IPC — Chromium swallows Ctrl+Tab before the
   // page sees it, so main intercepts (before-input-event) and forwards here.
-  window.electronAPI?.onSwitcherCycle?.((e) =>
-    cycle(e.key, e.shift ? -1 : 1),
-  );
+  console.log("[switcher-dbg] install", {
+    electronAPI: !!window.electronAPI,
+    onSwitcherCycle: !!window.electronAPI?.onSwitcherCycle,
+  });
+  window.electronAPI?.onSwitcherCycle?.((e) => {
+    console.log("[switcher-dbg] ipc", e);
+    cycle(e.key, e.shift ? -1 : 1);
+  });
 }
 
 function subscribe(l: () => void) {

@@ -76,6 +76,19 @@ import {
   unstageAll,
   unstageFile,
 } from "./git";
+import {
+  createWorktree,
+  removeWorktree,
+  listWorktrees,
+  createWorktreePr,
+  type CreateWorktreeInput,
+} from "./worktrees";
+import type { CreatePrInput } from "../shared-types";
+import {
+  getProjectDefaults,
+  setProjectDefaults,
+  type ProjectDefaults,
+} from "./worktrees-store";
 
 const isMac = process.platform === "darwin";
 
@@ -224,13 +237,23 @@ function createMainWindow(): BrowserWindow {
   // it fires before the page, so we cancel the keystroke and forward a cycle to
   // the renderer, which owns the modal and commits when the user releases Ctrl.
   win.webContents.on("before-input-event", (event, input) => {
-    if (
-      input.type === "keyDown" &&
-      (input.code === "Tab" || input.code === "Backquote") &&
-      input.control &&
-      !input.meta &&
-      !input.alt
-    ) {
+    if (input.type === "keyDown" && (input.control || input.meta)) {
+      console.log("[switcher-dbg] before-input", input.code, {
+        control: input.control,
+        meta: input.meta,
+        alt: input.alt,
+      });
+    }
+    if (input.type !== "keyDown" || input.alt) return;
+    // Ctrl+Tab cycles sessions — Tab stays Ctrl-only because Cmd+Tab is the
+    // macOS app switcher and must not be hijacked. Projects cycle on Ctrl+` OR
+    // Cmd+`: we accept Cmd because that's the key macOS users reach for, and
+    // overriding the OS "cycle windows" shortcut is harmless in a single-window
+    // app.
+    const isTab = input.code === "Tab" && input.control && !input.meta;
+    const isBackquote =
+      input.code === "Backquote" && (input.control || input.meta);
+    if (isTab || isBackquote) {
       event.preventDefault();
       sendSwitcherCycle(input.code, input.shift);
     }
@@ -505,6 +528,32 @@ function registerIpc() {
 
   ipcMain.handle("repos:list", async (_e, encoded: string) =>
     discoverRepos(encoded),
+  );
+
+  // Worktrees
+  ipcMain.handle("worktrees:list", async (_e, encoded: string) =>
+    listWorktrees(encoded),
+  );
+  ipcMain.handle(
+    "worktrees:create",
+    async (_e, encoded: string, input: CreateWorktreeInput) =>
+      createWorktree(encoded, input),
+  );
+  ipcMain.handle("worktrees:remove", async (_e, id: string) =>
+    removeWorktree(id),
+  );
+  ipcMain.handle(
+    "worktrees:createPr",
+    async (_e, id: string, input: CreatePrInput) =>
+      createWorktreePr(id, input),
+  );
+  ipcMain.handle("worktrees:getDefaults", async (_e, encoded: string) =>
+    getProjectDefaults(encoded),
+  );
+  ipcMain.handle(
+    "worktrees:setDefaults",
+    async (_e, encoded: string, defaults: ProjectDefaults) =>
+      setProjectDefaults(encoded, defaults),
   );
 
   // Git

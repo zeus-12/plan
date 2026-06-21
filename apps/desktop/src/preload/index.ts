@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { SessionEvent } from "../main/session-watcher";
 import type { SearchOptions } from "../shared-types";
+import type { ProjectDefaults, CreatePrInput } from "../shared-types";
 
 const electronAPI = {
   listProjects: () => ipcRenderer.invoke("projects:list"),
@@ -24,6 +25,20 @@ const electronAPI = {
       subPath
     ),
   listRepos: (encoded: string) => ipcRenderer.invoke("repos:list", encoded),
+
+  listWorktrees: (encoded: string) =>
+    ipcRenderer.invoke("worktrees:list", encoded),
+  createWorktree: (
+    encoded: string,
+    input: { name: string; branch: string; base: string }
+  ) => ipcRenderer.invoke("worktrees:create", encoded, input),
+  removeWorktree: (id: string) => ipcRenderer.invoke("worktrees:remove", id),
+  createWorktreePr: (id: string, input: CreatePrInput) =>
+    ipcRenderer.invoke("worktrees:createPr", id, input),
+  getWorktreeDefaults: (encoded: string) =>
+    ipcRenderer.invoke("worktrees:getDefaults", encoded),
+  setWorktreeDefaults: (encoded: string, defaults: ProjectDefaults) =>
+    ipcRenderer.invoke("worktrees:setDefaults", encoded, defaults),
   getFileView: (
     encoded: string,
     path: string,
