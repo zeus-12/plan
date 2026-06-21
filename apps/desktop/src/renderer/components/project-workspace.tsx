@@ -51,7 +51,6 @@ import {
   recordUse,
   subscribeMru,
 } from "../lib/mru-store";
-import { Toaster } from "@plan/shared/components/ui/sonner";
 import { mergeSession } from "../lib/merge-session";
 import { osNotify, pushToast } from "../lib/toast-store";
 
@@ -1332,41 +1331,11 @@ export function ProjectWorkspace({
     }
   }, [selectedSessionId]);
 
-  // Reply notification: a NEW assistant message in the transcript (fact).
-  // OS notification + sound when the app is unfocused; toast when you're on
-  // another tab. Nothing while you're already watching the chat.
-  const lastAssistantUuidRef = useRef<string | null>(null);
-  const notifyBaselineRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!session) return;
-    const lastAssistant = [...session.messages]
-      .reverse()
-      .find(
-        (m) => m.role === "assistant" && m.parts.some((p) => p.kind === "text"),
-      );
-    const uuid = lastAssistant?.uuid ?? null;
-    if (notifyBaselineRef.current !== selectedSessionId) {
-      // First load of this session — baseline, don't notify about history.
-      notifyBaselineRef.current = selectedSessionId;
-      lastAssistantUuidRef.current = uuid;
-      return;
-    }
-    if (uuid && uuid !== lastAssistantUuidRef.current) {
-      lastAssistantUuidRef.current = uuid;
-      const title =
-        sessions.find((s) => s.sessionId === selectedSessionId)?.title ??
-        "Claude";
-      if (!document.hasFocus()) {
-        osNotify("Claude replied", title);
-      } else if (tab !== "chat") {
-        pushToast({
-          text: `Claude replied in “${title}”`,
-          actionLabel: "View",
-          onAction: () => setTab("chat"),
-        });
-      }
-    }
-  }, [session, selectedSessionId, sessions, tab]);
+  // "Claude is done" notifications are owned globally by the session-done
+  // notifier (started at the app root), which watches every live session's
+  // status — not just the one on screen. We deliberately don't fire a per-reply
+  // notification here: a single turn appends several assistant messages (text,
+  // then a tool call, then more text), which would notify several times.
 
   // Stall signal: the transcript's LAST message has a tool call with no result
   // and nothing new has been written for 20s — that's the shape of a pending
@@ -1857,7 +1826,6 @@ export function ProjectWorkspace({
       shortcut={{ key: "e", meta: true }}
     >
       {confirmDialog}
-      <Toaster position="bottom-right" closeButton />
       <CommandPalette
         open={paletteMode === "files"}
         placeholder="Search files in this project…"

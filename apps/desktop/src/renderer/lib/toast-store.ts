@@ -20,12 +20,17 @@ export function pushToast(t: Toast, ttlMs = 12_000) {
 }
 
 /**
- * OS-level notification (with the system sound) — used when the window isn't
- * focused so activity isn't missed. In-app states use toasts instead.
+ * OS-level notification. By default it carries the system sound; pass
+ * `{ silent: true }` when a caller plays its own sound (e.g. the session-done
+ * notifier's configurable chime) so the two don't double up.
  */
-export function osNotify(title: string, body: string) {
+export function osNotify(
+  title: string,
+  body: string,
+  opts: { silent?: boolean } = {},
+) {
   try {
-    new Notification(title, { body, silent: false });
+    new Notification(title, { body, silent: opts.silent ?? false });
   } catch {
     // Notifications unavailable — the in-app toast still covers it.
   }
