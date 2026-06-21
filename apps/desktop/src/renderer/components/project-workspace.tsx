@@ -67,6 +67,11 @@ const NEW_SESSION_IDS = new Set<string>();
 // Off now that "Needs input" is reliable — flip back on to re-tune the regexes.
 const DEBUG_INPUT_DETECT = false;
 
+// Shows a "Copy terminal" button (and ⌘⇧D) in the chat header that copies the
+// headless emulator's full rendered text — handy for sharing real Claude Code
+// frames to tune the detection heuristics. Flip off to hide it.
+const DEBUG_COPY_TERMINAL = false;
+
 import type { SessionListItem } from "./session-list";
 import type { FileEntry, RepoFileGroup } from "./file-list";
 
@@ -559,14 +564,25 @@ export function ProjectWorkspace({
     [refreshSessions, project.encoded],
   );
 
-  // ⌘⇧A: archive the open chat immediately (no dialog), with a short-lived
-  // "Unarchive" toast so an accidental archive can be reversed.
-  const handleArchiveCurrentChat = useCallback(() => {
+  // ⌘⇧A: toggle archive on the open chat immediately (no dialog). Archiving
+  // shows a short-lived "Unarchive" toast so an accidental archive can be
+  // reversed; pressing it again on an already-archived chat unarchives it.
+  const handleToggleArchiveCurrentChat = useCallback(() => {
     if (openKind !== "chat" || !selectedSessionId) return;
     const sid = selectedSessionId;
+    const current = sessions.find((s) => s.sessionId === sid);
+    if (!current) return;
+
+    // If the open chat is already archived, unarchive it and keep it open.
+    if (current.archived) {
+      void handleSetSessionArchived(sid, false);
+      setSelectedSessionId(sid);
+      setOpenKind("chat");
+      return;
+    }
+
     const active = sessions.filter((s) => !s.archived);
-    const title =
-      active.find((s) => s.sessionId === sid)?.title ?? "Untitled chat";
+    const title = current.title ?? "Untitled chat";
     // Land on the chat that takes this one's slot (the next in the list), or the
     // new last one if this was the tail, or nothing if it was the only chat.
     const idx = active.findIndex((s) => s.sessionId === sid);
@@ -605,12 +621,12 @@ export function ProjectWorkspace({
       ) {
         if (openKind !== "chat" || !selectedSessionId) return;
         e.preventDefault();
-        handleArchiveCurrentChat();
+        handleToggleArchiveCurrentChat();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleArchiveCurrentChat, openKind, selectedSessionId]);
+  }, [handleToggleArchiveCurrentChat, openKind, selectedSessionId]);
 
   const refreshSelectedSession = useCallback(async () => {
     if (!selectedSessionId) {
@@ -1154,6 +1170,7 @@ export function ProjectWorkspace({
   const pendingPasteRef = useRef<{
     id: string;
     text: string;
+    imagePaths: string[];
     submit: boolean;
   } | null>(null);
 
@@ -1161,11 +1178,17 @@ export function ProjectWorkspace({
     setOpenedIds((ids) => (ids.includes(tid) ? ids : [...ids, tid]));
   }, []);
 
-  const writeToTerminal = (tid: string, text: string, submit: boolean) => {
+  const writeToTerminal = (
+    tid: string,
+    text: string,
+    imagePaths: string[],
+    submit: boolean,
+  ) => {
     if (submit) {
-      // Main pastes the body, then sends Enter as a SEPARATE keystroke a beat
-      // later — Claude's TUI ignores an Enter bundled with the paste itself.
-      window.electronAPI.terminalSubmit(tid, text);
+      // Main pastes the body, types any image paths (so Claude attaches them),
+      // then sends Enter as a SEPARATE keystroke a beat later — Claude's TUI
+      // ignores an Enter bundled with the paste itself.
+      window.electronAPI.terminalSubmit(tid, text, imagePaths);
     } else {
       const body = text.replace(/\r\n/g, "\n").replace(/\r/g, "");
       window.electronAPI.terminalInput(tid, `\x1b[200~${body}\x1b[201~`);
@@ -1176,18 +1199,19 @@ export function ProjectWorkspace({
     readyIds.current.add(tid);
     const p = pendingPasteRef.current;
     if (p && p.id === tid) {
-      writeToTerminal(p.id, p.text, p.submit);
+      writeToTerminal(p.id, p.text, p.imagePaths, p.submit);
       pendingPasteRef.current = null;
     }
   }, []);
 
-  // Send text to terminal `tid` (paste + optional Enter), queuing until ready.
+  // Send text (+ optional image paths) to terminal `tid`, queuing until ready.
   const sendToTerminal = useCallback(
-    (tid: string, text: string, submit: boolean) => {
-      if (!text.trim()) return;
+    (tid: string, text: string, imagePaths: string[], submit: boolean) => {
+      if (!text.trim() && imagePaths.length === 0) return;
       ensureOpened(tid);
-      if (readyIds.current.has(tid)) writeToTerminal(tid, text, submit);
-      else pendingPasteRef.current = { id: tid, text, submit };
+      if (readyIds.current.has(tid))
+        writeToTerminal(tid, text, imagePaths, submit);
+      else pendingPasteRef.current = { id: tid, text, imagePaths, submit };
     },
     [ensureOpened],
   );
@@ -1246,11 +1270,11 @@ export function ProjectWorkspace({
   // No optimistic echo / "working" indicator — the transcript (JSONL watcher)
   // is the source of truth; the message appears when it actually lands.
   const handleSendChat = useCallback(
-    (text: string) => {
+    (text: string, imagePaths: string[] = []) => {
       if (!selectedSessionId) return;
       const tid = `${chatPrefix}${selectedSessionId}`;
       if (!openedIds.includes(tid)) return;
-      sendToTerminal(tid, text, true);
+      sendToTerminal(tid, text, imagePaths, true);
       // The transcript will confirm delivery; if it doesn't within 12s, the
       // watchdog says so (toast + notification) instead of leaving you lost.
       armSendWatchdog(selectedSessionId);
@@ -1407,7 +1431,7 @@ export function ProjectWorkspace({
   // the pty stream, not a guess. The spinner redraws while it works, so output
   // flowing = working; output stopped = idle (done or blocked on approval).
   const chatWorking = useTerminalWorking(
-    selectedSessionId ? `${chatPrefix}${selectedSessionId}` : null
+    selectedSessionId ? `${chatPrefix}${selectedSessionId}` : null,
   );
 
   // ── EXPERIMENTAL: input-box vs. selection-menu detection ─────────────
@@ -1444,7 +1468,7 @@ export function ProjectWorkspace({
                 res.lines.slice(-3).join(" ⏎ ") || "(empty)"
               }`,
             },
-            6_000
+            6_000,
           );
         }
       } catch {
@@ -1483,6 +1507,37 @@ export function ProjectWorkspace({
     }
   }, [awaitingSelection, selectedSessionId, revealChatTerminal]);
 
+  // Debug: copy the chat terminal's full rendered text to the clipboard so it
+  // can be shared to tune the detection heuristics (button + ⌘⇧D).
+  const copyTerminalDump = useCallback(async () => {
+    if (!selectedSessionId) return;
+    try {
+      const text = await window.electronAPI.terminalDump(
+        `${chatPrefix}${selectedSessionId}`,
+      );
+      await navigator.clipboard.writeText(text);
+      pushToast({ text: `Copied terminal (${text.length} chars)` }, 3_000);
+    } catch {
+      pushToast({ text: "Couldn't copy the terminal" }, 3_000);
+    }
+  }, [selectedSessionId, chatPrefix]);
+
+  useEffect(() => {
+    if (!DEBUG_COPY_TERMINAL) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "d"
+      ) {
+        e.preventDefault();
+        void copyTerminalDump();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [copyTerminalDump]);
+
   // Conversation turns (user messages that aren't tool results) — far more
   // meaningful than raw transcript entry count, and free to compute.
   const turnCount = useMemo(
@@ -1512,11 +1567,7 @@ export function ProjectWorkspace({
         chatInputRef.current?.focus();
       });
     },
-    [
-      setAnnotationsByFile,
-      setChatAnnotations,
-      setAnnotationsByProjectFile,
-    ],
+    [setAnnotationsByFile, setChatAnnotations, setAnnotationsByProjectFile],
   );
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
@@ -1911,6 +1962,17 @@ export function ProjectWorkspace({
                       "No session"}
                   </span>
                   <div className="flex shrink-0 items-center gap-3">
+                    {DEBUG_COPY_TERMINAL &&
+                      selectedSessionId &&
+                      chatTerminalReady && (
+                        <button
+                          onClick={copyTerminalDump}
+                          title="Copy the terminal's rendered text — ⌘⇧D (debug)"
+                          className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+                        >
+                          Copy terminal
+                        </button>
+                      )}
                     <span>
                       {session
                         ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
@@ -1923,7 +1985,7 @@ export function ProjectWorkspace({
                             "flex items-center gap-1.5 rounded-md border px-2 py-1",
                             awaitingSelection
                               ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
-                              : "border-[var(--border)]"
+                              : "border-[var(--border)]",
                           )}
                           title={
                             awaitingSelection
@@ -1944,7 +2006,7 @@ export function ProjectWorkspace({
                                   ? "bg-[var(--text-tertiary)]"
                                   : chatWorking
                                     ? "animate-pulse bg-emerald-500"
-                                    : "bg-emerald-500"
+                                    : "bg-emerald-500",
                             )}
                           />
                           <span>
