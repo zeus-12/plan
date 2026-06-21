@@ -22,8 +22,12 @@ interface Props {
   trafficLightInset?: boolean;
 }
 
+// Flat, full-width rows with a left-border accent — the same shape the project
+// and session sidebars use, so all three columns read consistently.
 const rowCls =
-  "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors";
+  "group flex w-full items-center gap-2 border-l-2 px-3 py-2 text-left transition-colors";
+const activeCls = "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]";
+const idleCls = "border-l-transparent hover:bg-[var(--bg-surface-hover)]";
 
 /**
  * Left sidebar: the live working-copy row + this project's worktrees. The
@@ -43,97 +47,117 @@ export function WorktreeRail({
   onOpenSettings,
   trafficLightInset = false,
 }: Props) {
+  const liveActive = activeWorktreeId === null;
   return (
-    <div className="flex h-full flex-col gap-1 overflow-y-auto p-2 font-[family-name:var(--font-mono)] text-[13px]">
+    <div className="flex h-full flex-col font-[family-name:var(--font-mono)] text-[13px]">
       {/* Clear the macOS traffic lights when this rail is flush-left; the strip
           stays draggable so the window can be moved from it. */}
       {trafficLightInset && (
         <div className="h-7 shrink-0 [-webkit-app-region:drag]" />
       )}
-      <div className="flex items-center justify-between px-1 pb-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+      {/* Header — mirrors the other sidebars' uppercase mono section labels. */}
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
           Worktrees
         </span>
         <div className="flex items-center gap-0.5">
           <button
             onClick={onOpenSettings}
             title="Project defaults"
-            className="flex h-7 w-7 items-center justify-center rounded text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            className="flex h-6 w-6 items-center justify-center rounded text-[14px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
           >
             ⚙
           </button>
           <button
             onClick={onNew}
             title="New worktree"
-            className="flex h-7 w-7 items-center justify-center rounded text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            className="flex h-6 w-6 items-center justify-center rounded text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
           >
             ＋
           </button>
         </div>
       </div>
 
-      {/* Live working copy — the real checkout, whatever branch it's on. */}
-      <button
-        onClick={onSelectLive}
-        className={cn(
-          rowCls,
-          activeWorktreeId === null
-            ? "bg-[var(--bg-surface-hover)] text-[var(--text)]"
-            : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
-        )}
-      >
-        <span className="text-[var(--diff-add-bar)]">●</span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[var(--text)]">{projectName}</span>
-          <span className="truncate text-[11px] text-[var(--text-tertiary)]">
-            {liveBranch ? `${liveBranch} · working copy` : "working copy"}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
+        {/* Live working copy — the real checkout you opened, whatever branch
+            it's on. The small green pip marks it as the live tree, as opposed
+            to the worktree clones listed below. */}
+        <button
+          onClick={onSelectLive}
+          className={cn(rowCls, liveActive ? activeCls : idleCls)}
+        >
+          <span className="flex h-2 w-2 shrink-0 items-center justify-center">
+            <span
+              className="h-1.5 w-1.5 rounded-full bg-[var(--diff-add-bar)]"
+              title="Live working copy"
+            />
           </span>
-        </span>
-      </button>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span
+              className={cn(
+                "truncate",
+                liveActive
+                  ? "text-[var(--text)]"
+                  : "text-[var(--text-secondary)]",
+              )}
+            >
+              {projectName}
+            </span>
+            <span className="truncate text-[11px] text-[var(--text-tertiary)]">
+              {liveBranch ? `${liveBranch} · working copy` : "working copy"}
+            </span>
+          </span>
+        </button>
 
-      {worktrees.map((w) => {
-        const active = w.id === activeWorktreeId;
-        const branch = w.repos[0]?.branch ?? "";
-        return (
-          <div
-            key={w.id}
-            className={cn(
-              rowCls,
-              active
-                ? "bg-[var(--bg-surface-hover)] text-[var(--text)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
-            )}
-          >
-            <button
-              onClick={() => onSelectWorktree(w.id)}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        {worktrees.map((w) => {
+          const active = w.id === activeWorktreeId;
+          const branch = w.repos[0]?.branch ?? "";
+          return (
+            <div
+              key={w.id}
+              className={cn(rowCls, active ? activeCls : idleCls)}
             >
-              <span className="text-[var(--text-tertiary)]">▸</span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-[var(--text)]">{w.name}</span>
-                <span className="truncate text-[11px] text-[var(--text-tertiary)]">
-                  {branch}
-                  {w.repos.length > 1 ? ` · ${w.repos.length} repos` : ""}
+              <button
+                onClick={() => onSelectWorktree(w.id)}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                {/* Empty slot keeps worktree labels aligned with the live row. */}
+                <span className="h-2 w-2 shrink-0" />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span
+                    className={cn(
+                      "truncate",
+                      active
+                        ? "text-[var(--text)]"
+                        : "text-[var(--text-secondary)]",
+                    )}
+                  >
+                    {w.name}
+                  </span>
+                  <span className="truncate text-[11px] text-[var(--text-tertiary)]">
+                    {branch}
+                    {w.repos.length > 1 ? ` · ${w.repos.length} repos` : ""}
+                  </span>
                 </span>
-              </span>
-            </button>
-            <button
-              onClick={() => onCreatePr(w.id)}
-              title="Create pull request"
-              className="hidden h-6 shrink-0 items-center justify-center rounded px-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)] group-hover:flex"
-            >
-              PR
-            </button>
-            <button
-              onClick={() => onRemove(w.id)}
-              title="Remove worktree"
-              className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-[13px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--removed-text)] group-hover:flex"
-            >
-              ✕
-            </button>
-          </div>
-        );
-      })}
+              </button>
+              <button
+                onClick={() => onCreatePr(w.id)}
+                title="Create pull request"
+                className="hidden h-6 shrink-0 items-center justify-center rounded px-1.5 text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)] group-hover:flex"
+              >
+                PR
+              </button>
+              <button
+                onClick={() => onRemove(w.id)}
+                title="Remove worktree"
+                className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-[13px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--removed-text)] group-hover:flex"
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
