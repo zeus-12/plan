@@ -98,6 +98,16 @@ export interface ProjectEntry {
   archived: boolean;
 }
 
+/** A skill/command invocable as `/name` in the Claude Code TUI. */
+export interface SkillInfo {
+  /** Invocation name without the leading slash, e.g. "code-review". */
+  name: string;
+  /** Frontmatter description (may be empty). */
+  description: string;
+  /** Where it was discovered — drives the menu badge. */
+  source: "project" | "personal" | "plugin";
+}
+
 export interface SessionListEntry {
   sessionId: string;
   filePath: string;

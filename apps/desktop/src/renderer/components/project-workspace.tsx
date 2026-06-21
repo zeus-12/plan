@@ -2261,6 +2261,7 @@ export function ProjectWorkspace({
                     <ChatInput
                       ref={chatInputRef}
                       sessionId={selectedSessionId}
+                      projectEncoded={project.encoded}
                       inactive={!chatTerminalReady}
                       onStart={handleResumeChat}
                       onSend={handleSendChat}

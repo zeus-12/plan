@@ -52,6 +52,7 @@ const electronAPI = {
     ipcRenderer.invoke("files:read", encoded, relPath),
   projectFilePath: (encoded: string, relPath: string) =>
     ipcRenderer.invoke("files:path", encoded, relPath),
+  listSkills: (encoded: string) => ipcRenderer.invoke("skills:list", encoded),
   searchProjectFiles: (encoded: string, query: string, opts: SearchOptions) =>
     ipcRenderer.invoke("files:search", encoded, query, opts),
 

@@ -44,6 +44,7 @@ import {
   resolveProjectFilePath,
   searchProjectFiles,
 } from "./project-files";
+import { listSkills } from "./skills";
 import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
 import {
@@ -528,6 +529,9 @@ function registerIpc() {
   );
   ipcMain.handle("files:path", async (_e, encoded: string, relPath: string) =>
     resolveProjectFilePath(encoded, relPath),
+  );
+  ipcMain.handle("skills:list", async (_e, encoded: string) =>
+    listSkills(encoded),
   );
   ipcMain.handle(
     "files:search",
