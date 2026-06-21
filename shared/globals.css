@@ -133,29 +133,17 @@ body {
 
 ::selection {
   background: var(--selection-bg);
+  /* Force a high-contrast text color: syntax-highlighted tokens keep their own
+     (often dark) color otherwise and vanish under the selection background. */
+  color: var(--text);
 }
 
 /*
- * Chat annotation highlights, drawn with the CSS Custom Highlight API so they
- * sit over rendered markdown without splitting its DOM. (Custom highlights
- * support only a few paint properties — background, underline, color.)
+ * Chat annotation / find highlights use the CSS Custom Highlight API, whose
+ * `::highlight()` pseudo-element only the desktop renderer registers. Its rules
+ * are injected at runtime there (see message-list.tsx) rather than living here,
+ * because Turbopack's CSS parser (web build) rejects `::highlight()`.
  */
-::highlight(chat-annotation) {
-  background-color: var(--highlight-bg);
-  text-decoration: underline;
-  text-decoration-color: var(--text-tertiary);
-  text-decoration-thickness: 1.5px;
-}
-::highlight(chat-annotation-pending) {
-  background-color: var(--selection-bg);
-}
-/* In-view find (⌘F) matches over rendered markdown / transcript text. */
-::highlight(chat-find) {
-  background-color: var(--find-match-bg, rgba(234, 179, 8, 0.32));
-}
-::highlight(chat-find-current) {
-  background-color: var(--find-current-bg, rgba(249, 115, 22, 0.6));
-}
 
 * {
   scrollbar-width: thin;
