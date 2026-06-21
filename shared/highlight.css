@@ -1,4 +1,13 @@
 /*
+ * Code-block language label. Rendered as generated content from a `data-lang`
+ * attribute (not a DOM text node) so it never shifts the character offsets the
+ * chat/plan surfaces compute over the block's `textContent`.
+ */
+.code-lang-label::before {
+  content: attr(data-lang);
+}
+
+/*
  * Shiki tokens: each span carries its own `--shiki-light` / `--shiki-dark`
  * CSS variables as inline style. We pick which one applies based on the
  * theme class on the root element.

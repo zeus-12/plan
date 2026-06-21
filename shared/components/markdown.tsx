@@ -1,23 +1,47 @@
-import { memo, useRef, useState } from "react";
+import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { highlightToHtml, useShikiReady } from "../lib/highlight";
 import { cn } from "../lib/utils";
-import type { ComponentPropsWithoutRef, ElementType } from "react";
+import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
+
+/** Pull the raw code text out of react-markdown's <code> child node. */
+function codeText(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(codeText).join("");
+  return "";
+}
 
 /**
- * A fenced code block with a copy button. The button is icon-only (no text
- * node) on purpose: this markdown renders inside chat/plan surfaces that compute
- * annotation + find offsets over `textContent`, so any stray characters here
- * would shift those offsets. Top padding reserves room so the button never
- * overlaps the code.
+ * A fenced code block: a header strip showing the language (left) and a
+ * hover-revealed copy button (right), over syntax-highlighted code.
+ *
+ * Two deliberate constraints keep this safe inside chat/plan surfaces, which
+ * compute annotation + find offsets over the block's `textContent`:
+ *  - The language label is a CSS `::before` pseudo-element (see `data-lang`),
+ *    not a real text node, so it never shifts those offsets.
+ *  - The copy button is icon-only (no text node) for the same reason.
+ * Syntax highlighting only wraps existing characters in <span>s, so the code's
+ * `textContent` is byte-identical to the plain text — offsets are unaffected.
  */
-function CodeBlock({
-  className,
-  children,
-  ...rest
-}: ComponentPropsWithoutRef<"pre">) {
+function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  const shikiReady = useShikiReady();
+
+  // react-markdown nests the fenced text in a <code class="language-xxx">.
+  const codeEl = isValidElement(children) ? children : null;
+  const codeProps = (codeEl?.props ?? {}) as { className?: string; children?: ReactNode };
+  const lang =
+    /language-(\S+)/.exec(codeProps.className ?? "")?.[1]?.toLowerCase() ?? "";
+  const code = codeText(codeProps.children);
+
+  const html = useMemo(
+    () => highlightToHtml(code, lang),
+    // Re-render once shiki finishes loading so existing code gains color.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [code, lang, shikiReady]
+  );
 
   const copy = () => {
     const text = ref.current?.textContent ?? "";
@@ -28,25 +52,28 @@ function CodeBlock({
   };
 
   return (
-    <div className="group relative my-2">
-      <button
-        type="button"
-        onClick={copy}
-        aria-label={copied ? "Copied" : "Copy code"}
-        title={copied ? "Copied" : "Copy"}
-        className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] opacity-60 transition-all hover:text-[var(--text)] hover:opacity-100 group-hover:opacity-100"
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </button>
+    <div className="group my-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-surface)] py-1 pl-3 pr-1.5">
+        <span
+          aria-hidden
+          data-lang={lang || "text"}
+          className="code-lang-label select-none font-[family-name:var(--font-mono)] text-[11px] tracking-wide text-[var(--text-tertiary)]"
+        />
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={copied ? "Copied" : "Copy code"}
+          title={copied ? "Copied" : "Copy"}
+          className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+      </div>
       <pre
         ref={ref}
-        className={cn(
-          "overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-9 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed",
-          className
-        )}
-        {...rest}
+        className="overflow-x-auto px-3 py-2.5 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed"
       >
-        {children}
+        <code dangerouslySetInnerHTML={{ __html: html }} />
       </pre>
     </div>
   );
