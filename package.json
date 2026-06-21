@@ -8,7 +8,8 @@
     "build:web": "pnpm --filter @plan/web build",
     "build:desktop": "pnpm --filter @plan/desktop build",
     "typecheck": "pnpm --filter @plan/web run typecheck && pnpm --filter @plan/desktop run typecheck",
-    "lint": "pnpm --filter @plan/web lint"
+    "lint": "pnpm --filter @plan/web lint",
+    "release": "bash scripts/release.sh"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["node-pty"]

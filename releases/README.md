@@ -5,17 +5,16 @@ Releases are built automatically by GitHub Actions (`.github/workflows/release.y
 ## Cut a release
 
 ```sh
-cd apps/desktop
-npm version patch --no-git-tag-version   # or minor / major
-cd ../..
-git commit -am "release v0.1.1"
-git tag v0.1.1
-git push && git push origin v0.1.1
+pnpm release 0.1.1
 ```
 
-Pushing the `v*` tag triggers the workflow: it builds the Intel + Apple Silicon
-DMGs on macOS runners and publishes a GitHub Release with them attached, under
-**Releases** on GitHub. No binaries are committed to the repo.
+That's it — the script bumps `package.json`, commits, tags `v0.1.1`, and pushes
+the branch + tag. Pushing the `v*` tag triggers the workflow: it builds the Intel
++ Apple Silicon DMGs on macOS runners and publishes a GitHub Release with them
+attached, under **Releases** on GitHub. No binaries are committed to the repo.
+
+The git tag is the source of truth for the version — the CI build derives
+everything from it.
 
 ## Build locally (optional)
 
