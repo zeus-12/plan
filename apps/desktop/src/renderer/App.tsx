@@ -21,6 +21,7 @@ import { CreatePrModal } from "./components/create-pr-modal";
 import { ProjectDefaultsModal } from "./components/project-defaults-modal";
 import { useConfirm } from "./components/confirm-dialog";
 import { useWorktrees } from "./lib/use-worktrees";
+import { usePersistentNumber } from "./lib/use-persistent-number";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
 import { openProjectTab, makeChatTab } from "./lib/tabs-store";
 import {
@@ -214,6 +215,35 @@ function Shell() {
       String(worktreeRailOpen),
     );
   }, [worktreeRailOpen]);
+
+  // Drag-to-resize, mirroring the projects sidebar's handle. Width persists so a
+  // user's drag sticks across reloads; `resizing` drops the width transition so
+  // the column tracks the cursor instead of lagging behind it.
+  const [worktreeRailWidth, setWorktreeRailWidth] = usePersistentNumber(
+    "plan.worktreeRail.width",
+    224,
+  );
+  const [worktreeRailResizing, setWorktreeRailResizing] = useState(false);
+  const startWorktreeRailResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      setWorktreeRailResizing(true);
+      const startX = e.clientX;
+      const startW = worktreeRailWidth;
+      const onMove = (ev: PointerEvent) => {
+        const next = Math.min(Math.max(startW + (ev.clientX - startX), 200), 420);
+        setWorktreeRailWidth(next);
+      };
+      const onUp = () => {
+        setWorktreeRailResizing(false);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [worktreeRailWidth, setWorktreeRailWidth],
+  );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (
@@ -328,14 +358,19 @@ function Shell() {
         <div
           data-state={worktreeRailOpen ? "expanded" : "collapsed"}
           className={
-            "relative flex h-full shrink-0 flex-col overflow-hidden bg-[var(--bg-surface)] transition-[width] duration-200 ease-out" +
+            "relative flex h-full shrink-0 flex-col overflow-hidden bg-[var(--bg-surface)] ease-out" +
+            // No width transition while dragging — it would lag the handle.
+            (worktreeRailResizing ? "" : " transition-[width] duration-200") +
             (worktreeRailOpen ? " border-r border-[var(--border)]" : "")
           }
-          style={{ width: worktreeRailOpen ? 224 : 0 }}
+          style={{ width: worktreeRailOpen ? worktreeRailWidth : 0 }}
         >
           {/* Inner sits at the rail's natural width; the outer column clips it
               as the width animates, so it slides like the other sidebars. */}
-          <div className="flex h-full w-56 flex-col">
+          <div
+            className="flex h-full flex-col"
+            style={{ width: worktreeRailWidth }}
+          >
             <WorktreeRail
               trafficLightInset={!projectsSidebar.open}
               projectName={projectShortName(selected)}
@@ -352,6 +387,16 @@ function Shell() {
               onOpenSettings={() => setShowDefaults(true)}
             />
           </div>
+          {worktreeRailOpen && (
+            <div
+              onPointerDown={startWorktreeRailResize}
+              title="Drag to resize"
+              className={
+                "absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize transition-colors hover:bg-[var(--border-strong)]" +
+                (worktreeRailResizing ? " bg-[var(--accent)]" : "")
+              }
+            />
+          )}
         </div>
       )}
       <main className="flex min-w-0 flex-1 flex-col">

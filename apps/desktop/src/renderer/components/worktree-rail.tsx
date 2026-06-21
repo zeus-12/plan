@@ -1,3 +1,4 @@
+import { Plus, Settings } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import type { WorktreeRecord } from "../../shared-types";
 
@@ -56,7 +57,7 @@ export function WorktreeRail({
         <div className="h-7 shrink-0 [-webkit-app-region:drag]" />
       )}
       {/* Header — mirrors the other sidebars' uppercase mono section labels. */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-2">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border)] px-3">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
           Worktrees
         </span>
@@ -64,16 +65,16 @@ export function WorktreeRail({
           <button
             onClick={onOpenSettings}
             title="Project defaults"
-            className="flex h-6 w-6 items-center justify-center rounded text-[14px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
           >
-            ⚙
+            <Settings size={13} />
           </button>
           <button
             onClick={onNew}
             title="New worktree"
-            className="flex h-6 w-6 items-center justify-center rounded text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
           >
-            ＋
+            <Plus size={14} />
           </button>
         </div>
       </div>
