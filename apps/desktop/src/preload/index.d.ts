@@ -11,6 +11,11 @@ import type {
   DiscoveredRepo,
   SearchOptions,
   SearchResult,
+  WorktreeRecord,
+  ProjectDefaults,
+  CreateWorktreeInput,
+  CreatePrInput,
+  CreatePrResult,
 } from "../shared-types";
 
 interface ElectronAPI {
@@ -28,6 +33,19 @@ interface ElectronAPI {
     subPath?: string
   ) => Promise<FileContents>;
   listRepos: (encoded: string) => Promise<DiscoveredRepo[]>;
+
+  listWorktrees: (encoded: string) => Promise<WorktreeRecord[]>;
+  createWorktree: (
+    encoded: string,
+    input: CreateWorktreeInput
+  ) => Promise<WorktreeRecord>;
+  removeWorktree: (id: string) => Promise<void>;
+  createWorktreePr: (id: string, input: CreatePrInput) => Promise<CreatePrResult>;
+  getWorktreeDefaults: (encoded: string) => Promise<ProjectDefaults>;
+  setWorktreeDefaults: (
+    encoded: string,
+    defaults: ProjectDefaults
+  ) => Promise<void>;
   getFileView: (
     encoded: string,
     path: string,

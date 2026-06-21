@@ -18,6 +18,7 @@ import { SessionList, type SessionListItem } from "./session-list";
 import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { RunTerminal } from "./run-terminal";
 import { SearchPanel } from "./search-panel";
 import { usePersistentNumber } from "../lib/use-persistent-number";
 
@@ -79,12 +80,19 @@ interface Props {
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
-  terminals: { id: string; label: string }[];
+  /** The Run tab (kind "run") is always first and non-closable; rest are shells. */
+  terminals: { id: string; label: string; kind: "run" | "shell" }[];
   /** The shell shown in the embedded pane below the tab strip. */
   activeTerminalId: string | null;
   onNewTerminal: () => void;
   onSelectTerminal: (id: string) => void;
   onCloseTerminal: (id: string) => void;
+  /** Project-level Run command (shared across worktrees); undefined = unset. */
+  runCommand?: string;
+  /** Optional build command run before the Run command. */
+  buildCommand?: string;
+  /** Open the Run-command config modal. */
+  onConfigureRun: () => void;
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -182,6 +190,9 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onNewTerminal,
   onSelectTerminal,
   onCloseTerminal,
+  runCommand,
+  buildCommand,
+  onConfigureRun,
 }: Props) {
   const sidebar = useSidebar();
   // Minimise the embedded terminal pane while keeping the tab strip visible.
@@ -211,9 +222,10 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   };
 
   // ⌘1‑⌘5 → swap tabs (match the visual order); ⌘⇧F → Search (VS Code binding).
+  // Cmd only (not Ctrl): Ctrl+digit is reserved for the worktree switcher.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.metaKey || e.ctrlKey) return;
       if (e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         onTabChange("search");

@@ -38,9 +38,27 @@ const SUPPORTED_LANGS: string[] = [
 const LIGHT_THEME = "github-light";
 const DARK_THEME = "github-dark";
 
-// Shiki uses its own canonical language names. Map our app's ids to those.
+// Shiki uses its own canonical language names. Map our app's ids — and the
+// short forms that show up as markdown code-fence languages (```js, ```py) —
+// onto those.
 const LANG_ALIAS: Record<string, string> = {
   shell: "bash",
+  sh: "bash",
+  zsh: "bash",
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  ts: "typescript",
+  py: "python",
+  rb: "ruby",
+  yml: "yaml",
+  md: "markdown",
+  rs: "rust",
+  kt: "kotlin",
+  cs: "csharp",
+  golang: "go",
+  "c++": "cpp",
+  "c#": "csharp",
 };
 
 let highlighter: Highlighter | null = null;
@@ -188,6 +206,56 @@ export function highlightTokens(code: string, languageId: string): SyntaxToken[]
     offset += 1;
   }
   return out;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/"/g, "&quot;");
+}
+
+/**
+ * Render a code string to an HTML string of colored <span>s using shiki
+ * tokens. The concatenated text content is byte-identical to `value` (tokens
+ * only wrap existing characters — no characters are added or removed), so
+ * callers that compute character offsets over the rendered DOM are unaffected.
+ * Returns escaped plain text when shiki isn't ready or the language is
+ * unsupported.
+ */
+export function highlightToHtml(value: string, language: string): string {
+  if (!value) return "";
+  const tokens = highlightTokens(value, language);
+  if (tokens.length === 0) return escapeHtml(value);
+
+  const parts: string[] = [];
+  let cur = 0;
+  for (const t of tokens) {
+    if (t.start > cur) parts.push(escapeHtml(value.slice(cur, t.start)));
+
+    const classes: string[] = [];
+    if (t.className) classes.push(t.className);
+    if (t.lightColor || t.darkColor) classes.push("shiki-tok");
+
+    const styleBits: string[] = [];
+    if (t.lightColor) styleBits.push(`--shiki-light:${t.lightColor}`);
+    if (t.darkColor) styleBits.push(`--shiki-dark:${t.darkColor}`);
+    if (t.italic) styleBits.push("font-style:italic");
+    if (t.bold) styleBits.push("font-weight:600");
+
+    const classAttr = classes.length ? ` class="${escapeAttr(classes.join(" "))}"` : "";
+    const styleAttr = styleBits.length ? ` style="${escapeAttr(styleBits.join(";"))}"` : "";
+    parts.push(
+      `<span${classAttr}${styleAttr}>${escapeHtml(value.slice(t.start, t.end))}</span>`
+    );
+    cur = t.end;
+  }
+  if (cur < value.length) parts.push(escapeHtml(value.slice(cur)));
+  return parts.join("");
 }
 
 /**

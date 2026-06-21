@@ -15,6 +15,12 @@ import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
 import { SwitcherOverlay } from "./components/switcher-overlay";
 import { SessionsDashboard } from "./components/sessions-dashboard";
+import { WorktreeRail } from "./components/worktree-rail";
+import { NewWorktreeModal } from "./components/new-worktree-modal";
+import { CreatePrModal } from "./components/create-pr-modal";
+import { ProjectDefaultsModal } from "./components/project-defaults-modal";
+import { useConfirm } from "./components/confirm-dialog";
+import { useWorktrees } from "./lib/use-worktrees";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
 import { openProjectTab, makeChatTab } from "./lib/tabs-store";
 import { getMruVersion, orderByMru, recordUse, subscribeMru } from "./lib/mru-store";
@@ -127,6 +133,131 @@ function Shell() {
 
   const selected = projects.find((p) => p.encoded === selectedEncoded) ?? null;
 
+  // ── Worktrees (scoped to the selected project) ──────────────────────
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const worktrees = useWorktrees(selectedEncoded ?? "");
+  // null = the live working copy (the real checkout). Reset on project switch.
+  const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(null);
+  const [showNewWorktree, setShowNewWorktree] = useState(false);
+  const [showDefaults, setShowDefaults] = useState(false);
+  // Worktree id whose Create-PR modal is open (null = closed).
+  const [prWorktreeId, setPrWorktreeId] = useState<string | null>(null);
+  useEffect(() => {
+    setActiveWorktreeId(null);
+  }, [selectedEncoded]);
+
+  const activeWorktree =
+    worktrees.worktrees.find((w) => w.id === activeWorktreeId) ?? null;
+  const prWorktree =
+    worktrees.worktrees.find((w) => w.id === prWorktreeId) ?? null;
+
+  // A worktree is just another cwd; the backend primed its `encoded`, so we
+  // hand ProjectWorkspace a synthesized project + the worktree's own repos and
+  // it scopes everything to the worktree without any changes inside it.
+  const [worktreeRepos, setWorktreeRepos] = useState<DiscoveredRepo[]>([]);
+  useEffect(() => {
+    if (!activeWorktree) {
+      setWorktreeRepos([]);
+      return;
+    }
+    let cancelled = false;
+    window.electronAPI.listRepos(activeWorktree.encoded).then((r) => {
+      if (!cancelled) setWorktreeRepos(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorktree?.encoded]);
+
+  const effectiveProject: ProjectEntry | null = activeWorktree
+    ? {
+        encoded: activeWorktree.encoded,
+        cwd: activeWorktree.rootPath,
+        mtimeMs: activeWorktree.createdAt,
+        archived: false,
+      }
+    : selected;
+  const effectiveRepos = activeWorktree
+    ? worktreeRepos
+    : reposByProject.get(selectedEncoded ?? "") ?? [];
+
+  const handleRemoveWorktree = useCallback(
+    async (id: string) => {
+      const wt = worktrees.worktrees.find((w) => w.id === id);
+      const ok = await confirm({
+        title: `Remove worktree "${wt?.name ?? ""}"?`,
+        description:
+          "This deletes the worktree's checkouts and branches-in-progress for every repo. Uncommitted work in it is lost.",
+        confirmLabel: "Remove worktree",
+      });
+      if (!ok) return;
+      if (activeWorktreeId === id) setActiveWorktreeId(null);
+      await worktrees.remove(id);
+    },
+    [worktrees, confirm, activeWorktreeId]
+  );
+
+  // ⌘E toggles the worktrees rail; persisted like the projects sidebar.
+  const [worktreeRailOpen, setWorktreeRailOpen] = useState<boolean>(() =>
+    typeof window === "undefined"
+      ? true
+      : window.localStorage.getItem("plan.worktreeRail.open") !== "false"
+  );
+  useEffect(() => {
+    window.localStorage.setItem(
+      "plan.worktreeRail.open",
+      String(worktreeRailOpen)
+    );
+  }, [worktreeRailOpen]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "d"
+      ) {
+        const el = document.activeElement as HTMLElement | null;
+        const tag = el?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+        e.preventDefault();
+        setWorktreeRailOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Ctrl+1 cycles the live working copy + this project's worktrees, reusing the
+  // same modifier-held switcher as projects (Ctrl+`) and sessions (Ctrl+Tab).
+  const worktreeItems = useMemo(
+    () => [
+      {
+        key: "__live__",
+        id: null as string | null,
+        label: selected ? projectShortName(selected) : "working copy",
+      },
+      ...worktrees.worktrees.map((w) => ({
+        key: w.id,
+        id: w.id as string | null,
+        label: w.name,
+      })),
+    ],
+    [selected, worktrees.worktrees]
+  );
+  const worktreeIndex = Math.max(
+    0,
+    worktreeItems.findIndex((it) => it.id === activeWorktreeId)
+  );
+  const worktreeSwitcher = useTabSwitcher({
+    id: "worktrees",
+    enabled: !!selected && worktreeItems.length > 1,
+    triggerCode: "Digit1",
+    items: worktreeItems,
+    currentIndex: worktreeIndex,
+    onCommit: (it) => setActiveWorktreeId(it.id),
+  });
+
   // Sessions dashboard: a control-center for every live Claude pty.
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const navigateToSession = useCallback(
@@ -189,12 +320,29 @@ function Shell() {
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
       />
+      {selected && worktreeRailOpen && (
+        <div className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-surface)]">
+          <WorktreeRail
+            trafficLightInset={!projectsSidebar.open}
+            projectName={projectShortName(selected)}
+            liveBranch={reposByProject.get(selected.encoded)?.[0]?.branch ?? null}
+            worktrees={worktrees.worktrees}
+            activeWorktreeId={activeWorktreeId}
+            onSelectLive={() => setActiveWorktreeId(null)}
+            onSelectWorktree={setActiveWorktreeId}
+            onNew={() => setShowNewWorktree(true)}
+            onRemove={handleRemoveWorktree}
+            onCreatePr={setPrWorktreeId}
+            onOpenSettings={() => setShowDefaults(true)}
+          />
+        </div>
+      )}
       <main className="flex min-w-0 flex-1 flex-col">
-        {selected ? (
+        {effectiveProject ? (
           <ProjectWorkspace
-            key={selected.encoded}
-            project={selected}
-            repos={reposByProject.get(selected.encoded) ?? []}
+            key={effectiveProject.encoded}
+            project={effectiveProject}
+            repos={effectiveRepos}
             projectsSidebarOpen={projectsSidebar.open}
             projects={projects}
             onSelectProject={setSelectedEncoded}
@@ -223,6 +371,43 @@ function Shell() {
           }))}
         />
       )}
+      {worktreeSwitcher.active && (
+        <SwitcherOverlay
+          title="Worktrees"
+          index={worktreeSwitcher.index}
+          items={worktreeItems.map((it) => ({
+            key: it.key,
+            label: it.label,
+            sub: it.id ? "worktree" : "working copy",
+          }))}
+        />
+      )}
+      {showNewWorktree && selected && (
+        <NewWorktreeModal
+          defaults={worktrees.defaults}
+          onCreate={async (input) => {
+            const rec = await worktrees.create(input);
+            setActiveWorktreeId(rec.id);
+          }}
+          onClose={() => setShowNewWorktree(false)}
+        />
+      )}
+      {prWorktree && (
+        <CreatePrModal
+          worktree={prWorktree}
+          onCreate={(input) => worktrees.createPr(prWorktree.id, input)}
+          onClose={() => setPrWorktreeId(null)}
+        />
+      )}
+      {showDefaults && selected && (
+        <ProjectDefaultsModal
+          encoded={selected.encoded}
+          defaults={worktrees.defaults}
+          onSave={worktrees.saveDefaults}
+          onClose={() => setShowDefaults(false)}
+        />
+      )}
+      {confirmDialog}
     </div>
   );
 }
