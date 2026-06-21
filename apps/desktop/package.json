@@ -48,6 +48,7 @@
     "@electron/rebuild": "^4.0.4",
     "@tailwindcss/postcss": "^4",
     "@types/diff": "^7.0.2",
+    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
