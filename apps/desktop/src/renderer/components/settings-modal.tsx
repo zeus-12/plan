@@ -14,6 +14,7 @@ import {
   type SoundId,
 } from "../lib/notification-settings";
 import { playSound } from "../lib/notification-sounds";
+import { useAutoModeEnabled } from "../lib/auto-mode-settings";
 
 interface Props {
   open: boolean;
@@ -27,6 +28,7 @@ interface Props {
  */
 export function SettingsModal({ open, onClose }: Props) {
   const [settings, update] = useNotificationSettings();
+  const [autoMode, setAutoMode] = useAutoModeEnabled();
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +68,28 @@ export function SettingsModal({ open, onClose }: Props) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <section className="mb-6 flex flex-col gap-3">
+            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+              Auto mode
+            </h3>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-[12px] text-[var(--text)]">
+                  Run Claude Code in auto mode
+                </span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  New sessions start with{" "}
+                  <code className="font-[family-name:var(--font-mono)] text-[10px]">
+                    --enable-auto-mode
+                  </code>
+                  .
+                </span>
+              </div>
+              <Switch checked={autoMode} onCheckedChange={setAutoMode} />
+            </div>
+          </section>
+
           <section className="flex flex-col gap-3">
             <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
               Notifications

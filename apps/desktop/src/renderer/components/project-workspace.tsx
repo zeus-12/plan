@@ -37,6 +37,7 @@ import Fuse from "fuse.js";
 import { useConfirm } from "./confirm-dialog";
 import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
 import { useProjectAnnotations } from "../lib/annotation-store";
+import { useAutoModeEnabled } from "../lib/auto-mode-settings";
 import { useProjectTerminals, useTerminalHeight } from "../lib/terminal-store";
 import {
   useProjectTabs,
@@ -191,6 +192,9 @@ export function ProjectWorkspace({
   autoMode,
   onSaveRunConfig,
 }: Props) {
+  // Global auto-mode default (Settings dialog). A project's own `autoMode`
+  // override, when set, wins; otherwise this app-wide preference applies.
+  const [globalAutoMode] = useAutoModeEnabled();
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
   // VSCode model: `tab` chooses which LIST shows in the right sidebar. The main
@@ -1220,7 +1224,7 @@ export function ProjectWorkspace({
     const sid = tid.slice(chatPrefix.length);
     // Brand-new chats start claude with a pre-chosen session id (nothing to
     // resume yet); existing ones resume their transcript.
-    const flags = autoMode ? " --enable-auto-mode" : "";
+    const flags = (autoMode ?? globalAutoMode) ? " --enable-auto-mode" : "";
     return NEW_SESSION_IDS.has(sid)
       ? `claude --session-id ${sid}${flags}`
       : `claude --resume ${sid}${flags}`;
