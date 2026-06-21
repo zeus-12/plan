@@ -20,15 +20,14 @@ function repoLabel(r: DiscoveredRepo): string {
 
 /**
  * Per-project defaults the user sets once: base branch + optional branch prefix
- * for new worktrees, and per-repo Setup / Run commands (multi-repo projects get
- * a Setup/Run pair per discovered repo).
+ * for new worktrees, and a per-repo Setup command (run once when a worktree is
+ * created). The project's Run command lives in the Run terminal's own modal.
  */
 export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Props) {
   const [repos, setRepos] = useState<DiscoveredRepo[]>([]);
   const [base, setBase] = useState(defaults.base ?? "");
   const [branchPrefix, setBranchPrefix] = useState(defaults.branchPrefix ?? "");
   const [setup, setSetup] = useState<Record<string, string>>(defaults.setup ?? {});
-  const [run, setRun] = useState<Record<string, string>>(defaults.run ?? {});
   const [busy, setBusy] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -42,11 +41,13 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
     // Drop empty command entries so the store stays clean.
     const prune = (m: Record<string, string>) =>
       Object.fromEntries(Object.entries(m).filter(([, v]) => v.trim() !== ""));
+    // Spread existing defaults so the project-level run command (set in the Run
+    // terminal's own modal) and any legacy fields aren't clobbered here.
     await onSave({
+      ...defaults,
       base: base.trim() || undefined,
       branchPrefix: branchPrefix.trim() || undefined,
       setup: prune(setup),
-      run: prune(run),
     });
     onClose();
   };
@@ -70,7 +71,7 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
           Project defaults
         </div>
         <div className="mb-3 text-[11px] text-[var(--text-tertiary)]">
-          Pre-fills new worktrees and the Setup / Run terminals.
+          Pre-fills new worktrees and runs the Setup command on create.
         </div>
 
         <div className="flex flex-col gap-3">
@@ -97,7 +98,7 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
           </div>
 
           <div className="mt-1 border-t border-[var(--border)] pt-3">
-            <div className={labelCls}>Setup &amp; Run commands</div>
+            <div className={labelCls}>Setup commands</div>
             <div className="flex flex-col gap-4">
               {repos.map((r) => {
                 const key = r.subPath;
@@ -113,15 +114,6 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
                         setSetup((s) => ({ ...s, [key]: e.target.value }))
                       }
                       placeholder="npm install"
-                      className={`${inputCls} mb-2`}
-                    />
-                    <label className={labelCls}>Run (dev server)</label>
-                    <input
-                      value={run[key] ?? ""}
-                      onChange={(e) =>
-                        setRun((s) => ({ ...s, [key]: e.target.value }))
-                      }
-                      placeholder="npm run dev"
                       className={inputCls}
                     />
                   </div>

@@ -180,8 +180,20 @@ export interface ProjectDefaults {
   branchPrefix?: string;
   /** subPath → setup command (run once on worktree creation). */
   setup?: Record<string, string>;
-  /** subPath → run command (the long-lived dev server). */
+  /**
+   * Legacy per-repo run map (subPath → dev-server command). Superseded by the
+   * single project-level `runCommand` below; kept in the type so existing
+   * `worktrees.json` data round-trips, but no longer surfaced in the UI.
+   */
   run?: Record<string, string>;
+  /**
+   * The "Run" terminal's command — one per project, shared across all worktrees
+   * and sessions. The running process is per-worktree (pty `run:<encoded>`); the
+   * command itself lives here.
+   */
+  runCommand?: string;
+  /** Optional command run before `runCommand` in the same Run terminal. */
+  buildCommand?: string;
 }
 
 export interface CreateWorktreeInput {

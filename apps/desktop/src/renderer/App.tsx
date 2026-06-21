@@ -346,6 +346,17 @@ function Shell() {
             projectsSidebarOpen={projectsSidebar.open}
             projects={projects}
             onSelectProject={setSelectedEncoded}
+            // Run command is project-level: keyed by the parent project's
+            // defaults, so every worktree of this project shares it.
+            runCommand={worktrees.defaults.runCommand}
+            buildCommand={worktrees.defaults.buildCommand}
+            onSaveRunConfig={(runCommand, buildCommand) =>
+              worktrees.saveDefaults({
+                ...worktrees.defaults,
+                runCommand,
+                buildCommand,
+              })
+            }
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">

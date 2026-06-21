@@ -54,6 +54,7 @@ import { TabBar } from "./tab-bar";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
+import { RunConfigModal } from "./run-config-modal";
 import { ThemeMenu } from "./theme-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
@@ -94,6 +95,12 @@ interface Props {
   /** All projects + a switch callback — drives the ⌘K palette. */
   projects: ProjectEntry[];
   onSelectProject: (encoded: string) => void;
+  /** Project-level Run terminal command (shared across this project's worktrees). */
+  runCommand?: string;
+  /** Optional build command run before the Run command. */
+  buildCommand?: string;
+  /** Persist the Run/build command to the project (parent-keyed defaults). */
+  onSaveRunConfig: (runCommand: string, buildCommand: string) => Promise<void> | void;
 }
 
 function WorkspaceHeader({
@@ -178,6 +185,9 @@ export function ProjectWorkspace({
   projectsSidebarOpen,
   projects,
   onSelectProject,
+  runCommand,
+  buildCommand,
+  onSaveRunConfig,
 }: Props) {
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
@@ -1687,9 +1697,21 @@ export function ProjectWorkspace({
     [shellPrefix],
   );
 
+  const [runConfigOpen, setRunConfigOpen] = useState(false);
+
+  // The Run terminal is always first and non-closable; its pty id is scoped to
+  // this worktree's encoded so the running process is per-worktree (the command
+  // itself is project-level, threaded in via props).
   const sidebarTerminals = useMemo(
-    () => shells.map((id) => ({ id, label: `Terminal ${shellNumber(id)}` })),
-    [shells, shellNumber],
+    () => [
+      { id: `run:${project.encoded}`, label: "Run", kind: "run" as const },
+      ...shells.map((id) => ({
+        id,
+        label: `Terminal ${shellNumber(id)}`,
+        kind: "shell" as const,
+      })),
+    ],
+    [project.encoded, shells, shellNumber],
   );
 
   const handleNewShell = useCallback(() => {
@@ -1951,6 +1973,14 @@ export function ProjectWorkspace({
       shortcut={{ key: "e", meta: true }}
     >
       {confirmDialog}
+      {runConfigOpen && (
+        <RunConfigModal
+          runCommand={runCommand}
+          buildCommand={buildCommand}
+          onSave={onSaveRunConfig}
+          onClose={() => setRunConfigOpen(false)}
+        />
+      )}
       <Toaster position="bottom-right" closeButton />
       <CommandPalette
         open={paletteMode === "files"}
@@ -2344,10 +2374,14 @@ export function ProjectWorkspace({
           onOpenSearchResult={handleOpenSearchResult}
           encoded={project.encoded}
           terminals={sidebarTerminals}
-          activeTerminalId={activeShellId}
+          // Default to the always-present Run tab when no shell is selected.
+          activeTerminalId={activeShellId ?? `run:${project.encoded}`}
           onNewTerminal={handleNewShell}
           onSelectTerminal={handleSelectShell}
           onCloseTerminal={handleCloseShell}
+          runCommand={runCommand}
+          buildCommand={buildCommand}
+          onConfigureRun={() => setRunConfigOpen(true)}
         />
       </div>
     </SidebarProvider>

@@ -455,23 +455,25 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                   )}
                 >
                   <span>{t.label}</span>
-                  <span
-                    role="button"
-                    aria-label={`Close ${t.label}`}
-                    title="Close terminal"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseTerminal(t.id);
-                    }}
-                    className={cn(
-                      "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
-                      active
-                        ? "text-[var(--text-tertiary)]"
-                        : "opacity-0 group-hover:opacity-100"
-                    )}
-                  >
-                    ×
-                  </span>
+                  {t.kind === "shell" && (
+                    <span
+                      role="button"
+                      aria-label={`Close ${t.label}`}
+                      title="Close terminal"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseTerminal(t.id);
+                      }}
+                      className={cn(
+                        "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
+                        active
+                          ? "text-[var(--text-tertiary)]"
+                          : "opacity-0 group-hover:opacity-100"
+                      )}
+                    >
+                      ×
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -514,13 +516,24 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     (!active || paneCollapsed) && "hidden"
                   )}
                 >
-                  <TerminalPanel
-                    id={t.id}
-                    encoded={encoded}
-                    showHeader={false}
-                    visible={active && !paneCollapsed && sidebar.open}
-                    onRequestClose={() => onCloseTerminal(t.id)}
-                  />
+                  {t.kind === "run" ? (
+                    <RunTerminal
+                      id={t.id}
+                      encoded={encoded}
+                      runCommand={runCommand}
+                      buildCommand={buildCommand}
+                      visible={active && !paneCollapsed && sidebar.open}
+                      onConfigure={onConfigureRun}
+                    />
+                  ) : (
+                    <TerminalPanel
+                      id={t.id}
+                      encoded={encoded}
+                      showHeader={false}
+                      visible={active && !paneCollapsed && sidebar.open}
+                      onRequestClose={() => onCloseTerminal(t.id)}
+                    />
+                  )}
                 </div>
               );
             })}
