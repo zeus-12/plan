@@ -23,7 +23,12 @@ import { useConfirm } from "./components/confirm-dialog";
 import { useWorktrees } from "./lib/use-worktrees";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
 import { openProjectTab, makeChatTab } from "./lib/tabs-store";
-import { getMruVersion, orderByMru, recordUse, subscribeMru } from "./lib/mru-store";
+import {
+  getMruVersion,
+  orderByMru,
+  recordUse,
+  subscribeMru,
+} from "./lib/mru-store";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
@@ -38,7 +43,7 @@ function Shell() {
   const [selectedEncoded, setSelectedEncoded] = useState<string | null>(() =>
     typeof window === "undefined"
       ? null
-      : window.localStorage.getItem(SELECTED_PROJECT_KEY)
+      : window.localStorage.getItem(SELECTED_PROJECT_KEY),
   );
   const [reposByProject, setReposByProject] = useState<
     Map<string, DiscoveredRepo[]>
@@ -59,7 +64,7 @@ function Shell() {
         } catch {
           return [p.encoded, [] as DiscoveredRepo[]] as const;
         }
-      })
+      }),
     );
     setReposByProject(new Map(entries));
   }, []);
@@ -118,17 +123,17 @@ function Shell() {
       await window.electronAPI.setProjectArchived(encoded, archived);
       // Reflect in local state immediately so the row moves between sections.
       setProjects((prev) =>
-        prev.map((p) => (p.encoded === encoded ? { ...p, archived } : p))
+        prev.map((p) => (p.encoded === encoded ? { ...p, archived } : p)),
       );
       // If we just archived the selected project, jump to the first active one.
       if (archived && selectedEncoded === encoded) {
         const fallback = projects.find(
-          (p) => p.encoded !== encoded && !p.archived
+          (p) => p.encoded !== encoded && !p.archived,
         );
         setSelectedEncoded(fallback ? fallback.encoded : null);
       }
     },
-    [projects, selectedEncoded]
+    [projects, selectedEncoded],
   );
 
   const selected = projects.find((p) => p.encoded === selectedEncoded) ?? null;
@@ -179,7 +184,7 @@ function Shell() {
     : selected;
   const effectiveRepos = activeWorktree
     ? worktreeRepos
-    : reposByProject.get(selectedEncoded ?? "") ?? [];
+    : (reposByProject.get(selectedEncoded ?? "") ?? []);
 
   const handleRemoveWorktree = useCallback(
     async (id: string) => {
@@ -194,19 +199,19 @@ function Shell() {
       if (activeWorktreeId === id) setActiveWorktreeId(null);
       await worktrees.remove(id);
     },
-    [worktrees, confirm, activeWorktreeId]
+    [worktrees, confirm, activeWorktreeId],
   );
 
   // ⌘E toggles the worktrees rail; persisted like the projects sidebar.
   const [worktreeRailOpen, setWorktreeRailOpen] = useState<boolean>(() =>
     typeof window === "undefined"
       ? true
-      : window.localStorage.getItem("plan.worktreeRail.open") !== "false"
+      : window.localStorage.getItem("plan.worktreeRail.open") !== "false",
   );
   useEffect(() => {
     window.localStorage.setItem(
       "plan.worktreeRail.open",
-      String(worktreeRailOpen)
+      String(worktreeRailOpen),
     );
   }, [worktreeRailOpen]);
   useEffect(() => {
@@ -219,7 +224,8 @@ function Shell() {
       ) {
         const el = document.activeElement as HTMLElement | null;
         const tag = el?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+        if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable)
+          return;
         e.preventDefault();
         setWorktreeRailOpen((v) => !v);
       }
@@ -243,11 +249,11 @@ function Shell() {
         label: w.name,
       })),
     ],
-    [selected, worktrees.worktrees]
+    [selected, worktrees.worktrees],
   );
   const worktreeIndex = Math.max(
     0,
-    worktreeItems.findIndex((it) => it.id === activeWorktreeId)
+    worktreeItems.findIndex((it) => it.id === activeWorktreeId),
   );
   const worktreeSwitcher = useTabSwitcher({
     id: "worktrees",
@@ -269,7 +275,7 @@ function Shell() {
       setSelectedEncoded(encoded);
       setDashboardOpen(false);
     },
-    []
+    [],
   );
 
   // Ctrl+` : cycle projects in a modal, commit on Ctrl-release (Shift reverses).
@@ -279,26 +285,24 @@ function Shell() {
   // projects are excluded — you can't switch to one you've hidden.
   const activeProjects = useMemo(
     () =>
-      projects
-        .filter((p) => !p.archived)
-        .sort((a, b) => b.mtimeMs - a.mtimeMs),
-    [projects]
+      projects.filter((p) => !p.archived).sort((a, b) => b.mtimeMs - a.mtimeMs),
+    [projects],
   );
   const mruVersion = useSyncExternalStore(
     subscribeMru,
     getMruVersion,
-    getMruVersion
+    getMruVersion,
   );
   const projectsByMru = useMemo(
     () => orderByMru("projects", activeProjects, (p) => p.encoded),
-    [activeProjects, mruVersion]
+    [activeProjects, mruVersion],
   );
   useEffect(() => {
     if (selectedEncoded) recordUse("projects", selectedEncoded);
   }, [selectedEncoded]);
   const projectIndex = Math.max(
     0,
-    projectsByMru.findIndex((p) => p.encoded === selectedEncoded)
+    projectsByMru.findIndex((p) => p.encoded === selectedEncoded),
   );
   const projectSwitcher = useTabSwitcher({
     id: "projects",
@@ -320,21 +324,34 @@ function Shell() {
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
       />
-      {selected && worktreeRailOpen && (
-        <div className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-surface)]">
-          <WorktreeRail
-            trafficLightInset={!projectsSidebar.open}
-            projectName={projectShortName(selected)}
-            liveBranch={reposByProject.get(selected.encoded)?.[0]?.branch ?? null}
-            worktrees={worktrees.worktrees}
-            activeWorktreeId={activeWorktreeId}
-            onSelectLive={() => setActiveWorktreeId(null)}
-            onSelectWorktree={setActiveWorktreeId}
-            onNew={() => setShowNewWorktree(true)}
-            onRemove={handleRemoveWorktree}
-            onCreatePr={setPrWorktreeId}
-            onOpenSettings={() => setShowDefaults(true)}
-          />
+      {selected && (
+        <div
+          data-state={worktreeRailOpen ? "expanded" : "collapsed"}
+          className={
+            "relative flex h-full shrink-0 flex-col overflow-hidden bg-[var(--bg-surface)] transition-[width] duration-200 ease-out" +
+            (worktreeRailOpen ? " border-r border-[var(--border)]" : "")
+          }
+          style={{ width: worktreeRailOpen ? 224 : 0 }}
+        >
+          {/* Inner sits at the rail's natural width; the outer column clips it
+              as the width animates, so it slides like the other sidebars. */}
+          <div className="flex h-full w-56 flex-col">
+            <WorktreeRail
+              trafficLightInset={!projectsSidebar.open}
+              projectName={projectShortName(selected)}
+              liveBranch={
+                reposByProject.get(selected.encoded)?.[0]?.branch ?? null
+              }
+              worktrees={worktrees.worktrees}
+              activeWorktreeId={activeWorktreeId}
+              onSelectLive={() => setActiveWorktreeId(null)}
+              onSelectWorktree={setActiveWorktreeId}
+              onNew={() => setShowNewWorktree(true)}
+              onRemove={handleRemoveWorktree}
+              onCreatePr={setPrWorktreeId}
+              onOpenSettings={() => setShowDefaults(true)}
+            />
+          </div>
         </div>
       )}
       <main className="flex min-w-0 flex-1 flex-col">
