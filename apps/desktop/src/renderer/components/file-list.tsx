@@ -95,8 +95,8 @@ function Chevron({ open }: { open: boolean }) {
 
 function svgProps() {
   return {
-    width: 14,
-    height: 14,
+    width: 13,
+    height: 13,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
@@ -167,7 +167,7 @@ function SectionIconButton({
           }}
           aria-label={tooltip}
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
+            "flex h-5 w-5 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
             danger && "hover:text-[var(--removed-text)]",
             accent && "hover:text-[var(--text)]",
             !danger && !accent && "hover:text-[var(--text-secondary)]"
@@ -183,13 +183,13 @@ function SectionIconButton({
 
 /** Small icon button for per-row stage/unstage/discard. */
 function ActionButton({
-  label,
+  icon,
   title,
   onClick,
   danger,
   accent,
 }: {
-  label: string;
+  icon: React.ReactNode;
   title: string;
   onClick: (e: React.MouseEvent) => void;
   danger?: boolean;
@@ -200,13 +200,13 @@ function ActionButton({
       onClick={onClick}
       title={title}
       className={cn(
-        "flex h-6 w-6 items-center justify-center rounded-md font-[family-name:var(--font-mono)] text-[15px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
+        "flex h-5 w-5 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
         danger && "hover:text-[var(--removed-text)]",
         accent && "hover:text-[var(--text)]",
         !danger && !accent && "hover:text-[var(--text-secondary)]"
       )}
     >
-      {label}
+      {icon}
     </button>
   );
 }
@@ -358,7 +358,7 @@ export function FileList({
                   </span>
                   <span>{files.length}</span>
                 </button>
-                <div className="flex shrink-0 items-center gap-1.5 pl-2">
+                <div className="flex shrink-0 items-center gap-0.5 pl-2">
                   {isStaged ? (
                     <SectionIconButton
                       icon={<MinusIcon />}
@@ -434,17 +434,17 @@ export function FileList({
               </button>
               <span
                 className={cn(
-                  "shrink-0 px-1 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
+                  "shrink-0 pl-1 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
                   statusColor(file.letter)
                 )}
                 title={file.letter === "?" ? "Untracked" : undefined}
               >
                 {displayLetter(file.letter)}
               </span>
-              <div className="flex items-center gap-1.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
+              <div className="flex items-center gap-0.5 pl-1.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
                 {file.staged ? (
                   <ActionButton
-                    label="−"
+                    icon={<MinusIcon />}
                     title="Unstage"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -454,7 +454,7 @@ export function FileList({
                 ) : (
                   <>
                     <ActionButton
-                      label="↺"
+                      icon={<DiscardIcon />}
                       title="Discard changes"
                       danger
                       onClick={(e) => {
@@ -463,7 +463,7 @@ export function FileList({
                       }}
                     />
                     <ActionButton
-                      label="+"
+                      icon={<PlusIcon />}
                       title="Stage"
                       accent
                       onClick={(e) => {
