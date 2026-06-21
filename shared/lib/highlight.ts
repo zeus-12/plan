@@ -5,6 +5,7 @@ import { createLowlight, common } from "lowlight";
 export {
   highlightTokens,
   highlightPerLine,
+  highlightToHtml,
   ensureHighlighter,
   useShikiReady,
   type SyntaxToken,

@@ -96,11 +96,22 @@ function onKeyDown(e: KeyboardEvent) {
   // Ctrl+Shift+Tab and the Ctrl+` (Backquote) project combos; the main-process
   // IPC forward (see install) covers the swallowed Ctrl+Tab. cycle() dedupes if
   // both deliver the same keystroke.
+  // Open/step whichever registered channel claims this key code (Tab, Backquote,
+  // Backslash, …). Channel-driven so adding a switcher needs no edit here.
+  // Ctrl drives every channel; Cmd also drives non-Tab channels (e.g. the
+  // Backquote project switcher) since that's the key macOS users reach for —
+  // Tab stays Ctrl-only because Cmd+Tab is the macOS app switcher.
+  // Ctrl drives every channel. Cmd also drives letter/backtick channels (e.g.
+  // the project switcher) since that's the macOS-natural key — but NOT Tab
+  // (Cmd+Tab is the OS app switcher) and NOT digits (Cmd+1‑4 switch sidebar
+  // tabs), so the worktree switcher stays Ctrl-only.
+  const mod =
+    e.ctrlKey ||
+    (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
   if (
-    (e.code === "Tab" || e.code === "Backquote") &&
-    e.ctrlKey &&
-    !e.metaKey &&
-    !e.altKey
+    mod &&
+    !e.altKey &&
+    channels.some((c) => c.triggerCode === e.code)
   ) {
     e.preventDefault();
     cycle(e.code, e.shiftKey ? -1 : 1);
@@ -122,8 +133,10 @@ function onKeyUp(e: KeyboardEvent) {
 function install() {
   if (installed || typeof window === "undefined") return;
   installed = true;
-  window.addEventListener("keydown", onKeyDown);
-  window.addEventListener("keyup", onKeyUp);
+  // Capture phase: window sees the key BEFORE any descendant (e.g. an xterm
+  // terminal pane), so a focused input can't swallow the switcher combo.
+  window.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("keyup", onKeyUp, true);
   // Safety net: if the window loses focus mid-gesture we may never see the Ctrl
   // keyup, so cancel rather than leave the modal stuck open.
   window.addEventListener("blur", () => {
@@ -131,9 +144,7 @@ function install() {
   });
   // Cycling is driven from main via IPC — Chromium swallows Ctrl+Tab before the
   // page sees it, so main intercepts (before-input-event) and forwards here.
-  window.electronAPI?.onSwitcherCycle?.((e) =>
-    cycle(e.key, e.shift ? -1 : 1),
-  );
+  window.electronAPI?.onSwitcherCycle?.((e) => cycle(e.key, e.shift ? -1 : 1));
 }
 
 function subscribe(l: () => void) {

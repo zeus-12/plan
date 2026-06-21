@@ -44,6 +44,8 @@ export function SessionList({
 }: Props) {
   // When true the list transforms into an archived-only view.
   const [archivedView, setArchivedView] = useState(false);
+  // Free-text filter for the archived view (title substring match).
+  const [archivedSearch, setArchivedSearch] = useState("");
 
   const { active, archived } = useMemo(() => {
     const a: SessionListItem[] = [];
@@ -52,12 +54,21 @@ export function SessionList({
     return { active: a, archived: ar };
   }, [sessions]);
 
-  // Leave the archived view automatically once it's empty.
+  // Leave the archived view automatically once it's empty; drop any stale
+  // filter text whenever we're back on the active list.
   useEffect(() => {
+    if (!archivedView && archivedSearch) setArchivedSearch("");
     if (archivedView && archived.length === 0) setArchivedView(false);
-  }, [archivedView, archived.length]);
+  }, [archivedView, archived.length, archivedSearch]);
 
-  const shown = archivedView ? archived : active;
+  const shown = useMemo(() => {
+    if (!archivedView) return active;
+    const q = archivedSearch.trim().toLowerCase();
+    if (!q) return archived;
+    return archived.filter((s) =>
+      (s.title ?? "Untitled session").toLowerCase().includes(q)
+    );
+  }, [archivedView, active, archived, archivedSearch]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -71,7 +82,21 @@ export function SessionList({
           <span className="flex-1">Archived chats</span>
           <span>{archived.length}</span>
         </button>
-      ) : (
+      ) : null}
+      {archivedView && (
+        <div className="shrink-0 border-b border-[var(--border)] px-2 py-1.5">
+          <input
+            value={archivedSearch}
+            onChange={(e) => setArchivedSearch(e.target.value)}
+            placeholder="Search archived chats"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]"
+          />
+        </div>
+      )}
+      {!archivedView && (
         <div className="flex shrink-0 items-center border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
           Recent sessions
         </div>
@@ -83,7 +108,11 @@ export function SessionList({
           </div>
         ) : shown.length === 0 ? (
           <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-            {archivedView ? "No archived chats" : "No sessions"}
+            {archivedView
+              ? archivedSearch.trim()
+                ? "No matching chats"
+                : "No archived chats"
+              : "No sessions"}
           </div>
         ) : (
           <div className="flex flex-col">

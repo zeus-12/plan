@@ -18,6 +18,7 @@ import { SessionList, type SessionListItem } from "./session-list";
 import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { RunTerminal } from "./run-terminal";
 import { SearchPanel } from "./search-panel";
 import { usePersistentNumber } from "../lib/use-persistent-number";
 
@@ -79,12 +80,19 @@ interface Props {
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
-  terminals: { id: string; label: string }[];
+  /** The Run tab (kind "run") is always first and non-closable; rest are shells. */
+  terminals: { id: string; label: string; kind: "run" | "shell" }[];
   /** The shell shown in the embedded pane below the tab strip. */
   activeTerminalId: string | null;
   onNewTerminal: () => void;
   onSelectTerminal: (id: string) => void;
   onCloseTerminal: (id: string) => void;
+  /** Project-level Run command (shared across worktrees); undefined = unset. */
+  runCommand?: string;
+  /** Optional build command run before the Run command. */
+  buildCommand?: string;
+  /** Open the Run-command config modal. */
+  onConfigureRun: () => void;
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -182,6 +190,9 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onNewTerminal,
   onSelectTerminal,
   onCloseTerminal,
+  runCommand,
+  buildCommand,
+  onConfigureRun,
 }: Props) {
   const sidebar = useSidebar();
   // Minimise the embedded terminal pane while keeping the tab strip visible.
@@ -211,9 +222,10 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   };
 
   // ⌘1‑⌘5 → swap tabs (match the visual order); ⌘⇧F → Search (VS Code binding).
+  // Cmd only (not Ctrl): Ctrl+digit is reserved for the worktree switcher.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.metaKey || e.ctrlKey) return;
       if (e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         onTabChange("search");
@@ -443,29 +455,36 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                   )}
                 >
                   <span>{t.label}</span>
-                  <span
-                    role="button"
-                    aria-label={`Close ${t.label}`}
-                    title="Close terminal"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseTerminal(t.id);
-                    }}
-                    className={cn(
-                      "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
-                      active
-                        ? "text-[var(--text-tertiary)]"
-                        : "opacity-0 group-hover:opacity-100"
-                    )}
-                  >
-                    ×
-                  </span>
+                  {t.kind === "shell" && (
+                    <span
+                      role="button"
+                      aria-label={`Close ${t.label}`}
+                      title="Close terminal"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseTerminal(t.id);
+                      }}
+                      className={cn(
+                        "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
+                        active
+                          ? "text-[var(--text-tertiary)]"
+                          : "opacity-0 group-hover:opacity-100"
+                      )}
+                    >
+                      ×
+                    </span>
+                  )}
                 </button>
               );
             })}
             {/* Immediately right of the last tab; scrolls with the strip. */}
             <button
-              onClick={onNewTerminal}
+              onClick={() => {
+                // Spawning already switches to the new terminal; make sure the
+                // pane is expanded so a collapsed terminal section reopens too.
+                onNewTerminal();
+                setPaneCollapsed(false);
+              }}
               title="New terminal (⌘⇧J)"
               aria-label="New terminal"
               className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
@@ -502,13 +521,24 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     (!active || paneCollapsed) && "hidden"
                   )}
                 >
-                  <TerminalPanel
-                    id={t.id}
-                    encoded={encoded}
-                    showHeader={false}
-                    visible={active && !paneCollapsed && sidebar.open}
-                    onRequestClose={() => onCloseTerminal(t.id)}
-                  />
+                  {t.kind === "run" ? (
+                    <RunTerminal
+                      id={t.id}
+                      encoded={encoded}
+                      runCommand={runCommand}
+                      buildCommand={buildCommand}
+                      visible={active && !paneCollapsed && sidebar.open}
+                      onConfigure={onConfigureRun}
+                    />
+                  ) : (
+                    <TerminalPanel
+                      id={t.id}
+                      encoded={encoded}
+                      showHeader={false}
+                      visible={active && !paneCollapsed && sidebar.open}
+                      onRequestClose={() => onCloseTerminal(t.id)}
+                    />
+                  )}
                 </div>
               );
             })}

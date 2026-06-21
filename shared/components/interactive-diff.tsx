@@ -12,6 +12,7 @@ import {
   Fragment,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import type { Annotation } from "../lib/store";
 import { type DiffSettings, FONT_SIZE_OPTIONS } from "../lib/settings";
 import {
@@ -114,6 +115,21 @@ interface Props {
    * responds to ⌘F.
    */
   findEnabled?: boolean;
+  /**
+   * How the diff-settings controls are presented. "bar" (default) lays them out
+   * inline above the diff — the web surface. "popover" collapses them behind a
+   * single gear button that opens a small panel — the desktop surface, where the
+   * header is already crowded with file actions.
+   */
+  settingsVariant?: "bar" | "popover";
+  /**
+   * Where to render the "popover" gear button. When provided, the gear is
+   * portaled into this node (e.g. a slot in the file header beside "Format")
+   * instead of sitting above the diff — while its logic stays here, so the
+   * "Changes only" toggle keeps tracking manual line expansions. Ignored unless
+   * settingsVariant is "popover".
+   */
+  settingsPortalTarget?: HTMLElement | null;
 }
 
 export interface HunkRange {
@@ -492,6 +508,8 @@ export function InteractiveDiff({
   onMergeChange,
   hunkActions,
   findEnabled = true,
+  settingsVariant = "bar",
+  settingsPortalTarget,
 }: Props) {
   const mergeEnabled = !!onMergeChange;
   const hunkActionsEnabled = !!hunkActions;
@@ -506,6 +524,20 @@ export function InteractiveDiff({
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
     new Set()
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss the settings popover on any click outside it (incl. the trigger).
+  useEffect(() => {
+    if (!settingsOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      if (!settingsRef.current?.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [settingsOpen]);
 
   const interactive = !!onAddAnnotation;
   const effectiveViewMode = isFirstVersion ? "unified" : settings.viewMode;
@@ -1409,105 +1441,190 @@ export function InteractiveDiff({
     );
   }
 
-  /* ── Settings bar ───────────────────────────────────────── */
+  /* ── Settings controls ──────────────────────────────────── */
 
+  // Each control is its own element so the bar (web) and the popover (desktop)
+  // can lay out the *same* widgets differently without duplicating their logic.
+
+  function renderViewModeToggle() {
+    if (isFirstVersion || !onSettingsChange) return null;
+    return (
+      <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
+        {(["split", "unified"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => onSettingsChange({ viewMode: mode })}
+            className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
+              settings.viewMode === mode
+                ? "bg-[var(--accent)] text-[var(--bg)]"
+                : "text-[var(--text-tertiary)]"
+            }`}
+          >
+            {mode === "split" ? "Split" : "Unified"}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderFontSizeSelect() {
+    if (!onSettingsChange) return null;
+    return (
+      <select
+        value={settings.fontSize}
+        onChange={(e) =>
+          onSettingsChange({
+            fontSize: Number(e.target.value) as DiffSettings["fontSize"],
+          })
+        }
+        className="cursor-pointer appearance-none rounded-md border border-[var(--border)] bg-transparent px-2 py-1 pr-5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "right 4px center",
+        }}
+      >
+        {FONT_SIZE_OPTIONS.map((size) => (
+          <option key={size} value={size}>
+            {size}px
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  function renderHideUnchangedToggle() {
+    if (!onSettingsChange) return null;
+    return (
+      <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
+        {([true, false] as const).map((hide) => {
+          // When the user has manually expanded "N unchanged lines" sections
+          // we're in a mixed state — neither toggle reflects reality.
+          const isCustomized = expandedSeparators.size > 0;
+          const isActive = !isCustomized && settings.hideUnchanged === hide;
+          return (
+            <button
+              key={String(hide)}
+              onClick={() => {
+                if (hide && settings.hideUnchanged && isCustomized) {
+                  // Already in changes-only mode but with expansions —
+                  // collapse them back without re-firing hideUnchanged.
+                  setExpandedSeparators(new Set());
+                  return;
+                }
+                onSettingsChange({ hideUnchanged: hide });
+              }}
+              className={`px-2.5 py-1 transition-colors ${hide ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
+                isActive
+                  ? "bg-[var(--accent)] text-[var(--bg)]"
+                  : "text-[var(--text-tertiary)]"
+              }`}
+            >
+              {hide ? "Changes only" : "All lines"}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderLineWrapButton() {
+    if (!onSettingsChange) return null;
+    return (
+      <button
+        onClick={() => onSettingsChange({ lineWrap: !settings.lineWrap })}
+        className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
+          settings.lineWrap
+            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+            : "border-[var(--border)] text-[var(--text-tertiary)]"
+        }`}
+      >
+        Line wrap
+      </button>
+    );
+  }
+
+  function renderIgnoreWhitespaceButton() {
+    if (!onSettingsChange) return null;
+    return (
+      <button
+        onClick={() =>
+          onSettingsChange({ ignoreWhitespace: !settings.ignoreWhitespace })
+        }
+        className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
+          settings.ignoreWhitespace
+            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+            : "border-[var(--border)] text-[var(--text-tertiary)]"
+        }`}
+      >
+        Ignore whitespace
+      </button>
+    );
+  }
+
+  /** Inline row of controls — the web surface. */
   function renderSettingsBar() {
     if (!onSettingsChange) return null;
     return (
       <div className="mb-2 flex items-center justify-end gap-2">
-        {!isFirstVersion && (
-          <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
-            {(["split", "unified"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => onSettingsChange({ viewMode: mode })}
-                className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
-                  settings.viewMode === mode
-                    ? "bg-[var(--accent)] text-[var(--bg)]"
-                    : "text-[var(--text-tertiary)]"
-                }`}
+        {renderViewModeToggle()}
+        {renderFontSizeSelect()}
+        {renderHideUnchangedToggle()}
+        {renderLineWrapButton()}
+        {renderIgnoreWhitespaceButton()}
+      </div>
+    );
+  }
+
+  /**
+   * Gear button + popover — the desktop surface. Portaled into a header slot
+   * (beside "Format") so its logic stays co-located with the diff state it
+   * reads, while the trigger lives where the user expects it.
+   */
+  function renderSettingsPopover() {
+    if (!onSettingsChange || !settingsPortalTarget) return null;
+    const rows: { label: string; control: ReactNode }[] = [
+      { label: "View", control: renderViewModeToggle() },
+      { label: "Font size", control: renderFontSizeSelect() },
+      { label: "Lines", control: renderHideUnchangedToggle() },
+      { label: "Wrap", control: renderLineWrapButton() },
+      { label: "Whitespace", control: renderIgnoreWhitespaceButton() },
+    ].filter((r) => r.control);
+
+    const menu = (
+      <div ref={settingsRef} className="relative">
+        <button
+          onClick={() => setSettingsOpen((o) => !o)}
+          title="Diff settings"
+          aria-label="Diff settings"
+          aria-expanded={settingsOpen}
+          className={`flex h-8 w-8 items-center justify-center rounded-md border text-[15px] transition-colors ${
+            settingsOpen
+              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+              : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+          }`}
+        >
+          ⚙
+        </button>
+        {settingsOpen && (
+          <div className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5 shadow-lg">
+            {rows.map(({ label, control }) => (
+              <div
+                key={label}
+                className="flex items-center justify-between gap-4"
               >
-                {mode === "split" ? "Split" : "Unified"}
-              </button>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  {label}
+                </span>
+                {control}
+              </div>
             ))}
           </div>
         )}
-        <select
-          value={settings.fontSize}
-          onChange={(e) =>
-            onSettingsChange({
-              fontSize: Number(e.target.value) as DiffSettings["fontSize"],
-            })
-          }
-          className="cursor-pointer appearance-none rounded-md border border-[var(--border)] bg-transparent px-2 py-1 pr-5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
-            backgroundRepeat: "no-repeat",
-            backgroundPosition: "right 4px center",
-          }}
-        >
-          {FONT_SIZE_OPTIONS.map((size) => (
-            <option key={size} value={size}>
-              {size}px
-            </option>
-          ))}
-        </select>
-        <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
-          {([true, false] as const).map((hide) => {
-            // When the user has manually expanded "N unchanged lines" sections
-            // we're in a mixed state — neither toggle reflects reality.
-            const isCustomized = expandedSeparators.size > 0;
-            const isActive =
-              !isCustomized && settings.hideUnchanged === hide;
-            return (
-              <button
-                key={String(hide)}
-                onClick={() => {
-                  if (hide && settings.hideUnchanged && isCustomized) {
-                    // Already in changes-only mode but with expansions —
-                    // collapse them back without re-firing hideUnchanged.
-                    setExpandedSeparators(new Set());
-                    return;
-                  }
-                  onSettingsChange({ hideUnchanged: hide });
-                }}
-                className={`px-2.5 py-1 transition-colors ${hide ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
-                  isActive
-                    ? "bg-[var(--accent)] text-[var(--bg)]"
-                    : "text-[var(--text-tertiary)]"
-                }`}
-              >
-                {hide ? "Changes only" : "All lines"}
-              </button>
-            );
-          })}
-        </div>
-        <button
-          onClick={() =>
-            onSettingsChange({ lineWrap: !settings.lineWrap })
-          }
-          className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
-            settings.lineWrap
-              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-              : "border-[var(--border)] text-[var(--text-tertiary)]"
-          }`}
-        >
-          Line wrap
-        </button>
-        <button
-          onClick={() =>
-            onSettingsChange({ ignoreWhitespace: !settings.ignoreWhitespace })
-          }
-          className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
-            settings.ignoreWhitespace
-              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-              : "border-[var(--border)] text-[var(--text-tertiary)]"
-          }`}
-        >
-          Ignore whitespace
-        </button>
       </div>
     );
+
+    return createPortal(menu, settingsPortalTarget);
   }
 
   /* ── Separator row ─────────────────────────────────────── */
@@ -1860,7 +1977,9 @@ export function InteractiveDiff({
           <FindWidget find={find} revealTrigger={findReveal} />
         </div>
       )}
-      {renderSettingsBar()}
+      {settingsVariant === "popover"
+        ? renderSettingsPopover()
+        : renderSettingsBar()}
 
       <div
         ref={contentRef}

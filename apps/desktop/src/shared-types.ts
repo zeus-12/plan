@@ -148,3 +148,80 @@ export interface DiscoveredRepo {
   commonDir: string;
   branch: string | null;
 }
+
+/** One repo's checkout within a worktree ("" subPath for single-repo projects). */
+export interface WorktreeRepoRecord {
+  subPath: string;
+  /** Absolute path to this repo's worktree checkout (under ~/.plan/worktrees/…). */
+  path: string;
+  branch: string;
+  base: string;
+}
+
+export interface WorktreeRecord {
+  id: string;
+  /** Claude-encoded project cwd this worktree belongs to. */
+  projectEncoded: string;
+  name: string;
+  /** Absolute root dir holding this worktree's repo checkouts. */
+  rootPath: string;
+  /**
+   * Encoded key for the worktree's own cwd (rootPath). The workspace swaps to
+   * this so all `(encoded, subPath)` content ops scope to the worktree.
+   */
+  encoded: string;
+  repos: WorktreeRepoRecord[];
+  createdAt: number;
+}
+
+/** Per-project defaults the user sets once; pre-fill new worktrees + terminals. */
+export interface ProjectDefaults {
+  base?: string;
+  branchPrefix?: string;
+  /** subPath → setup command (run once on worktree creation). */
+  setup?: Record<string, string>;
+  /**
+   * Legacy per-repo run map (subPath → dev-server command). Superseded by the
+   * single project-level `runCommand` below; kept in the type so existing
+   * `worktrees.json` data round-trips, but no longer surfaced in the UI.
+   */
+  run?: Record<string, string>;
+  /**
+   * The "Run" terminal's command — one per project, shared across all worktrees
+   * and sessions. The running process is per-worktree (pty `run:<encoded>`); the
+   * command itself lives here.
+   */
+  runCommand?: string;
+  /** Optional command run before `runCommand` in the same Run terminal. */
+  buildCommand?: string;
+}
+
+export interface CreateWorktreeInput {
+  name: string;
+  branch: string;
+  base: string;
+}
+
+/** Fields the user approves in the Create PR modal before `gh pr create` runs. */
+export interface CreatePrInput {
+  title: string;
+  body: string;
+  base: string;
+}
+
+/** Outcome of opening a PR for one repo in a worktree. */
+export interface CreatePrRepoResult {
+  subPath: string;
+  /** Human label for the repo ("repo root" or its subPath). */
+  label: string;
+  /** PR URL when created (or already open). */
+  url?: string;
+  /** True when the PR already existed and we returned its URL. */
+  existed?: boolean;
+  /** Failure reason for this repo (push or gh error). */
+  error?: string;
+}
+
+export interface CreatePrResult {
+  repos: CreatePrRepoResult[];
+}

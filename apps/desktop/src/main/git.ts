@@ -230,6 +230,27 @@ export async function push(
   subPath: string = ""
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
+
+  // Mirror VS Code's "sync": pull before pushing so remote commits are merged
+  // in and the push isn't rejected as non-fast-forward. Skip when the branch
+  // has no upstream yet — there's nothing to pull, and the publish path below
+  // handles first push.
+  const hasUpstream =
+    (await run(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"])).code === 0;
+  if (hasUpstream) {
+    // `git pull` aborts when no reconcile strategy is configured. Default this
+    // repo to merge — but only when the user hasn't already chosen one in any
+    // scope, so an explicit preference (e.g. rebase) is respected.
+    const cfg = await run(cwd, ["config", "pull.rebase"]);
+    if (cfg.code !== 0 || !cfg.stdout.trim()) {
+      await run(cwd, ["config", "pull.rebase", "false"]);
+    }
+    const pull = await run(cwd, ["pull"]);
+    if (pull.code !== 0) {
+      return { ok: false, error: pull.stderr || "git pull failed" };
+    }
+  }
+
   const r = await run(cwd, ["push"]);
   if (r.code === 0) return { ok: true };
   // No upstream configured → set it on first push.
