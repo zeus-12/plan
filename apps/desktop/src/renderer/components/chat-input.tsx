@@ -16,7 +16,7 @@ export interface ChatInputHandle {
 interface Props {
   /** Session this composer belongs to — keys the persisted draft. */
   sessionId: string;
-  onSend: (text: string) => void;
+  onSend: (text: string, imagePaths: string[]) => void;
   /** No live terminal yet — clicking the box starts one (see onStart). */
   inactive?: boolean;
   onStart?: () => void;
@@ -151,13 +151,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       }
       if (inactive || pendingSaves) return;
       const text = value.trim();
-      const paths = attachments
+      const imagePaths = attachments
         .map((a) => a.path)
-        .filter((p): p is string => p !== null)
-        .join(" ");
-      const full = [text, paths].filter(Boolean).join("\n\n");
-      if (!full) return;
-      onSend(full);
+        .filter((p): p is string => p !== null);
+      if (!text && imagePaths.length === 0) return;
+      // Image paths are sent separately (not folded into the text) so the
+      // terminal can type them as a real path the way a direct paste does —
+      // bundling them into the bracketed paste left the message unsent.
+      onSend(text, imagePaths);
       // Snapshot the raw text so ⌘Z can bring it back verbatim.
       lastSentRef.current = value;
       setValue("");
