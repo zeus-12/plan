@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  memo,
   useRef,
   useState,
   useMemo,
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   Fragment,
   type ReactNode,
 } from "react";
@@ -16,6 +18,7 @@ import {
   type DiffLine,
   type FilteredItem,
   type SplitRow,
+  type WordSegment,
   buildDiffLines,
   filterUnchangedLines,
   buildSplitRows,
@@ -28,6 +31,7 @@ import {
   buildLineToChangeMap,
   computeChanges,
 } from "../lib/diff-merge";
+import type { GitHunk } from "../lib/git-hunks";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import { useShikiReady } from "../lib/shiki";
 import { useCommentSelection } from "../lib/use-comment-selection";
@@ -97,6 +101,9 @@ interface Props {
    */
   hunkActions?: {
     isStaged: boolean;
+    /** The file's git hunks (the real stageable unit). The split-view gutter
+     *  renders one control box per hunk, so a click stages exactly that hunk. */
+    hunks: GitHunk[];
     onStage: (range: HunkRange) => void;
     onRevert: (range: HunkRange) => void;
     onUnstage: (range: HunkRange) => void;
@@ -138,6 +145,27 @@ function gutterBg(type: DiffLine["type"]) {
   if (type === "add") return "var(--diff-add-gutter)";
   if (type === "remove") return "var(--diff-remove-gutter)";
   return undefined;
+}
+
+/** Nearest scrollable ancestor (the element the diff actually scrolls inside). */
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const oy = getComputedStyle(node).overflowY;
+    if (oy === "auto" || oy === "scroll") return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** One git hunk mapped to its changed-line extent + the range that stages it. */
+interface HunkBlock {
+  hunkIdx: number;
+  /** dLines index of the first changed line in the hunk. */
+  firstIdx: number;
+  /** dLines index of the last changed line in the hunk. */
+  lastIdx: number;
+  range: HunkRange;
 }
 
 /* ── Merge overlay (lifted card over a change) ────────────── */
@@ -248,6 +276,207 @@ function MergeOverlay({
 }
 
 /* ── Component ────────────────────────────────────────────── */
+
+/* ── Per-line content (memoized) ──────────────────────────────
+ * One source line's rendered spans. Extracted into a memoized component so the
+ * frequent transient re-renders of the whole diff — mouse-move hunk hover, the
+ * merge overlay, comment editing, find stepping — DON'T rebuild every line's
+ * spans. A line only re-renders when its own inputs change (its syntax tokens,
+ * its overlapping highlights, or — if it carries an annotation — the hovered
+ * annotation). The shared EMPTY_* constants keep the common "no decorations"
+ * line referentially stable so it bails out of every re-render. */
+
+type Hl = {
+  s: number;
+  e: number;
+  kind: "ann" | "pending" | "find" | "find-current";
+  annId?: string;
+};
+
+const EMPTY_TOKENS: SyntaxToken[] = [];
+const EMPTY_HLS: Hl[] = [];
+
+interface LineContentProps {
+  text: string;
+  lineType: DiffLine["type"];
+  /** Syntax tokens for this line (a stable ref; EMPTY_TOKENS when none). */
+  syntax: SyntaxToken[];
+  /** Word-diff segments, or null when this line has none / is whitespace-only. */
+  wordSegments: WordSegment[] | null;
+  /** Annotation / pending-selection / find highlights (EMPTY_HLS when none). */
+  hls: Hl[];
+  hoveredAnnId: string | null;
+  onClickAnn: (annId: string, rect: DOMRect) => void;
+  onHoverAnn: (annId: string | null) => void;
+}
+
+function lineContentEqual(a: LineContentProps, b: LineContentProps): boolean {
+  if (
+    a.text !== b.text ||
+    a.lineType !== b.lineType ||
+    a.syntax !== b.syntax ||
+    a.wordSegments !== b.wordSegments ||
+    a.hls !== b.hls ||
+    a.onClickAnn !== b.onClickAnn ||
+    a.onHoverAnn !== b.onHoverAnn
+  ) {
+    return false;
+  }
+  // hoveredAnnId only changes the paint of a line that carries an annotation.
+  if (b.hls.some((h) => h.kind === "ann") && a.hoveredAnnId !== b.hoveredAnnId) {
+    return false;
+  }
+  return true;
+}
+
+const LineContent = memo(function LineContent({
+  text,
+  lineType,
+  syntax,
+  wordSegments,
+  hls,
+  hoveredAnnId,
+  onClickAnn,
+  onHoverAnn,
+}: LineContentProps): ReactNode {
+  if (!text) return " ";
+
+  const wordBgVar =
+    lineType === "add"
+      ? "var(--diff-add-word)"
+      : lineType === "remove"
+        ? "var(--diff-remove-word)"
+        : null;
+
+  if (hls.length === 0 && syntax.length === 0 && !wordSegments) {
+    return text;
+  }
+
+  // Build flat list of breakpoints (every range start/end), then walk segments.
+  const bounds = new Set<number>([0, text.length]);
+  for (const t of syntax) {
+    bounds.add(t.start);
+    bounds.add(t.end);
+  }
+  if (wordSegments) {
+    let off = 0;
+    for (const w of wordSegments) {
+      bounds.add(off);
+      off += w.text.length;
+      bounds.add(off);
+    }
+  }
+  for (const h of hls) {
+    bounds.add(h.s);
+    bounds.add(h.e);
+  }
+  const sorted = [...bounds]
+    .filter((b) => b >= 0 && b <= text.length)
+    .sort((a, b) => a - b);
+
+  // Pre-index word-segment offsets so we can look up per char.
+  const wordOffsets: { start: number; end: number; changed: boolean }[] = [];
+  if (wordSegments) {
+    let off = 0;
+    for (const w of wordSegments) {
+      wordOffsets.push({ start: off, end: off + w.text.length, changed: w.changed });
+      off += w.text.length;
+    }
+  }
+
+  function findSyntax(pos: number) {
+    for (const t of syntax) if (t.start <= pos && pos < t.end) return t;
+    return null;
+  }
+  function findAnn(pos: number) {
+    for (const h of hls) if (h.s <= pos && pos < h.e) return h;
+    return null;
+  }
+  function findWord(pos: number) {
+    for (const w of wordOffsets) if (w.start <= pos && pos < w.end) return w;
+    return null;
+  }
+
+  const parts: ReactNode[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const s = sorted[i];
+    const e = sorted[i + 1];
+    if (s >= e) continue;
+    const slice = text.slice(s, e);
+
+    const synTok = findSyntax(s);
+    const annHl = findAnn(s);
+    const wordSeg = findWord(s);
+
+    const isAnn = annHl?.kind === "ann";
+    const isPending = annHl?.kind === "pending";
+    const isFind = annHl?.kind === "find";
+    const isFindCurrent = annHl?.kind === "find-current";
+    const hovered = isAnn && hoveredAnnId === annHl?.annId;
+
+    const wantsBg =
+      isAnn || isPending || isFind || isFindCurrent || (wordSeg && wordSeg.changed);
+    const background = isFindCurrent
+      ? "var(--find-current-bg, rgba(249,115,22,0.6))"
+      : isFind
+        ? "var(--find-match-bg, rgba(234,179,8,0.32))"
+        : hovered
+          ? "var(--highlight-bg-hover)"
+          : isAnn
+            ? "var(--highlight-bg)"
+            : isPending
+              ? "var(--selection-bg)"
+              : wordSeg && wordSeg.changed && wordBgVar
+                ? wordBgVar
+                : undefined;
+
+    const classNames: string[] = [];
+    if (synTok?.className) classNames.push(synTok.className);
+    if (synTok?.lightColor || synTok?.darkColor) classNames.push("shiki-tok");
+    if (wantsBg) classNames.push("rounded-sm");
+    if (isAnn)
+      classNames.push(
+        "cursor-pointer",
+        "border-b-[1.5px]",
+        "border-[var(--text-tertiary)]"
+      );
+
+    const style: React.CSSProperties & Record<string, string | undefined> = {};
+    if (background) style.background = background;
+    if (isFindCurrent)
+      style.outline = "1px solid var(--find-current-border, #f59e0b)";
+    if (synTok?.lightColor) style["--shiki-light"] = synTok.lightColor;
+    if (synTok?.darkColor) style["--shiki-dark"] = synTok.darkColor;
+    if (synTok?.italic) style.fontStyle = "italic";
+    if (synTok?.bold) style.fontWeight = "600";
+
+    const annId = isAnn ? annHl?.annId : undefined;
+
+    parts.push(
+      <span
+        key={`p${s}`}
+        className={classNames.join(" ") || undefined}
+        style={Object.keys(style).length > 0 ? style : undefined}
+        onClick={
+          isAnn && annId
+            ? (event) => {
+                event.stopPropagation();
+                onClickAnn(
+                  annId,
+                  (event.currentTarget as HTMLElement).getBoundingClientRect()
+                );
+              }
+            : undefined
+        }
+        onMouseEnter={isAnn && annId ? () => onHoverAnn(annId) : undefined}
+        onMouseLeave={isAnn ? () => onHoverAnn(null) : undefined}
+      >
+        {slice}
+      </span>
+    );
+  }
+  return <>{parts}</>;
+}, lineContentEqual);
 
 export function InteractiveDiff({
   oldText,
@@ -476,10 +705,12 @@ export function InteractiveDiff({
   );
 
   function tokensForDiffLine(line: DiffLine): SyntaxToken[] {
+    // Returning a shared empty constant (not `?? []`) keeps the token ref stable
+    // across renders, so a line with no tokens bails out of LineContent's memo.
     if (line.type === "remove") {
-      return oldLineTokens[(line.oldNum ?? 0) - 1] ?? [];
+      return oldLineTokens[(line.oldNum ?? 0) - 1] ?? EMPTY_TOKENS;
     }
-    return newLineTokens[(line.newNum ?? 0) - 1] ?? [];
+    return newLineTokens[(line.newNum ?? 0) - 1] ?? EMPTY_TOKENS;
   }
 
   /* ── Change blocks (for the merge overlay) ─────────────── */
@@ -493,6 +724,180 @@ export function InteractiveDiff({
     () => (blocksEnabled ? buildLineToChangeMap(changes) : new Map<number, number>()),
     [changes, blocksEnabled]
   );
+
+  /* ── Split-view per-hunk gutter (VS Code-style stage/revert) ── */
+
+  // `hunkActions.hunks` is memoized by the caller, so depend on the array (not
+  // the inline `hunkActions` object, which is a fresh literal every render).
+  const hunkList = hunkActions?.hunks;
+
+  // Each git hunk → its first/last changed line in `dLines` + the range that
+  // stages exactly it. Git hunks (not finer `Change`s) are the stageable unit,
+  // so one box per hunk means a click can never stage a neighbour.
+  const hunkBlocks: HunkBlock[] = useMemo(() => {
+    if (!hunkActionsEnabled || !hunkList?.length) return [];
+    const out: HunkBlock[] = [];
+    hunkList.forEach((h, hunkIdx) => {
+      const oldEnd = h.oldStart + Math.max(h.oldCount, 1) - 1;
+      const newEnd = h.newStart + Math.max(h.newCount, 1) - 1;
+      let firstIdx = Infinity;
+      let lastIdx = -Infinity;
+      for (const l of dLines) {
+        const inHunk =
+          (l.type === "remove" &&
+            l.oldNum != null &&
+            l.oldNum >= h.oldStart &&
+            l.oldNum <= oldEnd) ||
+          (l.type === "add" &&
+            l.newNum != null &&
+            l.newNum >= h.newStart &&
+            l.newNum <= newEnd);
+        if (!inHunk) continue;
+        if (l.idx < firstIdx) firstIdx = l.idx;
+        if (l.idx > lastIdx) lastIdx = l.idx;
+      }
+      if (firstIdx === Infinity) return; // hunk with no changed lines (defensive)
+      out.push({
+        hunkIdx,
+        firstIdx,
+        lastIdx,
+        range: {
+          oldStart: h.oldCount > 0 ? h.oldStart : null,
+          oldEnd: h.oldCount > 0 ? oldEnd : null,
+          newStart: h.newCount > 0 ? h.newStart : null,
+          newEnd: h.newCount > 0 ? newEnd : null,
+        },
+      });
+    });
+    return out;
+  }, [hunkActionsEnabled, hunkList, dLines]);
+
+  const showGutter =
+    hunkActionsEnabled && effectiveViewMode === "split" && hunkBlocks.length > 0;
+
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const hunkBoxRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const hunkLineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  // Cached pixel extent (top/bottom in gutter-local coords) of each hunk.
+  // Measured only on layout changes; the scroll handler reads these, never the
+  // DOM — which is why the box can't jitter or drift the way earlier tries did.
+  const hunkExtents = useRef<Map<number, { top: number; bottom: number }>>(
+    new Map()
+  );
+
+  useLayoutEffect(() => {
+    if (!showGutter) {
+      hunkExtents.current.clear();
+      return;
+    }
+    const content = contentRef.current;
+    const gutter = gutterRef.current;
+    if (!content || !gutter) return;
+    const scrollParent = findScrollParent(gutter);
+
+    // Re-measure each hunk's extent and pin its line. Cheap and rare (layout
+    // changes only). Union across both columns so the line spans whichever side
+    // wrapped taller — keeping it aligned regardless of line-wrap.
+    const measure = () => {
+      const gTop = gutter.getBoundingClientRect().top;
+      for (const b of hunkBlocks) {
+        const firsts = content.querySelectorAll(`[data-dline="${b.firstIdx}"]`);
+        const lasts = content.querySelectorAll(`[data-dline="${b.lastIdx}"]`);
+        if (!firsts.length || !lasts.length) {
+          hunkExtents.current.delete(b.hunkIdx);
+          continue;
+        }
+        let top = Infinity;
+        let bottom = -Infinity;
+        firsts.forEach((el) => {
+          top = Math.min(top, el.getBoundingClientRect().top - gTop);
+        });
+        lasts.forEach((el) => {
+          bottom = Math.max(bottom, el.getBoundingClientRect().bottom - gTop);
+        });
+        hunkExtents.current.set(b.hunkIdx, { top, bottom });
+        const line = hunkLineRefs.current.get(b.hunkIdx);
+        if (line) {
+          line.style.top = `${top}px`;
+          line.style.height = `${Math.max(0, bottom - top)}px`;
+        }
+      }
+      place();
+    };
+
+    // Centre each box in the visible slice of its hunk, hard-clamped to the
+    // hunk so it can never bleed into a neighbour. Pure arithmetic on cached
+    // extents — no layout, no jitter.
+    const place = () => {
+      const gTop = gutter.getBoundingClientRect().top;
+      let viewTop: number;
+      let viewBottom: number;
+      if (scrollParent) {
+        const r = scrollParent.getBoundingClientRect();
+        viewTop = r.top - gTop;
+        viewBottom = r.bottom - gTop;
+      } else {
+        viewTop = -gTop;
+        viewBottom = window.innerHeight - gTop;
+      }
+      // Keep the box clear of the sticky find bar at the top of the viewport.
+      viewTop += find.open ? 44 : 6;
+
+      for (const b of hunkBlocks) {
+        const box = hunkBoxRefs.current.get(b.hunkIdx);
+        const ext = hunkExtents.current.get(b.hunkIdx);
+        if (!box || !ext) continue;
+        const half = (box.offsetHeight || 32) / 2;
+        const visTop = Math.max(ext.top, viewTop);
+        const visBottom = Math.min(ext.bottom, viewBottom);
+        const center =
+          visBottom <= visTop
+            ? // Hunk fully off-screen: park at the nearest edge (still clamped).
+              ext.top < viewTop
+              ? ext.bottom - half
+              : ext.top + half
+            : (visTop + visBottom) / 2;
+        const min = ext.top + half;
+        const max = ext.bottom - half;
+        box.style.top = `${
+          max < min ? (ext.top + ext.bottom) / 2 : Math.min(Math.max(center, min), max)
+        }px`;
+      }
+    };
+
+    measure();
+
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        place();
+      });
+    };
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(content);
+    const scrollTarget: Window | HTMLElement = scrollParent ?? window;
+    scrollTarget.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", measure);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      ro.disconnect();
+      scrollTarget.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", measure);
+    };
+  }, [
+    showGutter,
+    hunkBlocks,
+    splitRows,
+    effectiveViewMode,
+    settings.lineWrap,
+    settings.fontSize,
+    settings.hideUnchanged,
+    expandedSeparators,
+    find.open,
+  ]);
 
   const [activeChangeIdx, setActiveChangeIdx] = useState<number | null>(null);
   const [overlayPos, setOverlayPos] = useState<
@@ -585,10 +990,51 @@ export function InteractiveDiff({
 
   const [hoverChangeIdx, setHoverChangeIdx] = useState<number | null>(null);
   const [hunkCtrlTop, setHunkCtrlTop] = useState<number | null>(null);
+  // Split-view: which hunk's box is currently revealed (hover/focus). Only one
+  // box is ever shown, so oversized boxes on small hunks can't collide.
+  const [hoveredHunkIdx, setHoveredHunkIdx] = useState<number | null>(null);
 
   useEffect(() => {
     setHoverChangeIdx(null);
+    setHoveredHunkIdx(null);
   }, [oldText, newText]);
+
+  // dLines index → the hunk it belongs to, spanning each hunk's full extent
+  // (incl. internal context) so hovering anywhere in a block reveals its box.
+  const dlineToHunk = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const b of hunkBlocks) {
+      for (let i = b.firstIdx; i <= b.lastIdx; i++) map.set(i, b.hunkIdx);
+    }
+    return map;
+  }, [hunkBlocks]);
+
+  // Resolve a mousemove to a hovered hunk. Returns the hunk idx, `null` to
+  // clear, or `undefined` to keep the current hover (cursor is on the box).
+  function hunkHoverFromEvent(e: React.MouseEvent): number | null | undefined {
+    const target = e.target as HTMLElement;
+    const gutter = gutterRef.current;
+    // Inside the gutter: the box itself keeps the hover; otherwise resolve by
+    // the cursor's Y against the cached hunk extents (so the whole gutter
+    // column is hover-active per hunk, making the box easy to reach).
+    if (gutter && gutter.contains(target)) {
+      if (target.closest("[data-hunk-control]")) return undefined;
+      const y = e.clientY - gutter.getBoundingClientRect().top;
+      for (const b of hunkBlocks) {
+        const ext = hunkExtents.current.get(b.hunkIdx);
+        if (ext && y >= ext.top && y <= ext.bottom) return b.hunkIdx;
+      }
+      return null;
+    }
+    // Over the code: resolve by the hovered diff row.
+    let el: HTMLElement | null = target;
+    while (el && !el.hasAttribute("data-dline")) {
+      if (el === contentRef.current) return null;
+      el = el.parentElement;
+    }
+    if (!el) return null;
+    return dlineToHunk.get(parseInt(el.getAttribute("data-dline")!)) ?? null;
+  }
 
   useEffect(() => {
     if (
@@ -809,7 +1255,14 @@ export function InteractiveDiff({
     setEditing(null);
   }
 
-  function openEdit(ann: Annotation, rect: DOMRect) {
+  // Stable handlers passed to every memoized LineContent. Kept referentially
+  // stable (annotations read through a ref) so a line bails out of re-rendering
+  // unless its own content changed — passing fresh closures would defeat the memo.
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
+  const handleClickAnn = useCallback((annId: string, rect: DOMRect) => {
+    const ann = annotationsRef.current.find((a) => a.id === annId);
+    if (!ann) return;
     setEditing({
       annotation: ann,
       pos: {
@@ -820,16 +1273,13 @@ export function InteractiveDiff({
         ),
       },
     });
-  }
+  }, []);
+  const handleHoverAnn = useCallback(
+    (id: string | null) => setHoveredAnnId(id),
+    []
+  );
 
   /* ── Highlights ─────────────────────────────────────────── */
-
-  type Hl = {
-    s: number;
-    e: number;
-    kind: "ann" | "pending" | "find" | "find-current";
-    annId?: string;
-  };
 
   // `side` is the column being rendered in split view. A context (unchanged)
   // line shares one DiffLine.idx across both columns, so without this filter a
@@ -877,155 +1327,10 @@ export function InteractiveDiff({
       });
     }
 
+    // Shared empty constant when there's nothing to paint — keeps the ref stable
+    // so undecorated lines bail out of LineContent's memo.
+    if (out.length === 0) return EMPTY_HLS;
     return out.sort((a, b) => a.s - b.s);
-  }
-
-  function renderContent(lineIdx: number, side?: "left" | "right"): ReactNode {
-    const line = dLines[lineIdx];
-    const txt = line.content;
-    if (!txt) return "\u00A0";
-
-    const hls = hlsForLine(lineIdx, side);
-    const syntax = tokensForDiffLine(line);
-    const wordSegments =
-      line.wordSegments && !line.whitespaceOnly ? line.wordSegments : null;
-    const wordBgVar =
-      line.type === "add"
-        ? "var(--diff-add-word)"
-        : line.type === "remove"
-          ? "var(--diff-remove-word)"
-          : null;
-
-    if (hls.length === 0 && syntax.length === 0 && !wordSegments) {
-      return txt;
-    }
-
-    // Build flat list of breakpoints (every range start/end), then walk segments
-    const bounds = new Set<number>([0, txt.length]);
-    for (const t of syntax) {
-      bounds.add(t.start);
-      bounds.add(t.end);
-    }
-    if (wordSegments) {
-      let off = 0;
-      for (const w of wordSegments) {
-        bounds.add(off);
-        off += w.text.length;
-        bounds.add(off);
-      }
-    }
-    for (const h of hls) {
-      bounds.add(h.s);
-      bounds.add(h.e);
-    }
-    const sorted = [...bounds]
-      .filter((b) => b >= 0 && b <= txt.length)
-      .sort((a, b) => a - b);
-
-    // Pre-index word-segment offsets so we can look up per char
-    let wordOffsets: { start: number; end: number; changed: boolean }[] = [];
-    if (wordSegments) {
-      let off = 0;
-      for (const w of wordSegments) {
-        wordOffsets.push({
-          start: off,
-          end: off + w.text.length,
-          changed: w.changed,
-        });
-        off += w.text.length;
-      }
-    }
-
-    function findSyntax(pos: number) {
-      for (const t of syntax) if (t.start <= pos && pos < t.end) return t;
-      return null;
-    }
-    function findAnn(pos: number) {
-      for (const h of hls) if (h.s <= pos && pos < h.e) return h;
-      return null;
-    }
-    function findWord(pos: number) {
-      for (const w of wordOffsets) if (w.start <= pos && pos < w.end) return w;
-      return null;
-    }
-
-    const parts: ReactNode[] = [];
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const s = sorted[i];
-      const e = sorted[i + 1];
-      if (s >= e) continue;
-      const slice = txt.slice(s, e);
-
-      const synTok = findSyntax(s);
-      const annHl = findAnn(s);
-      const wordSeg = findWord(s);
-
-      const isAnn = annHl?.kind === "ann";
-      const isPending = annHl?.kind === "pending";
-      const isFind = annHl?.kind === "find";
-      const isFindCurrent = annHl?.kind === "find-current";
-      const hovered = isAnn && hoveredAnnId === annHl?.annId;
-
-      const wantsBg =
-        isAnn || isPending || isFind || isFindCurrent || (wordSeg && wordSeg.changed);
-      const background =
-        isFindCurrent
-          ? "var(--find-current-bg, rgba(249,115,22,0.6))"
-          : isFind
-            ? "var(--find-match-bg, rgba(234,179,8,0.32))"
-            : hovered
-              ? "var(--highlight-bg-hover)"
-              : isAnn
-                ? "var(--highlight-bg)"
-                : isPending
-                  ? "var(--selection-bg)"
-                  : wordSeg && wordSeg.changed && wordBgVar
-                    ? wordBgVar
-                    : undefined;
-
-      const classNames: string[] = [];
-      if (synTok?.className) classNames.push(synTok.className);
-      if (synTok?.lightColor || synTok?.darkColor) classNames.push("shiki-tok");
-      if (wantsBg) classNames.push("rounded-sm");
-      if (isAnn) classNames.push("cursor-pointer", "border-b-[1.5px]", "border-[var(--text-tertiary)]");
-
-      const style: React.CSSProperties & Record<string, string | undefined> = {};
-      if (background) style.background = background;
-      if (isFindCurrent)
-        style.outline = "1px solid var(--find-current-border, #f59e0b)";
-      if (synTok?.lightColor) style["--shiki-light"] = synTok.lightColor;
-      if (synTok?.darkColor) style["--shiki-dark"] = synTok.darkColor;
-      if (synTok?.italic) style.fontStyle = "italic";
-      if (synTok?.bold) style.fontWeight = "600";
-
-      const annId = isAnn ? annHl?.annId : undefined;
-
-      parts.push(
-        <span
-          key={`p${s}`}
-          className={classNames.join(" ") || undefined}
-          style={Object.keys(style).length > 0 ? style : undefined}
-          onClick={
-            isAnn
-              ? (event) => {
-                  event.stopPropagation();
-                  const ann = annotations.find((a) => a.id === annId);
-                  if (ann)
-                    openEdit(
-                      ann,
-                      (event.currentTarget as HTMLElement).getBoundingClientRect()
-                    );
-                }
-              : undefined
-          }
-          onMouseEnter={isAnn && annId ? () => setHoveredAnnId(annId) : undefined}
-          onMouseLeave={isAnn ? () => setHoveredAnnId(null) : undefined}
-        >
-          {slice}
-        </span>
-      );
-    }
-    return <>{parts}</>;
   }
 
   /* ── Shared cell styles ─────────────────────────────────── */
@@ -1086,8 +1391,8 @@ export function InteractiveDiff({
           background: hovered ? "var(--bg-surface-hover)" : "var(--bg)",
         }}
         onClick={(e) =>
-          openEdit(
-            ann,
+          handleClickAnn(
+            ann.id,
             (e.currentTarget as HTMLElement).getBoundingClientRect()
           )
         }
@@ -1276,7 +1581,20 @@ export function InteractiveDiff({
                       data-dline={item.idx}
                       style={contentCellStyle(vt)}
                     >
-                      {renderContent(item.idx)}
+                      <LineContent
+                        text={item.content}
+                        lineType={item.type}
+                        syntax={tokensForDiffLine(item)}
+                        wordSegments={
+                          item.wordSegments && !item.whitespaceOnly
+                            ? item.wordSegments
+                            : null
+                        }
+                        hls={hlsForLine(item.idx)}
+                        hoveredAnnId={hoveredAnnId}
+                        onClickAnn={handleClickAnn}
+                        onHoverAnn={handleHoverAnn}
+                      />
                     </td>
                   </tr>
                   {lineAnns?.map(({ annotation: ann, index }) => (
@@ -1347,9 +1665,99 @@ export function InteractiveDiff({
           data-dline={line.idx}
           style={contentCellStyle(vt)}
         >
-          {renderContent(line.idx, side)}
+          <LineContent
+            text={line.content}
+            lineType={line.type}
+            syntax={tokensForDiffLine(line)}
+            wordSegments={
+              line.wordSegments && !line.whitespaceOnly ? line.wordSegments : null
+            }
+            hls={hlsForLine(line.idx, side)}
+            hoveredAnnId={hoveredAnnId}
+            onClickAnn={handleClickAnn}
+            onHoverAnn={handleHoverAnn}
+          />
         </td>
       </tr>
+    );
+  }
+
+  function renderHunkButtons(block: HunkBlock) {
+    if (!hunkActions) return null;
+    const { range } = block;
+    if (hunkActions.isStaged) {
+      return (
+        <button
+          onClick={() => hunkActions.onUnstage(range)}
+          title="Unstage this hunk"
+          aria-label="Unstage this hunk"
+          className="flex h-5 w-5 items-center justify-center rounded text-[13px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+        >
+          −
+        </button>
+      );
+    }
+    return (
+      <>
+        <button
+          onClick={() => hunkActions.onRevert(range)}
+          title="Revert this hunk"
+          aria-label="Revert this hunk"
+          className="flex h-5 w-5 items-center justify-center rounded text-[12px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--removed-text)]"
+        >
+          ↺
+        </button>
+        <button
+          onClick={() => hunkActions.onStage(range)}
+          title="Stage this hunk"
+          aria-label="Stage this hunk"
+          className="flex h-5 w-5 items-center justify-center rounded text-[13px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--bg)]"
+        >
+          ＋
+        </button>
+      </>
+    );
+  }
+
+  // The center gutter: a slim, full-height column holding one grey line + one
+  // control box per git hunk. Line and box are absolutely positioned children,
+  // so they scroll with the content for free; their vertical positions are set
+  // imperatively by the measure/place effect above (`opacity-0` until placed).
+  function renderGutter() {
+    return (
+      <div
+        ref={gutterRef}
+        className="relative w-8 shrink-0 self-stretch border-r border-[var(--border)] bg-[var(--bg)]"
+      >
+        {hunkBlocks.map((block) => (
+          <Fragment key={block.hunkIdx}>
+            <div
+              ref={(el) => {
+                if (el) hunkLineRefs.current.set(block.hunkIdx, el);
+                else hunkLineRefs.current.delete(block.hunkIdx);
+              }}
+              className="pointer-events-none absolute left-1/2 w-[2px] -translate-x-1/2 rounded-full bg-[var(--text-tertiary)]"
+              style={{ top: 0, height: 0 }}
+            />
+            <div
+              ref={(el) => {
+                if (el) hunkBoxRefs.current.set(block.hunkIdx, el);
+                else hunkBoxRefs.current.delete(block.hunkIdx);
+              }}
+              data-hunk-control
+              onMouseEnter={() => setHoveredHunkIdx(block.hunkIdx)}
+              className={`absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-0.5 shadow-sm transition-opacity ${
+                hoveredHunkIdx === block.hunkIdx
+                  ? "opacity-100"
+                  : "pointer-events-none opacity-0"
+              }`}
+              style={{ top: 0 }}
+            >
+              {renderHunkButtons(block)}
+            </div>
+          </Fragment>
+        ))}
+      </div>
     );
   }
 
@@ -1429,10 +1837,11 @@ export function InteractiveDiff({
 
     return (
       <div className="flex">
-        <div className="shrink-0 basis-1/2 overflow-x-auto border-r border-[var(--border)] [container-type:inline-size]">
+        <div className="min-w-0 flex-1 overflow-x-auto border-r border-[var(--border)] [container-type:inline-size]">
           {renderColumn("left")}
         </div>
-        <div className="shrink-0 basis-1/2 overflow-x-auto [container-type:inline-size]">
+        {showGutter && renderGutter()}
+        <div className="min-w-0 flex-1 overflow-x-auto [container-type:inline-size]">
           {renderColumn("right")}
         </div>
       </div>
@@ -1476,12 +1885,15 @@ export function InteractiveDiff({
         onMouseMove={
           hunkActionsEnabled
             ? (e) => {
+                // `undefined` → cursor is on the box itself; keep it revealed
+                // (moving onto it must NOT clear the hover, or it would blink).
+                if (effectiveViewMode === "split") {
+                  const h = hunkHoverFromEvent(e);
+                  if (h !== undefined) setHoveredHunkIdx(h);
+                  return;
+                }
                 let el: HTMLElement | null = e.target as HTMLElement | null;
                 while (el && !el.hasAttribute("data-dline")) {
-                  // Moving onto the floating control itself must NOT clear the
-                  // hover — otherwise the control unmounts the instant the
-                  // cursor reaches it, and re-mounts when it falls back onto the
-                  // line underneath, producing a blink loop.
                   if (el.hasAttribute("data-hunk-control")) return;
                   if (el === contentRef.current) {
                     setHoverChangeIdx(null);
@@ -1497,7 +1909,12 @@ export function InteractiveDiff({
             : undefined
         }
         onMouseLeave={
-          hunkActionsEnabled ? () => setHoverChangeIdx(null) : undefined
+          hunkActionsEnabled
+            ? () => {
+                setHoverChangeIdx(null);
+                setHoveredHunkIdx(null);
+              }
+            : undefined
         }
         // py-7 reserves vertical room at the top & bottom of the diff so the
         // merge overlay's strips have somewhere to live for changes that sit
@@ -1524,6 +1941,7 @@ export function InteractiveDiff({
         )}
         {hunkActionsEnabled &&
           hunkActions &&
+          effectiveViewMode !== "split" &&
           hoverChangeIdx !== null &&
           hunkCtrlTop !== null &&
           changes[hoverChangeIdx] && (
