@@ -107,13 +107,14 @@ const electronAPI = {
     ),
   terminalInput: (id: string, data: string) =>
     ipcRenderer.send("terminal:input", id, data),
-  terminalSubmit: (id: string, text: string) =>
-    ipcRenderer.send("terminal:submit", id, text),
+  terminalSubmit: (id: string, text: string, imagePaths: string[] = []) =>
+    ipcRenderer.send("terminal:submit", id, text, imagePaths),
   terminalSendKeys: (id: string, keys: string[]) =>
     ipcRenderer.send("terminal:sendKeys", id, keys),
   terminalStatus: (id: string) => ipcRenderer.invoke("terminal:status", id),
   terminalInputState: (id: string) =>
     ipcRenderer.invoke("terminal:inputState", id),
+  terminalDump: (id: string) => ipcRenderer.invoke("terminal:dump", id),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", id, cols, rows),
   terminalKill: (id: string) => ipcRenderer.send("terminal:kill", id),

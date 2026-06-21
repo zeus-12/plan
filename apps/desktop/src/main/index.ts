@@ -54,6 +54,7 @@ import {
   sendKeys,
   terminalStatus,
   detectInputState,
+  dumpTerminal,
   resizeTerminal,
   killTerminal,
   killAllTerminals,
@@ -588,8 +589,10 @@ function registerIpc() {
   ipcMain.on("terminal:input", (_e, id: string, data: string) =>
     writeTerminal(id, data),
   );
-  ipcMain.on("terminal:submit", (_e, id: string, text: string) =>
-    submitToTerminal(id, text),
+  ipcMain.on(
+    "terminal:submit",
+    (_e, id: string, text: string, imagePaths: string[] = []) =>
+      submitToTerminal(id, text, imagePaths),
   );
   ipcMain.on("terminal:sendKeys", (_e, id: string, keys: string[]) =>
     sendKeys(id, keys),
@@ -598,6 +601,7 @@ function registerIpc() {
   ipcMain.handle("terminal:inputState", (_e, id: string) =>
     detectInputState(id),
   );
+  ipcMain.handle("terminal:dump", (_e, id: string) => dumpTerminal(id));
   ipcMain.on("terminal:resize", (_e, id: string, cols: number, rows: number) =>
     resizeTerminal(id, cols, rows),
   );

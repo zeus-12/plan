@@ -475,6 +475,7 @@ export function FileDiffViewer({
               parsedHunks.hunks.length > 0
                 ? {
                     isStaged,
+                    hunks: parsedHunks.hunks,
                     onStage: (r) => applyHunk(r, "stage"),
                     onUnstage: (r) => applyHunk(r, "unstage"),
                     onRevert: (r) => applyHunk(r, "discard"),

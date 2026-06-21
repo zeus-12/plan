@@ -94,7 +94,7 @@ interface ElectronAPI {
     initialCommand?: string
   ) => Promise<{ cwd: string; error?: string }>;
   terminalInput: (id: string, data: string) => void;
-  terminalSubmit: (id: string, text: string) => void;
+  terminalSubmit: (id: string, text: string, imagePaths?: string[]) => void;
   terminalSendKeys: (id: string, keys: string[]) => void;
   terminalStatus: (
     id: string
@@ -105,6 +105,7 @@ interface ElectronAPI {
     state: "input" | "selection" | "unknown";
     lines: string[];
   }>;
+  terminalDump: (id: string) => Promise<string>;
   terminalResize: (id: string, cols: number, rows: number) => void;
   terminalKill: (id: string) => void;
   terminalList: () => Promise<{ id: string; cwd: string; pid: number }[]>;

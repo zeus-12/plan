@@ -243,14 +243,32 @@ export function sendKeys(id: string, keys: string[]) {
  * batch as a paste (anti-accidental-submit), so the separation is required —
  * the same approach tmux-based Claude drivers use.
  */
-export function submitToTerminal(id: string, text: string) {
+export function submitToTerminal(
+  id: string,
+  text: string,
+  imagePaths: string[] = []
+) {
   const s = sessions.get(id);
   if (!s) return;
-  const body = text.replace(/\r\n/g, "\n").replace(/\r/g, "");
-  s.pty.write(`\x1b[200~${body}\x1b[201~`);
-  setTimeout(() => {
-    sessions.get(id)?.pty.write("\r");
-  }, 150);
+  let body = text.replace(/\r\n/g, "\n").replace(/\r/g, "");
+  // Image paths go on their OWN line after the text, inside the bracketed paste.
+  // That's the shape Claude's TUI recognises as an attached image (recording it
+  // as "[Image: source: <path>]", which the transcript renders) — typing the
+  // path inline as plain text instead just leaves it as literal path text.
+  if (imagePaths.length > 0) {
+    body = [body, imagePaths.join(" ")].filter(Boolean).join("\n\n");
+  }
+  if (body) s.pty.write(`\x1b[200~${body}\x1b[201~`);
+  // Enter follows as a SEPARATE keystroke (Claude ignores an Enter bundled into
+  // the same batch as a paste). With an image, give Claude time to read + attach
+  // the file first — an Enter arriving mid-attach is dropped, which left the
+  // message sitting unsent in the input.
+  setTimeout(
+    () => {
+      sessions.get(id)?.pty.write("\r");
+    },
+    imagePaths.length > 0 ? 650 : 150
+  );
 }
 
 export function resizeTerminal(id: string, cols: number, rows: number) {
@@ -299,16 +317,24 @@ function readScreen(id: string): string[] {
   return out;
 }
 
-// Claude Code's TUI selection menus (tool approval, plan accept, AskUserQuestion)
-// render NUMBERED options with a ❯ pointer on the highlighted one, e.g.
-// "❯ 1. Yes". The free-text composer renders the box with a bare prompt — which
-// in current builds is ALSO a "❯" (or "> "), e.g. "│ ❯ ". So the ONLY reliable
-// difference is the digit: a chevron followed by "<number>." is a menu; a
-// chevron with no number is just the input prompt. Matching a bare chevron here
-// (as an earlier version did) misreads the normal composer as a menu — don't.
-// These are heuristics on rendered glyphs, not a protocol — word any UI as a
-// guess ("may be…").
-const SELECTION_RE = /❯\s*\d+[.)]/;
+// Claude Code blocks for input in two visually different shapes:
+//
+//  1. Yes/No-style menus (tool approval, plan accept): a NUMBERED option with a
+//     ❯ pointer on the highlighted one, e.g. "❯ 1. Yes". A bare chevron is NOT
+//     enough — the composer's own prompt is also "❯" (or "> ") in current
+//     builds, so only "❯ <number>." means a menu (matching a bare chevron, as
+//     an earlier version did, misread the normal composer as a menu).
+//
+//  2. AskUserQuestion pickers: options are highlighted by COLOR, not a ❯, so
+//     shape (1) misses them entirely. What they reliably carry is a footer hint
+//     line — "Enter to select", "Tab to switch questions", "Esc to cancel".
+//     "Esc to cancel" also rides on the Yes/No prompts, so it doubles as a
+//     general "an interactive prompt is up" signal. It is distinct from the
+//     working spinner's "(esc to interrupt)" — different word, so no clash.
+//
+// All heuristics on rendered glyphs, not a protocol — word any UI as a guess.
+const SELECTION_RE =
+  /❯\s*\d+[.)]|Esc to cancel|Enter to select|Tab to switch questions/;
 const INPUT_BOX_RE = /[│|]\s*[>❯]\s/;
 
 /**
@@ -329,6 +355,24 @@ export function detectInputState(
   if (SELECTION_RE.test(text)) state = "selection";
   else if (INPUT_BOX_RE.test(text)) state = "input";
   return { state, lines: nonEmpty.slice(-12) };
+}
+
+/**
+ * Full rendered text of terminal `id` (scrollback + visible screen), trimmed of
+ * leading/trailing blank lines. Debug aid: lets the UI copy what the headless
+ * emulator currently "sees" so the detection heuristics can be tuned against
+ * real Claude Code frames.
+ */
+export function dumpTerminal(id: string): string {
+  const s = sessions.get(id);
+  if (!s) return "";
+  const buf = s.screen.buffer.active;
+  const out: string[] = [];
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i);
+    out.push(line ? line.translateToString(true) : "");
+  }
+  return out.join("\n").replace(/^\n+|\n+$/g, "");
 }
 
 export interface TerminalInfo {
