@@ -479,7 +479,12 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             })}
             {/* Immediately right of the last tab; scrolls with the strip. */}
             <button
-              onClick={onNewTerminal}
+              onClick={() => {
+                // Spawning already switches to the new terminal; make sure the
+                // pane is expanded so a collapsed terminal section reopens too.
+                onNewTerminal();
+                setPaneCollapsed(false);
+              }}
               title="New terminal (⌘⇧J)"
               aria-label="New terminal"
               className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
