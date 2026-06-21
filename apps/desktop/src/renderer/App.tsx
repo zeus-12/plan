@@ -215,7 +215,7 @@ function Shell() {
         (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&
         !e.altKey &&
-        e.key.toLowerCase() === "t"
+        e.key.toLowerCase() === "d"
       ) {
         const el = document.activeElement as HTMLElement | null;
         const tag = el?.tagName;
@@ -323,6 +323,7 @@ function Shell() {
       {selected && worktreeRailOpen && (
         <div className="flex w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-surface)]">
           <WorktreeRail
+            trafficLightInset={!projectsSidebar.open}
             projectName={projectShortName(selected)}
             liveBranch={reposByProject.get(selected.encoded)?.[0]?.branch ?? null}
             worktrees={worktrees.worktrees}

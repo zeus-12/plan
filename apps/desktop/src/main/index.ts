@@ -118,10 +118,34 @@ function registerSwitcherShortcuts() {
   const b = globalShortcut.register("Control+Shift+Tab", () =>
     sendSwitcherCycle("Tab", true),
   );
-  switcherRegistered = a || b;
+  // Projects (Ctrl+`) get the SAME OS-level hook as Tab. before-input-event
+  // alone proved unreliable — when a terminal/xterm pane holds focus the page
+  // keydown is swallowed and the project switcher silently dies, while Tab kept
+  // working precisely because globalShortcut bypasses page-level handling. The
+  // backtick lives on the same physical key as ~, so Shift uses that accelerator.
+  const c = globalShortcut.register("Control+`", () =>
+    sendSwitcherCycle("Backquote", false),
+  );
+  const d = globalShortcut.register("Control+~", () =>
+    sendSwitcherCycle("Backquote", true),
+  );
+  // Worktrees (Ctrl+1). Chromium reserves Ctrl+1‑9 for tab navigation and
+  // swallows them before the page's keydown, so — like Tab/backtick — we tap it
+  // at the OS level and forward. Ctrl+Shift+1 reverses.
+  const e = globalShortcut.register("Control+1", () =>
+    sendSwitcherCycle("Digit1", false),
+  );
+  const f = globalShortcut.register("Control+Shift+1", () =>
+    sendSwitcherCycle("Digit1", true),
+  );
+  switcherRegistered = a || b || c || d || e || f;
   console.log("[switcher] globalShortcut registered:", {
     ctrlTab: a,
     ctrlShiftTab: b,
+    ctrlBacktick: c,
+    ctrlTilde: d,
+    ctrl1: e,
+    ctrlShift1: f,
   });
 }
 
@@ -129,6 +153,10 @@ function unregisterSwitcherShortcuts() {
   if (!switcherRegistered) return;
   globalShortcut.unregister("Control+Tab");
   globalShortcut.unregister("Control+Shift+Tab");
+  globalShortcut.unregister("Control+`");
+  globalShortcut.unregister("Control+~");
+  globalShortcut.unregister("Control+1");
+  globalShortcut.unregister("Control+Shift+1");
   switcherRegistered = false;
 }
 
@@ -237,13 +265,6 @@ function createMainWindow(): BrowserWindow {
   // it fires before the page, so we cancel the keystroke and forward a cycle to
   // the renderer, which owns the modal and commits when the user releases Ctrl.
   win.webContents.on("before-input-event", (event, input) => {
-    if (input.type === "keyDown" && (input.control || input.meta)) {
-      console.log("[switcher-dbg] before-input", input.code, {
-        control: input.control,
-        meta: input.meta,
-        alt: input.alt,
-      });
-    }
     if (input.type !== "keyDown" || input.alt) return;
     // Ctrl+Tab cycles sessions — Tab stays Ctrl-only because Cmd+Tab is the
     // macOS app switcher and must not be hijacked. Projects cycle on Ctrl+` OR

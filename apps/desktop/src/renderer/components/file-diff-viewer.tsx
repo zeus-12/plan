@@ -76,6 +76,8 @@ export function FileDiffViewer({
 }: Props) {
   const isStaged = mode === "staged";
   const [settings, updateSettings] = useDiffSettings();
+  // Header slot the diff portals its settings gear into (beside "Format").
+  const [settingsSlot, setSettingsSlot] = useState<HTMLDivElement | null>(null);
   const [contents, setContents] = useState<FileView | null>(null);
   // Bumped after a per-hunk op to re-fetch this file's view in place (so the
   // staged hunk leaves "Changes" immediately) without remounting the viewer.
@@ -442,6 +444,8 @@ export function FileDiffViewer({
             </TooltipTrigger>
             <TooltipContent side="bottom">{formatTooltip}</TooltipContent>
           </Tooltip>
+          {/* InteractiveDiff portals its settings gear here. */}
+          <div ref={setSettingsSlot} className="flex items-center" />
         </div>
       </div>
 
@@ -464,6 +468,8 @@ export function FileDiffViewer({
             newText={viewNewText}
             settings={settings}
             onSettingsChange={updateSettings}
+            settingsVariant="popover"
+            settingsPortalTarget={settingsSlot}
             findEnabled={active}
             isFirstVersion={!contents.oldText}
             language={effectiveLanguage}
