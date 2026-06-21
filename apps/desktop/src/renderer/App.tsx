@@ -13,8 +13,10 @@ import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
+import { Toaster } from "@plan/shared/components/ui/sonner";
 import { SwitcherOverlay } from "./components/switcher-overlay";
 import { SessionsDashboard } from "./components/sessions-dashboard";
+import { SettingsModal } from "./components/settings-modal";
 import { WorktreeRail } from "./components/worktree-rail";
 import { NewWorktreeModal } from "./components/new-worktree-modal";
 import { CreatePrModal } from "./components/create-pr-modal";
@@ -30,6 +32,11 @@ import {
   recordUse,
   subscribeMru,
 } from "./lib/mru-store";
+import {
+  setSessionLabelResolver,
+  setSessionNavigator,
+  startSessionDoneNotifier,
+} from "./lib/session-done-notifier";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
@@ -296,6 +303,25 @@ function Shell() {
 
   // Sessions dashboard: a control-center for every live Claude pty.
   const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Watch every live Claude session for completion and notify globally. Started
+  // once here at the app root so it covers background sessions too, not just the
+  // one on screen.
+  useEffect(() => startSessionDoneNotifier(), []);
+  // Keep the notification body's project label in sync with the project list.
+  useEffect(() => {
+    const byEncoded = new Map(
+      projects.map((p) => [p.encoded, projectShortName(p)]),
+    );
+    setSessionLabelResolver((id) => {
+      const m = id.match(/^chat:(.+):([^:]+)$/);
+      if (!m) return "Claude";
+      const name = byEncoded.get(m[1]);
+      const sid = m[2].slice(0, 8);
+      return name ? `${name} · ${sid}` : sid;
+    });
+  }, [projects]);
   const navigateToSession = useCallback(
     (encoded: string, sessionId: string) => {
       // Open (or focus) the chat as a tab in the target worktree. This persists
@@ -307,6 +333,14 @@ function Shell() {
     },
     [],
   );
+
+  // Let a "Claude is done" toast's "View" action jump to that session.
+  useEffect(() => {
+    setSessionNavigator((id) => {
+      const m = id.match(/^chat:(.+):([^:]+)$/);
+      if (m) navigateToSession(m[1], m[2]);
+    });
+  }, [navigateToSession]);
 
   // Ctrl+` : cycle projects in a modal, commit on Ctrl-release (Shift reverses).
   // Ordered most-recently-USED first (Alt-Tab style) so the current project
@@ -345,6 +379,9 @@ function Shell() {
 
   return (
     <div className="flex h-screen w-full flex-row overflow-hidden bg-[var(--bg)] text-[var(--text)]">
+      {/* App-root toast host — always mounted, so notifications show regardless
+          of which project/view is active. */}
+      <Toaster position="bottom-right" closeButton />
       <ProjectSidebar
         projects={projects}
         reposByProject={reposByProject}
@@ -353,6 +390,7 @@ function Shell() {
         onAddProject={handleAddProject}
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       {selected && (
         <div
@@ -433,6 +471,10 @@ function Shell() {
         open={dashboardOpen}
         onClose={() => setDashboardOpen(false)}
         onNavigate={navigateToSession}
+      />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
       {projectSwitcher.active && (
         <SwitcherOverlay
