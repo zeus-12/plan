@@ -13,6 +13,12 @@ fi
 v="${1#v}"   # accept either 0.1.1 or v0.1.1
 tag="v$v"
 
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$branch" != "main" ]; then
+  echo "releases must be cut from main (you are on '$branch')" >&2
+  exit 1
+fi
+
 if [ -n "$(git status --porcelain)" ]; then
   echo "working tree not clean — commit or stash first" >&2
   exit 1

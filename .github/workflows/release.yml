@@ -89,6 +89,19 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Refuse to publish a tag that doesn't point at a commit on main.
+      - name: Verify tag is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::tag $GITHUB_REF_NAME is not on main — refusing to publish"
+            exit 1
+          fi
+
       - name: Download all DMGs
         uses: actions/download-artifact@v4
         with:
