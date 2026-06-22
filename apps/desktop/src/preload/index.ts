@@ -131,6 +131,7 @@ const electronAPI = {
   terminalInputState: (id: string) =>
     ipcRenderer.invoke("terminal:inputState", id),
   terminalDump: (id: string) => ipcRenderer.invoke("terminal:dump", id),
+  terminalBusyIds: () => ipcRenderer.invoke("terminal:busyIds"),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", id, cols, rows),
   terminalKill: (id: string) => ipcRenderer.send("terminal:kill", id),

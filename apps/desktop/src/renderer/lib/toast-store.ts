@@ -4,6 +4,9 @@ export interface Toast {
   text: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** Stable key — a repeat push with the same id refreshes the existing toast
+   *  in place instead of stacking a new one (e.g. per-session "done"). */
+  id?: string;
 }
 
 /**
@@ -12,6 +15,7 @@ export interface Toast {
  */
 export function pushToast(t: Toast, ttlMs = 12_000) {
   toast(t.text, {
+    id: t.id,
     duration: ttlMs,
     action: t.actionLabel
       ? { label: t.actionLabel, onClick: () => t.onAction?.() }
@@ -27,10 +31,16 @@ export function pushToast(t: Toast, ttlMs = 12_000) {
 export function osNotify(
   title: string,
   body: string,
-  opts: { silent?: boolean } = {},
+  opts: { silent?: boolean; tag?: string } = {},
 ) {
   try {
-    new Notification(title, { body, silent: opts.silent ?? false });
+    // `tag` collapses repeats: a new banner with the same tag replaces the
+    // previous one rather than stacking another (e.g. per-session "done").
+    new Notification(title, {
+      body,
+      silent: opts.silent ?? false,
+      tag: opts.tag,
+    });
   } catch {
     // Notifications unavailable — the in-app toast still covers it.
   }

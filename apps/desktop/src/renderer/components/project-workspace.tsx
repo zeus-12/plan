@@ -52,7 +52,10 @@ import {
   type Tab,
 } from "../lib/tabs-store";
 import { TabBar } from "./tab-bar";
-import { useTerminalWorking } from "../lib/terminal-activity-store";
+import {
+  isWorking,
+  useTerminalWorking,
+} from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { RunConfigModal } from "./run-config-modal";
@@ -1559,16 +1562,41 @@ export function ProjectWorkspace({
     }
   }, [awaitingSelection, selectedSessionId, revealChatTerminal]);
 
-  // Debug: copy the chat terminal's full rendered text to the clipboard so it
-  // can be shared to tune the detection heuristics (button + ⌘⇧D).
+  // Debug: capture the chat terminal's rendered text twice — once now (idle),
+  // then again after 2s (scroll during the wait) — and put BOTH frames on the
+  // clipboard so we can compare "idle" vs "while scrolling" and find a real
+  // signal for "working" that scroll output can't fake (button + ⌘⇧D).
   const copyTerminalDump = useCallback(async () => {
     if (!selectedSessionId) return;
+    const tid = `${chatPrefix}${selectedSessionId}`;
+    // Snapshot both the rendered screen AND what the app currently believes the
+    // state is: `working` is the timing signal (the one that mis-fires), and
+    // `inputState` is main's screen-derived read. Capturing them WITH the frame
+    // removes any ambiguity about what was shown vs. what we inferred.
+    const snapshot = async (tag: string) => {
+      const text = await window.electronAPI.terminalDump(tid);
+      const working = isWorking(tid);
+      let inputState = "unknown";
+      try {
+        inputState = (await window.electronAPI.terminalInputState(tid)).state;
+      } catch {
+        /* main may not classify it — leave as unknown */
+      }
+      return [
+        `===== ${tag} =====`,
+        `[app state] working=${working}  inputState=${inputState}`,
+        "",
+        text,
+      ].join("\n");
+    };
     try {
-      const text = await window.electronAPI.terminalDump(
-        `${chatPrefix}${selectedSessionId}`,
-      );
-      await navigator.clipboard.writeText(text);
-      pushToast({ text: `Copied terminal (${text.length} chars)` }, 3_000);
+      const before = await snapshot("FRAME A (idle / before)");
+      pushToast({ text: "Captured frame A — scroll now (2s)…" }, 2_000);
+      await new Promise((r) => setTimeout(r, 2_000));
+      const after = await snapshot("FRAME B (after 2s / while scrolling)");
+      const combined = `${before}\n\n${after}`;
+      await navigator.clipboard.writeText(combined);
+      pushToast({ text: `Copied both frames (${combined.length} chars)` }, 3_000);
     } catch {
       pushToast({ text: "Couldn't copy the terminal" }, 3_000);
     }
@@ -2134,10 +2162,10 @@ export function ProjectWorkspace({
                         chatTerminalReady && (
                           <button
                             onClick={copyTerminalDump}
-                            title="Copy the terminal's rendered text — ⌘⇧D (debug)"
+                            title="Capture frame, wait 2s (scroll now), capture again — both to clipboard — ⌘⇧D (debug)"
                             className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
                           >
-                            Copy terminal
+                            Copy 2 frames
                           </button>
                         )}
                       <span>

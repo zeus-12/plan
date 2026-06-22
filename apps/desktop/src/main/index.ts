@@ -56,6 +56,7 @@ import {
   terminalStatus,
   detectInputState,
   dumpTerminal,
+  busyTerminalIds,
   resizeTerminal,
   killTerminal,
   killAllTerminals,
@@ -676,6 +677,7 @@ function registerIpc() {
     detectInputState(id),
   );
   ipcMain.handle("terminal:dump", (_e, id: string) => dumpTerminal(id));
+  ipcMain.handle("terminal:busyIds", () => busyTerminalIds());
   ipcMain.on("terminal:resize", (_e, id: string, cols: number, rows: number) =>
     resizeTerminal(id, cols, rows),
   );

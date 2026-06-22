@@ -375,6 +375,50 @@ export function dumpTerminal(id: string): string {
   return out.join("\n").replace(/^\n+|\n+$/g, "");
 }
 
+// While a Claude turn is in flight, its TUI footer renders an "esc to interrupt"
+// hint, and drops it the instant the turn ends (returning to the idle prompt or
+// stopping at an approval menu). That hint is the one true "working" signal:
+//
+//   - Unlike output timing, a scroll repaint can't fake it. Claude runs with
+//     mouse tracking on, so scrolling sends wheel escapes to the pty and Claude
+//     repaints — a real output stream that fooled the old timing-based signal
+//     into "working" for as long as you scrolled. Scrolling never renders this
+//     hint, so reading it instead is immune (verified against real frames).
+//   - Unlike the "✻ Worked for 2s" summaries (which linger in scrollback), it's
+//     only ever present live, so it never produces a stale match.
+//
+// We scan ONLY the FOOTER — the last couple of non-empty rows. Claude's
+// input/footer region stays pinned to the bottom of the frame even when the
+// transcript is scrolled, so this is scroll-independent. Restricting to the
+// footer is also what keeps the match honest: the phrase "esc to interrupt" can
+// legitimately appear in the TRANSCRIPT itself (e.g. a chat that's literally
+// discussing it — which pinned one session to "working" forever). The live hint
+// only ever sits in the footer; transcript text is always above the input box,
+// so it can't be the last non-empty rows. This reads the real rendered screen
+// (a headless emulator fed the same bytes, kept current for every session incl.
+// backgrounded ones), not an inference off a user action.
+const WORKING_HINT_RE = /esc to interrupt/i;
+// How many trailing non-empty rows count as the footer. The hint is the last
+// line; 2 gives a small margin without reaching the input box / transcript.
+const FOOTER_ROWS = 2;
+
+/** Whether terminal `id`'s rendered screen currently shows Claude's working hint. */
+export function isTerminalBusy(id: string): boolean {
+  const footer = readScreen(id)
+    .filter((line) => line.trim().length > 0)
+    .slice(-FOOTER_ROWS);
+  return footer.some((line) => WORKING_HINT_RE.test(line));
+}
+
+/** Ids of every live pty currently showing the "working" hint. */
+export function busyTerminalIds(): string[] {
+  const out: string[] = [];
+  for (const id of sessions.keys()) {
+    if (isTerminalBusy(id)) out.push(id);
+  }
+  return out;
+}
+
 export interface TerminalInfo {
   id: string;
   cwd: string;

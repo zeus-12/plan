@@ -1,55 +1,70 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Live "is this terminal actively working" signal, derived from the real
- * `terminal:data` stream that main pushes for every mounted pty — including the
- * hidden ones, since `openedIds` keeps connected chat terminals mounted.
+ * Live "is this terminal actively working" signal.
  *
- * While Claude thinks / generates / runs a tool, its TUI spinner redraws
- * constantly (see main's terminal.ts output-coalescing note), so a steady run of
- * chunks arrives. The moment it returns to the idle prompt — or sits blocked on
- * an approval — output stops, and we decay to idle after WORKING_WINDOW_MS.
+ * The truth is Claude's rendered screen, not the output stream. While a turn is
+ * in flight Claude's TUI shows an `esc to interrupt` hint and drops it the
+ * instant the turn ends; main reads that off a headless emulator it keeps
+ * current for every session (see terminal.ts `isTerminalBusy`). We poll that
+ * here.
  *
- * This is an OBSERVED fact (real output from the process), not an optimistic
- * guess off a user action, so it's a sound basis for a "working" indicator.
+ * Why not output timing (the previous approach): Claude runs with mouse tracking
+ * on, so scrolling the terminal sends wheel escapes to the pty and Claude
+ * repaints — a real, sustained output stream. "Any recent output = working" thus
+ * read a 5-second scroll as 5 seconds of work and fired a bogus "done" the
+ * moment you stopped. The screen hint can't be faked that way: scrolling slides
+ * the viewport but never renders `esc to interrupt`.
  */
 
-const WORKING_WINDOW_MS = 1500;
-const TICK_MS = 400;
+// Poll cadence. Main just scans its in-memory emulator rows, so this is a cheap
+// invoke; 400ms keeps the working dot responsive without busy-spinning.
+const POLL_MS = 400;
 
-const lastDataAt = new Map<string, number>();
+// Ids currently showing the working hint, as of the last poll.
+let busy = new Set<string>();
 const listeners = new Set<() => void>();
-let unsubData: (() => void) | null = null;
-let unsubExit: (() => void) | null = null;
-let ticker: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setInterval> | null = null;
+let inFlight = false;
 
 function emit() {
   listeners.forEach((l) => l());
 }
 
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
+async function poll() {
+  // Skip if a poll is still outstanding — never queue invokes up.
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const next = new Set(await window.electronAPI.terminalBusyIds());
+    if (!setsEqual(next, busy)) {
+      busy = next;
+      emit();
+    }
+  } catch {
+    // Main not ready / no terminals — leave the last known set in place.
+  } finally {
+    inFlight = false;
+  }
+}
+
 function ensureStarted() {
-  if (unsubData) return;
-  unsubData = window.electronAPI.onTerminalData((chunk) => {
-    lastDataAt.set(chunk.id, Date.now());
-    emit();
-  });
-  // A pty that exits is no longer "working" or "idle" — it's gone. Drop it so
-  // the done-notifier doesn't mistake a kill for a finished reply.
-  unsubExit = window.electronAPI.onTerminalExit((id) => {
-    if (lastDataAt.delete(id)) emit();
-  });
-  // Absence of data fires no event, so tick to let "working" decay to idle.
-  ticker = setInterval(emit, TICK_MS);
+  if (timer) return;
+  void poll();
+  timer = setInterval(() => void poll(), POLL_MS);
 }
 
 function maybeStop() {
   if (listeners.size > 0) return;
-  unsubData?.();
-  unsubData = null;
-  unsubExit?.();
-  unsubExit = null;
-  if (ticker) clearInterval(ticker);
-  ticker = null;
+  if (timer) clearInterval(timer);
+  timer = null;
+  busy = new Set();
 }
 
 function subscribe(listener: () => void) {
@@ -62,31 +77,24 @@ function subscribe(listener: () => void) {
 }
 
 /**
- * Subscribe to activity ticks (data arrival + the decay tick) without binding
- * to a single id — the done-notifier scans every live pty on each tick.
+ * Subscribe to working-state changes without binding to a single id — the
+ * done-notifier diffs the whole busy set on each change.
  */
 export function subscribeActivity(listener: () => void): () => void {
   return subscribe(listener);
 }
 
-/** Ids of every pty we've seen output from and haven't seen exit. */
-export function knownTerminalIds(): string[] {
-  return [...lastDataAt.keys()];
+/** Ids currently showing the working hint (snapshot). */
+export function currentBusyIds(): string[] {
+  return [...busy];
 }
 
-/** Whether terminal `id` emitted output within the working window. */
+/** Whether terminal `id` is currently showing the working hint. */
 export function isWorking(id: string): boolean {
-  const t = lastDataAt.get(id);
-  return t !== undefined && Date.now() - t < WORKING_WINDOW_MS;
+  return busy.has(id);
 }
 
-/** Milliseconds since terminal `id` last emitted output (Infinity if never). */
-export function idleMs(id: string): number {
-  const t = lastDataAt.get(id);
-  return t === undefined ? Infinity : Date.now() - t;
-}
-
-/** Live "is this terminal actively emitting output" flag for a single id. */
+/** Live "is this terminal actively working" flag for a single id. */
 export function useTerminalWorking(id: string | null): boolean {
   return useSyncExternalStore(
     subscribe,

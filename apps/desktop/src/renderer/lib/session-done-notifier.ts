@@ -1,9 +1,4 @@
-import {
-  idleMs,
-  isWorking,
-  knownTerminalIds,
-  subscribeActivity,
-} from "./terminal-activity-store";
+import { currentBusyIds, subscribeActivity } from "./terminal-activity-store";
 import { getNotificationSettings } from "./notification-settings";
 import { playSound } from "./notification-sounds";
 import { osNotify, pushToast } from "./toast-store";
@@ -12,37 +7,34 @@ import { osNotify, pushToast } from "./toast-store";
  * Global "a Claude session just finished" notifier.
  *
  * It runs at module scope (started once from the app root) so it watches EVERY
- * live chat pty, not just the one currently on screen. The signal is the same
- * fact the header's status dot uses: the pty's output stream. While Claude
- * works, its TUI repaints and output flows (`isWorking`); when it settles to the
- * idle prompt, output stops.
+ * live chat session, not just the one on screen. The signal is the real one the
+ * status dot uses: Claude's TUI shows an `esc to interrupt` hint while a turn is
+ * in flight and drops it when the turn ends (see terminal-activity-store). When
+ * a chat session leaves the working set, it just finished — so we fire once.
  *
- * Edge-triggered + debounced to avoid spam: a session must transition
- * Working -> idle and STAY idle for IDLE_DONE_MS before it fires once. It then
- * disarms until the session works again. Short mid-turn pauses (between tool
- * calls, while thinking) don't reach the threshold, so they don't fire.
+ * This replaces the old output-timing signal, which mistook a scroll (Claude
+ * repaints in response to wheel escapes) for work and fired a bogus "done" every
+ * time you scrolled. The screen hint can't be faked that way.
  *
- * Known trade-off (we iterate as bugs surface): output also stops when Claude
- * is blocked on an approval, so a long approval wait can read as "done". The
- * separate menu-detection path already nudges the user toward the terminal in
- * that case.
+ * Two non-completions are deliberately NOT treated as "done":
+ *   - the pty exited (session killed) — we drop it on the exit event so the
+ *     disappearance isn't read as a finished turn;
+ *   - an approval / selection menu is now on screen — Claude is waiting on the
+ *     user, not done; the menu-detection path handles that case.
  */
 
 // A chat pty's id is `chat:<encoded>:<sessionId>`; only these are Claude
 // sessions. Scratch shells (`term:...`) must never trigger a "Claude is done".
 const CHAT_PREFIX = "chat:";
 
-// How long output must stay stopped past the working window before we call it
-// done. WORKING_WINDOW_MS (1.5s) + this is the total quiet time. Tunable.
-const IDLE_DONE_MS = 4000;
+// After the hint disappears, re-confirm the session is genuinely settled before
+// firing — cheap insurance against a one-frame redraw blip mid-turn.
+const SETTLE_MS = 350;
 
-interface SessionState {
-  /** Armed: we've observed this session working since it last fired. */
-  sawWorking: boolean;
-}
-
-const states = new Map<string, SessionState>();
+// Sessions that were working as of the previous observation.
+let prevBusy = new Set<string>();
 let unsub: (() => void) | null = null;
+let unsubExit: (() => void) | null = null;
 
 /**
  * Resolve a chat pty id to a human label for the notification body. Set by the
@@ -78,38 +70,42 @@ function fire(id: string) {
   // OS banner: reliably shown when the app is in the background. macOS
   // suppresses banners while the app is focused (and dev builds often don't
   // banner at all), so the in-app toast below is the focus-independent cue.
-  osNotify("Claude is done", label, { silent: true });
+  // `tag`/`id` keyed to the session so a repeat for the same session refreshes
+  // in place instead of stacking another banner/toast.
+  osNotify("Claude is done", label, { silent: true, tag: id });
   pushToast({
+    id,
     text: `Claude finished — ${label}`,
     actionLabel: navigate ? "View" : undefined,
     onAction: navigate ? () => navigate?.(id) : undefined,
   });
 }
 
+/**
+ * A session dropped its working hint. Confirm it's really settled, and make sure
+ * it didn't settle onto an approval menu (waiting on the user, not done), then
+ * fire once.
+ */
+async function onFinished(id: string) {
+  await new Promise((r) => setTimeout(r, SETTLE_MS));
+  try {
+    if ((await window.electronAPI.terminalBusyIds()).includes(id)) return; // blip / resumed
+    const { state } = await window.electronAPI.terminalInputState(id);
+    if (state === "selection") return; // approval/menu up — not done
+  } catch {
+    // Best effort — if the confirm calls fail, still notify rather than swallow.
+  }
+  fire(id);
+}
+
 function tick() {
-  const live = new Set<string>();
-  for (const id of knownTerminalIds()) {
-    if (!id.startsWith(CHAT_PREFIX)) continue;
-    live.add(id);
-    let st = states.get(id);
-    if (!st) {
-      st = { sawWorking: false };
-      states.set(id, st);
-    }
-    if (isWorking(id)) {
-      // Working again — (re)arm. A session that's busy at startup arms here and
-      // only fires once it later settles, so we never notify about history.
-      st.sawWorking = true;
-    } else if (st.sawWorking && idleMs(id) >= IDLE_DONE_MS) {
-      st.sawWorking = false;
-      fire(id);
-    }
+  const now = new Set(
+    currentBusyIds().filter((id) => id.startsWith(CHAT_PREFIX)),
+  );
+  for (const id of prevBusy) {
+    if (!now.has(id)) void onFinished(id);
   }
-  // Forget sessions whose pty has gone (exit drops them from knownTerminalIds)
-  // so a killed-while-working session can't fire on a later tick.
-  for (const id of states.keys()) {
-    if (!live.has(id)) states.delete(id);
-  }
+  prevBusy = now;
 }
 
 /** Start the notifier. Idempotent; returns a stop function. */
@@ -127,6 +123,11 @@ export function startSessionDoneNotifier(): () => void {
   } catch {
     // No Notification API — toasts still cover it.
   }
+  // A killed pty disappears from the busy set; drop it from prevBusy on the exit
+  // event so that disappearance isn't mistaken for a finished turn.
+  unsubExit = window.electronAPI.onTerminalExit((id) => {
+    prevBusy.delete(id);
+  });
   unsub = subscribeActivity(tick);
   return stopSessionDoneNotifier;
 }
@@ -134,5 +135,7 @@ export function startSessionDoneNotifier(): () => void {
 export function stopSessionDoneNotifier() {
   unsub?.();
   unsub = null;
-  states.clear();
+  unsubExit?.();
+  unsubExit = null;
+  prevBusy = new Set();
 }

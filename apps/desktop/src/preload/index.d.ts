@@ -126,6 +126,8 @@ interface ElectronAPI {
     lines: string[];
   }>;
   terminalDump: (id: string) => Promise<string>;
+  /** Ids of every live pty currently showing Claude's "esc to interrupt" hint. */
+  terminalBusyIds: () => Promise<string[]>;
   terminalResize: (id: string, cols: number, rows: number) => void;
   terminalKill: (id: string) => void;
   terminalList: () => Promise<{ id: string; cwd: string; pid: number }[]>;
