@@ -145,9 +145,20 @@ body {
  * because Turbopack's CSS parser (web build) rejects `::highlight()`.
  */
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+/*
+ * Firefox-only fallback. In Chromium/WebKit these standard properties WIN over
+ * and disable the ::-webkit-scrollbar rules below, and a standard scrollbar
+ * can't be forced to a fixed size — it follows the OS, so on macOS it renders
+ * as a native overlay bar that fattens on hover. Scoping them to engines
+ * WITHOUT ::-webkit-scrollbar support (Firefox) lets the custom, fixed-size
+ * webkit scrollbar take effect everywhere else — which is what `scrollbar-gutter:
+ * stable` above already assumes.
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
 }
 
 ::-webkit-scrollbar {
