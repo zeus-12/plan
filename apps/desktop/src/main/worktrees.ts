@@ -9,11 +9,10 @@ import { encodeCwd } from "./manual-projects";
 import { discoverRepos } from "./git";
 
 /**
- * Worktree checkouts live here. Deliberately dot/space-free: Claude names a
- * session's transcript folder by replacing every non-alphanumeric char in the
- * cwd with "-", so keeping the path to "/" + alphanumerics + "-" makes our
- * `encodeCwd` (which only maps "/" → "-") provably equal to Claude's encoding.
- * That equality is what lets chats started in a worktree show up in its list.
+ * Worktree checkouts live here. Kept dot/space-free for tidy, predictable
+ * folder names: Claude names a session's transcript folder by replacing every
+ * non-alphanumeric char in the cwd with "-", which `encodeCwd` mirrors, so
+ * chats started in a worktree show up in its list regardless.
  */
 const WORKTREES_ROOT = join(homedir(), "plan-worktrees");
 
@@ -203,10 +202,11 @@ export async function createWorktreePr(
   for (const repo of rec.repos) {
     const label = repo.subPath || "repo root";
 
-    // A PR needs at least one commit ahead of base. Guard up front with a clear
-    // message (and skip the pointless push) instead of gh's cryptic GraphQL
-    // "No commits between …" error. If we can't determine it (e.g. base ref is
-    // missing locally), fall through and let gh be the judge.
+    // A PR needs at least one commit ahead of base. A repo with none isn't an
+    // error — the user just didn't touch it in this worktree — so mark it
+    // skipped and move on (also avoids a pointless push and gh's cryptic
+    // GraphQL "No commits between …" error). If we can't determine it (e.g. base
+    // ref is missing locally), fall through and let gh be the judge.
     try {
       const out = await git(repo.path, [
         "rev-list",
@@ -214,11 +214,7 @@ export async function createWorktreePr(
         `${base}..HEAD`,
       ]);
       if (parseInt(out.trim() || "0", 10) === 0) {
-        repos.push({
-          subPath: repo.subPath,
-          label,
-          error: `No commits on "${repo.branch}" since "${base}" yet — commit your changes before opening a PR.`,
-        });
+        repos.push({ subPath: repo.subPath, label, skipped: true });
         continue;
       }
     } catch {

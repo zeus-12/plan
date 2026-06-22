@@ -171,6 +171,10 @@ function PrResults({ result }: { result: CreatePrResult }) {
               {r.existed ? "PR already open — " : ""}
               {r.url}
             </a>
+          ) : r.skipped ? (
+            <div className="text-[11px] text-[var(--text-tertiary)]">
+              No changes — skipped
+            </div>
           ) : (
             <div className="text-[11px] text-[var(--removed-text)]">
               {r.error || "Failed to create PR."}
