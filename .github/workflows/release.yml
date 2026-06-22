@@ -26,16 +26,10 @@ permissions:
 
 jobs:
   build:
-    name: Build (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14 # Apple Silicon
-            arch: arm64
-          - runner: macos-13 # Intel
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    name: Build (arm64)
+    # Apple Silicon only. Intel (macos-13) runners are being retired and queue
+    # indefinitely; a universal build would need node-pty rebuilt for both arches.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -74,12 +68,12 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: >
           pnpm --filter @plan/desktop exec electron-builder
-          --mac dmg --${{ matrix.arch }} --publish never
+          --mac dmg --arm64 --publish never
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dmg-${{ matrix.arch }}
+          name: dmg-arm64
           path: apps/desktop/dist/*.dmg
           if-no-files-found: error
 
