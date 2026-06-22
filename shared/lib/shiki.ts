@@ -139,35 +139,17 @@ const FS_ITALIC = 1;
 const FS_BOLD = 2;
 
 /**
- * Above these sizes we skip syntax highlighting entirely. Tokenization is a
- * synchronous, main-thread cost (full file, both diff sides, every keystroke
- * in the editor), so for very large inputs we trade colors for responsiveness
- * — the diff's add/remove backgrounds and word-diff still render.
- */
-const MAX_HL_CHARS = 100_000;
-const MAX_HL_LINES = 5_000;
-
-export function isHighlightable(code: string): boolean {
-  if (code.length > MAX_HL_CHARS) return false;
-  // Counting newlines is far cheaper than split().
-  let lines = 1;
-  for (let i = 0; i < code.length; i++) {
-    if (code.charCodeAt(i) === 10 && ++lines > MAX_HL_LINES) return false;
-  }
-  return true;
-}
-
-/**
  * Synchronously highlight a code string and return flat tokens with
  * character-offset ranges, in source order. Returns [] when shiki isn't
- * ready, the language is unsupported, the input is too large, or
- * highlighting throws.
+ * ready, the language is unsupported, or highlighting throws. There is no
+ * size cap — whether code is colored depends only on language support, never
+ * on how large the file is. Tokenization is a synchronous main-thread cost, so
+ * very large inputs may briefly cost responsiveness in exchange for color.
  */
 export function highlightTokens(code: string, languageId: string): SyntaxToken[] {
   if (!highlighter) return [];
   const lang = resolveLang(languageId);
   if (!lang) return [];
-  if (!isHighlightable(code)) return [];
 
   let lines;
   try {
@@ -265,7 +247,7 @@ export function highlightToHtml(value: string, language: string): string {
  */
 export function highlightPerLine(value: string, languageId: string): SyntaxToken[][] {
   const lines = value.split("\n");
-  if (!resolveLang(languageId) || !isHighlightable(value)) {
+  if (!resolveLang(languageId)) {
     return lines.map(() => []);
   }
   const tokens = highlightTokens(value, languageId);

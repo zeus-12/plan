@@ -233,6 +233,8 @@ export interface CreatePrRepoResult {
   url?: string;
   /** True when the PR already existed and we returned its URL. */
   existed?: boolean;
+  /** True when the repo had no commits ahead of base — intentionally not a PR. */
+  skipped?: boolean;
   /** Failure reason for this repo (push or gh error). */
   error?: string;
 }

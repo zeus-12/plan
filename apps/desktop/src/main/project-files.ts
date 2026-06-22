@@ -1,6 +1,8 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { createReadStream } from "fs";
 import { readFile, readdir, stat } from "fs/promises";
+import { StringDecoder } from "string_decoder";
 import { join, relative, sep } from "path";
 import { resolveProjectCwd } from "./claude-projects";
 import type {
@@ -220,10 +222,47 @@ function lineRanges(line: string, re: RegExp): { start: number; end: number }[] 
 }
 
 /**
+ * Stream a file's lines without ever holding the whole file in memory, so file
+ * size never gates whether a match is found. Reads fixed-size chunks, decodes
+ * UTF-8 safely across chunk boundaries, and splits on "\n" (keeping any "\r" so
+ * offsets match the file viewer). Bails before yielding anything if the first
+ * chunk looks binary (contains a NUL byte), mirroring {@link isBinary}.
+ */
+async function* streamLines(full: string): AsyncGenerator<string> {
+  const stream = createReadStream(full, { highWaterMark: 1 << 16 });
+  const decoder = new StringDecoder("utf-8");
+  let rem = "";
+  let first = true;
+  try {
+    for await (const chunk of stream as AsyncIterable<Buffer>) {
+      if (first) {
+        first = false;
+        const n = Math.min(chunk.length, 8000);
+        for (let i = 0; i < n; i++) {
+          if (chunk[i] === 0) return; // binary — skip the whole file
+        }
+      }
+      rem += decoder.write(chunk);
+      let nl = rem.indexOf("\n");
+      while (nl !== -1) {
+        yield rem.slice(0, nl);
+        rem = rem.slice(nl + 1);
+        nl = rem.indexOf("\n");
+      }
+    }
+  } finally {
+    stream.destroy();
+  }
+  rem += decoder.end();
+  if (rem.length > 0) yield rem;
+}
+
+/**
  * Search every (git-tracked, non-ignored) text file in the project for `query`.
  * Runs in Node with a JS RegExp so result counts and highlight offsets stay in
- * exact agreement with what the file viewer later renders. Skips binary and
- * oversized files; capped at {@link SEARCH_MAX_MATCHES} total matches.
+ * exact agreement with what the file viewer later renders. Skips binary files;
+ * file size is never a gate (files stream line-by-line). Capped only at
+ * {@link SEARCH_MAX_MATCHES} total matches.
  */
 export async function searchProjectFiles(
   encoded: string,
@@ -259,45 +298,40 @@ export async function searchProjectFiles(
         const rel = paths[cursor++];
         if (BINARY_EXTS.has(extOf(rel))) continue;
         const full = join(cwd, rel);
-        // Cheap size gate FIRST — never pull a huge tracked file (lockfiles,
-        // bundles, datasets, media) into memory; that's what stalled/OOM'd the
-        // whole search before, since every file is read regardless of the query.
-        let size: number;
+        // Confirm it's a regular file (skip dirs/sockets). No size gate — files
+        // stream line-by-line below, so memory stays bounded by the longest
+        // line, not the file size. A big file is searched like any other and
+        // shows up purely on whether it matches, never on how large it is.
         try {
           const st = await stat(full);
           if (!st.isFile()) continue;
-          size = st.size;
         } catch {
           continue;
         }
-        if (size > MAX_READ_BYTES) continue;
-
-        let buf: Buffer;
-        try {
-          buf = await readFile(full);
-        } catch {
-          continue;
-        }
-        if (isBinary(buf)) continue;
 
         const matches: SearchMatch[] = [];
-        const lines = buf.toString("utf-8").split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const ranges = lineRanges(lines[i], re);
-          if (ranges.length === 0) continue;
-          // Cap the preview text so a single minified/huge line can't bloat the
-          // IPC payload (the panel only shows a short preview anyway; opening a
-          // hit still uses the real column).
-          const text =
-            lines[i].length > SEARCH_MAX_LINE_LEN
-              ? lines[i].slice(0, SEARCH_MAX_LINE_LEN)
-              : lines[i];
-          matches.push({ line: i + 1, text, ranges });
-          totalMatches += ranges.length;
-          if (totalMatches >= SEARCH_MAX_MATCHES) {
-            truncated = true;
-            break;
+        let lineNo = 0;
+        try {
+          for await (const line of streamLines(full)) {
+            lineNo++;
+            const ranges = lineRanges(line, re);
+            if (ranges.length === 0) continue;
+            // Cap the preview text so a single minified/huge line can't bloat
+            // the IPC payload (the panel only shows a short preview anyway;
+            // opening a hit still uses the real column).
+            const text =
+              line.length > SEARCH_MAX_LINE_LEN
+                ? line.slice(0, SEARCH_MAX_LINE_LEN)
+                : line;
+            matches.push({ line: lineNo, text, ranges });
+            totalMatches += ranges.length;
+            if (totalMatches >= SEARCH_MAX_MATCHES) {
+              truncated = true;
+              break;
+            }
           }
+        } catch {
+          // Unreadable mid-stream — keep whatever matched before the error.
         }
         if (matches.length > 0) results.push({ path: rel, matches });
       }
