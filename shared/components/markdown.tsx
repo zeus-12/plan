@@ -27,6 +27,7 @@ function codeText(node: ReactNode): string {
 function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedLine, setCopiedLine] = useState(false);
   const shikiReady = useShikiReady();
 
   // react-markdown nests the fenced text in a <code class="language-xxx">.
@@ -51,6 +52,17 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  // Collapse every line into one, joined by spaces — handy for pasting
+  // multi-line commands straight into a terminal.
+  const copyOneLine = () => {
+    const text = ref.current?.textContent ?? "";
+    if (!text) return;
+    const oneLine = text.split("\n").join(" ").trim();
+    void navigator.clipboard.writeText(oneLine);
+    setCopiedLine(true);
+    setTimeout(() => setCopiedLine(false), 1500);
+  };
+
   return (
     <div className="group my-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-surface)] py-1 pl-3 pr-1.5">
@@ -59,15 +71,32 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
           data-lang={lang || "text"}
           className="code-lang-label select-none font-[family-name:var(--font-mono)] text-[11px] tracking-wide text-[var(--text-tertiary)]"
         />
-        <button
-          type="button"
-          onClick={copy}
-          aria-label={copied ? "Copied" : "Copy code"}
-          title={copied ? "Copied" : "Copy"}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={copyOneLine}
+            aria-label={
+              copiedLine ? "Copied as one line" : "Copy as one line for terminal"
+            }
+            title={
+              copiedLine
+                ? "Copied as one line"
+                : "Copy as one line — joins all lines with spaces (paste-ready for the terminal)"
+            }
+            className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            {copiedLine ? <CheckIcon /> : <CopyOneLineIcon />}
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            aria-label={copied ? "Copied" : "Copy code"}
+            title={copied ? "Copied" : "Copy"}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </button>
+        </div>
       </div>
       <pre
         ref={ref}
@@ -84,6 +113,16 @@ function CopyIcon() {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+function CopyOneLineIcon() {
+  // Two chevrons collapsing toward a single middle line — i.e. many lines → one.
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 4l5 5 5-5" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <path d="M7 20l5-5 5 5" />
     </svg>
   );
 }
