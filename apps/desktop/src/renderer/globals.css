@@ -65,3 +65,45 @@ textarea {
 .scrollbar-hover-x:hover::-webkit-scrollbar-thumb {
   background-color: var(--text-tertiary);
 }
+
+/*
+ * Terminal (xterm 6) scrollbar. xterm stacks two vertical scrollbars over the
+ * terminal:
+ *   1. the legacy `.xterm-viewport`, which has `overflow-y: scroll` but no
+ *      scrollable content (the screen is absolutely positioned to fill it), so
+ *      it paints a full-height thumb that never moves — the dead bar; and
+ *   2. the real VS Code overlay scrollbar (`.xterm-scrollable-element .slider`),
+ *      which actually drives scrolling but fades to opacity 0 when idle AND is
+ *      themed at just 0.2 opacity of the foreground, so it's all but invisible.
+ * Kill the legacy track, then make the real slider an honest, visible scrollbar
+ * styled like the app's other scrollbars (the tab strip): a rounded thumb in
+ * `--border-strong`, brightening to `--text-tertiary` on hover. We keep it
+ * shown whenever the buffer is scrollable — xterm marks the slider
+ * `.invisible.fade` when scrollable-but-idle and plain `.invisible` when there
+ * is nothing to scroll (see scrollbarVisibilityController), so un-hiding only
+ * the `.fade` case leaves no phantom bar when the output fits on screen.
+ */
+.xterm .xterm-viewport {
+  overflow-y: hidden !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical {
+  width: 12px !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  width: 12px !important;
+  /* Transparent border + padding-box clip gives the thumb side padding so it
+   * reads as a slim ~6px pill inside the 12px hit target. */
+  box-sizing: border-box !important;
+  border: 3px solid transparent !important;
+  background-clip: padding-box !important;
+  border-radius: 9999px !important;
+  background-color: var(--border-strong) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar > .slider:hover,
+.xterm .xterm-scrollable-element > .scrollbar > .slider.active {
+  background-color: var(--text-tertiary) !important;
+}
+.xterm .xterm-scrollable-element > .invisible.fade {
+  opacity: 1 !important;
+  transition: none !important;
+}
