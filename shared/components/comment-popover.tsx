@@ -85,8 +85,14 @@ export function CommentPopover({
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && e.metaKey) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      // Stop the keystroke from also reaching the comments panel's window-level
+      // ⌘⏎ listener (it's armed whenever the chat composer is blurred). Without
+      // this, submitting a comment would in the same stroke flush the whole
+      // buffer to chat — the comment should settle in the panel first.
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
       handleSubmit();
     }
   }

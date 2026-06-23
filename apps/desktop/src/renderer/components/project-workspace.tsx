@@ -896,6 +896,8 @@ export function ProjectWorkspace({
     {
       sessionId: string;
       title: string;
+      /** The auto-derived name, present only when the chat was renamed away from it. */
+      originalTitle: string | null;
       projectEncoded: string;
       projectName: string;
     }[]
@@ -911,6 +913,11 @@ export function ProjectWorkspace({
             .map((s) => ({
               sessionId: s.sessionId,
               title: s.title ?? "Untitled chat",
+              // Only surface the original when a rename actually changed it.
+              originalTitle:
+                s.derivedTitle && s.derivedTitle !== s.title
+                  ? s.derivedTitle
+                  : null,
               projectEncoded: p.encoded,
               projectName: projShortName(p),
             }));
@@ -935,6 +942,7 @@ export function ProjectWorkspace({
     const chatEntries: SwitchEntry[] = allChats.map((c) => ({
       id: `s:${c.projectEncoded}:${c.sessionId}`,
       name: c.title,
+      originalName: c.originalTitle ?? undefined,
       project: c.projectName,
       badge: "chat",
       run: () => {
@@ -955,7 +963,8 @@ export function ProjectWorkspace({
   const switchFuse = useMemo(
     () =>
       new Fuse(switchEntries, {
-        keys: ["name", "project"],
+        // `originalName` lets a renamed chat still be found by its old name.
+        keys: ["name", "originalName", "project"],
         threshold: 0.4,
         ignoreLocation: true,
       }),
@@ -971,6 +980,7 @@ export function ProjectWorkspace({
       id: e.id,
       label: e.name,
       sublabel: e.project,
+      hint: e.originalName,
       badge: e.badge,
       onSelect: () => {
         e.run();
@@ -2402,6 +2412,8 @@ export function ProjectWorkspace({
 interface SwitchEntry {
   id: string;
   name: string;
+  /** A renamed chat's original auto-derived name, so search still matches it. */
+  originalName?: string;
   /** The project this entry belongs to (cwd for projects, name for chats). */
   project: string;
   badge: string;

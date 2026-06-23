@@ -253,16 +253,18 @@ function Shell() {
   );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === "d"
-      ) {
-        const el = document.activeElement as HTMLElement | null;
-        const tag = el?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable)
-          return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      // ⌘, → Settings (the standard macOS Preferences shortcut). Fires
+      // regardless of focus so it's reachable while typing.
+      if (e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
+        return;
+      }
+      // ⌘D → toggle the worktrees rail. Fires even when a text input or the
+      // Lexical chat composer is focused: ⌘D types nothing, so there's no
+      // conflict, and bailing on focused inputs made the shortcut feel broken.
+      if (e.key.toLowerCase() === "d") {
         e.preventDefault();
         setWorktreeRailOpen((v) => !v);
       }
