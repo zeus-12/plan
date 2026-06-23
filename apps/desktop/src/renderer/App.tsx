@@ -21,6 +21,7 @@ import { WorktreeRail } from "./components/worktree-rail";
 import { NewWorktreeModal } from "./components/new-worktree-modal";
 import { CreatePrModal } from "./components/create-pr-modal";
 import { ProjectDefaultsModal } from "./components/project-defaults-modal";
+import { UpdateBanner } from "./components/update-banner";
 import { useConfirm } from "./components/confirm-dialog";
 import { useWorktrees } from "./lib/use-worktrees";
 import { usePersistentNumber } from "./lib/use-persistent-number";
@@ -384,6 +385,7 @@ function Shell() {
       {/* App-root toast host — always mounted, so notifications show regardless
           of which project/view is active. */}
       <Toaster position="bottom-right" closeButton />
+      <UpdateBanner />
       <ProjectSidebar
         projects={projects}
         reposByProject={reposByProject}

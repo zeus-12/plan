@@ -249,3 +249,13 @@ export interface CreatePrRepoResult {
 export interface CreatePrResult {
   repos: CreatePrRepoResult[];
 }
+
+/** A newer published release than the running app, per the GitHub feed. */
+export interface UpdateInfo {
+  /** Marketing version of the latest release, without the leading `v`. */
+  version: string;
+  /** GitHub Releases page to send the user to for the download. */
+  url: string;
+  /** Release notes (markdown); may be empty. */
+  notes: string;
+}

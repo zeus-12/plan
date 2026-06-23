@@ -45,6 +45,7 @@ import {
   searchProjectFiles,
 } from "./project-files";
 import { listSkills } from "./skills";
+import { checkForUpdate } from "./updates";
 import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
 import {
@@ -430,6 +431,13 @@ async function listAllProjects(): Promise<ProjectEntry[]> {
 
 function registerIpc() {
   ipcMain.handle("projects:list", async () => listAllProjects());
+
+  // Update notifier: report whether a newer release exists, and open the
+  // download page in the user's browser. We never install — the app is unsigned.
+  ipcMain.handle("updates:check", () => checkForUpdate());
+  ipcMain.handle("updates:openDownload", (_e, url: string) => {
+    if (/^https:\/\/github\.com\//.test(url)) void shell.openExternal(url);
+  });
 
   ipcMain.handle(
     "projects:addManual",

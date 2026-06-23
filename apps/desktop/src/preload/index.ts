@@ -159,6 +159,11 @@ const electronAPI = {
     mode: "stage" | "unstage" | "discard" | "apply",
     subPath: string = ""
   ) => ipcRenderer.invoke("git:applyPatch", encoded, patch, mode, subPath),
+
+  // Updates (notify-only — see main/updates.ts)
+  checkForUpdate: () => ipcRenderer.invoke("updates:check"),
+  openUpdateDownload: (url: string) =>
+    ipcRenderer.invoke("updates:openDownload", url),
 };
 
 contextBridge.exposeInMainWorld("electronAPI", electronAPI);

@@ -17,6 +17,7 @@ import type {
   CreatePrInput,
   CreatePrResult,
   SkillInfo,
+  UpdateInfo,
 } from "../shared-types";
 
 interface ElectronAPI {
@@ -147,6 +148,11 @@ interface ElectronAPI {
     mode: "stage" | "unstage" | "discard" | "apply",
     subPath?: string
   ) => Promise<GitOpResult>;
+
+  /** Resolves to a newer release, or null when up to date / offline. */
+  checkForUpdate: () => Promise<UpdateInfo | null>;
+  /** Opens the release download page in the user's browser. */
+  openUpdateDownload: (url: string) => Promise<void>;
 }
 
 declare global {
