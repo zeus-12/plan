@@ -301,6 +301,7 @@ interface SessionListEntry {
   mtimeMs: number;
   archived: boolean;
   title: string | null;
+  derivedTitle: string | null;
   messageCount: number;
   updatedAt: number | string | null;
 }
@@ -366,6 +367,7 @@ async function listSessionsForProject(
           archived: archived.has(sessionId),
           // A user-assigned name wins over the derived title.
           title: names[sessionId] ?? meta.title,
+          derivedTitle: meta.title,
           messageCount: meta.messageCount,
           updatedAt: meta.updatedAt,
         });

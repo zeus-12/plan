@@ -113,7 +113,14 @@ export interface SessionListEntry {
   filePath: string;
   mtimeMs: number;
   archived: boolean;
+  /** Display title: a user-assigned name if set, else the auto-derived title. */
   title: string | null;
+  /**
+   * The auto-derived title from the transcript, regardless of any user rename.
+   * Lets search match the original name and the UI hint what a chat was called
+   * before it was renamed. Equal to `title` when the chat hasn't been renamed.
+   */
+  derivedTitle: string | null;
   messageCount: number;
   updatedAt: number | string | null;
 }

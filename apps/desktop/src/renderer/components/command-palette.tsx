@@ -7,6 +7,11 @@ export interface PaletteItem {
   id: string;
   label: string;
   sublabel?: string;
+  /**
+   * Optional muted "origin" line under the label (e.g. a renamed chat's old
+   * name). Rendered dimmed with a `↳` glyph so it reads as "derived from".
+   */
+  hint?: string;
   /** Optional leading icon (e.g. a file-type icon). */
   icon?: ReactNode;
   /** Optional right-aligned tag (e.g. "project", "chat"). */
@@ -87,21 +92,29 @@ export function CommandPalette({
                 value={it.id}
                 onSelect={it.onSelect}
                 className={cn(
-                  "flex cursor-pointer items-baseline gap-2 rounded-md px-3 py-2 font-[family-name:var(--font-mono)]",
+                  "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 font-[family-name:var(--font-mono)]",
                   "data-[selected=true]:bg-[var(--bg-surface-hover)]"
                 )}
               >
-                {it.icon && (
-                  <span className="shrink-0 self-center">{it.icon}</span>
-                )}
-                <span className="shrink-0 truncate text-[13px] text-[var(--text)]">
-                  {it.label}
-                </span>
-                {it.sublabel && (
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-tertiary)]">
-                    {it.sublabel}
-                  </span>
-                )}
+                {it.icon && <span className="shrink-0">{it.icon}</span>}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex items-baseline gap-2">
+                    <span className="shrink-0 truncate text-[13px] text-[var(--text)]">
+                      {it.label}
+                    </span>
+                    {it.sublabel && (
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-tertiary)]">
+                        {it.sublabel}
+                      </span>
+                    )}
+                  </div>
+                  {it.hint && (
+                    <span className="flex items-center gap-1 truncate text-[11px] italic leading-tight text-[var(--text-tertiary)]">
+                      <span className="not-italic opacity-60">↳</span>
+                      <span className="truncate">{it.hint}</span>
+                    </span>
+                  )}
+                </div>
                 {it.badge && (
                   <span className="ml-auto shrink-0 rounded border border-[var(--border)] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[var(--text-tertiary)]">
                     {it.badge}
