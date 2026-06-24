@@ -9,8 +9,8 @@
  * they're used.
  *
  * Scopes keep independent lists: "projects" is the single global project list;
- * sessions are scoped per project ("sessions:<encoded>") so each project keeps
- * its own order across ProjectWorkspace remounts (the store outlives them).
+ * content-pane tabs are scoped per worktree ("tabs:<encoded>") so each worktree
+ * keeps its own order across ProjectWorkspace remounts (the store outlives them).
  */
 
 const lists = new Map<string, string[]>();

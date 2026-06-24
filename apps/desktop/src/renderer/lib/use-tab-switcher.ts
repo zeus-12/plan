@@ -9,7 +9,8 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
  * for that tap. Escape cancels; losing window focus cancels too (so it can't
  * get stuck).
  *
- * Two channels coexist — sessions (Ctrl+Tab) and projects (Ctrl+`) — but there
+ * Several channels coexist — content-pane tabs (Ctrl+Tab), projects (Ctrl+`)
+ * and worktrees (Ctrl+1) — but there
  * is a SINGLE window listener and a SINGLE active-state, so there's no
  * effect-ordering race or stuck-lock between component instances: on the
  * opening keystroke we pick the enabled channel whose trigger key matches.

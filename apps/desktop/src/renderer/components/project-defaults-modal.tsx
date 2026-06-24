@@ -141,7 +141,7 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
                 <div className="text-[11px] text-[var(--text-tertiary)]">
                   Start sessions with{" "}
                   <span className="font-[family-name:var(--font-mono)]">
-                    --enable-auto-mode
+                    --permission-mode auto
                   </span>{" "}
                   so Claude runs without stopping for approvals.
                 </div>

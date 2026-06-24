@@ -81,7 +81,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 <span className="text-[11px] text-[var(--text-tertiary)]">
                   New sessions start with{" "}
                   <code className="font-[family-name:var(--font-mono)] text-[10px]">
-                    --enable-auto-mode
+                    --permission-mode auto
                   </code>
                   .
                 </span>

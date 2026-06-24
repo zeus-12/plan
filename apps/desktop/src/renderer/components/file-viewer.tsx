@@ -12,6 +12,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   highlightPerLine,
   languageFromPath,
+  useActiveShikiTheme,
   useShikiReady,
   type SyntaxToken,
 } from "@plan/shared/lib/highlight";
@@ -168,10 +169,9 @@ function lineNodes(
 
     const style: Record<string, string | number> = {};
     const cls: string[] = [];
-    if (tok?.lightColor || tok?.darkColor) {
+    if (tok?.color) {
       cls.push("shiki-tok");
-      if (tok.lightColor) style["--shiki-light"] = tok.lightColor;
-      if (tok.darkColor) style["--shiki-dark"] = tok.darkColor;
+      style["--shiki-color"] = tok.color;
     }
     if (tok?.italic) style.fontStyle = "italic";
     if (tok?.bold) style.fontWeight = 600;
@@ -223,6 +223,7 @@ export function FileViewer({
     null,
   );
   const shikiReady = useShikiReady();
+  const shikiTheme = useActiveShikiTheme();
   const parentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
@@ -285,9 +286,10 @@ export function FileViewer({
       data && !data.binary && !highlightStale
         ? highlightPerLine(text, language)
         : EMPTY_PER_LINE,
-    // shikiReady is a dep so colors appear once the highlighter finishes loading.
+    // shikiReady / shikiTheme are deps so colors appear once the highlighter
+    // finishes loading and re-tokenize when the theme changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, text, highlightStale, language, shikiReady]
+    [data, text, highlightStale, language, shikiReady, shikiTheme]
   );
 
   // Character offset where each line begins — lets a line/selection map back to

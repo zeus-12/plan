@@ -7,8 +7,7 @@ import { cn } from "@plan/shared/lib/utils";
 const SWATCH: Record<Theme, string> = {
   "soft-dark": "#1b1c20",
   "soft-light": "#f3f1ec",
-  dark: "#09090b",
-  light: "#fafafa",
+  "pierre-dark-soft": "#171717",
 };
 
 function SunIcon() {

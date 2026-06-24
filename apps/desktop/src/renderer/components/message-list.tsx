@@ -1121,6 +1121,10 @@ export const MessageList = memo(function MessageList({
       <div className="relative h-full">
       <FindWidget find={find} revealTrigger={findReveal} />
       <div ref={parentRef} className="h-full overflow-auto py-3">
+        {/* Centered reading column (ChatGPT-style): the scrollbar stays at the
+            pane edge while message width is capped for readability. Diff/file
+            tabs are separate views and keep their full width. */}
+        <div className="mx-auto w-full max-w-[820px]">
         {items.map((m, idx) => {
           const partMap = annotationsByMessage.get(m.uuid);
           const showHeader = showHeaderForRow[idx];
@@ -1190,6 +1194,7 @@ export const MessageList = memo(function MessageList({
           );
         })}
         {working && <TypingIndicator />}
+        </div>
       </div>
       {showScrollDown && (
         <button

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 /**
  * Global "auto mode" preference, persisted to localStorage. When enabled,
- * Claude sessions are started with the `--enable-auto-mode` flag. A per-project
+ * Claude sessions are started with the `--permission-mode auto` flag. A per-project
  * default (see project-defaults-modal) can still override this for a specific
  * project; this is the app-wide fallback used when a project hasn't set its own.
  *

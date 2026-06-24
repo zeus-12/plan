@@ -102,7 +102,7 @@ interface Props {
   runCommand?: string;
   /** Optional build command run before the Run command. */
   buildCommand?: string;
-  /** When true, Claude sessions start with `--enable-auto-mode`. */
+  /** When true, Claude sessions start with `--permission-mode auto`. */
   autoMode?: boolean;
   /** Persist the Run/build command to the project (parent-keyed defaults). */
   onSaveRunConfig: (runCommand: string, buildCommand: string) => Promise<void> | void;
@@ -1240,7 +1240,7 @@ export function ProjectWorkspace({
     const sid = tid.slice(chatPrefix.length);
     // Brand-new chats start claude with a pre-chosen session id (nothing to
     // resume yet); existing ones resume their transcript.
-    const flags = (autoMode ?? globalAutoMode) ? " --enable-auto-mode" : "";
+    const flags = (autoMode ?? globalAutoMode) ? " --permission-mode auto" : "";
     return NEW_SESSION_IDS.has(sid)
       ? `claude --session-id ${sid}${flags}`
       : `claude --resume ${sid}${flags}`;
@@ -1946,42 +1946,34 @@ export function ProjectWorkspace({
     connectAndShowChat,
   ]);
 
-  // Ctrl+Tab: cycle this project's chat sessions in a modal, committing on
-  // Ctrl-release (Shift reverses). Lands you on the Chat tab. Ordered
-  // most-recently-USED first (Alt-Tab style), per project, so the first tap
-  // lands on the chat you were last in; before any chat is used this session it
-  // keeps the default order. Archived chats are excluded.
-  const activeSessions = useMemo(
-    () => sessions.filter((s) => !s.archived),
-    [sessions],
-  );
-  const mruScope = `sessions:${project.encoded}`;
+  // Ctrl+Tab: cycle this worktree's open content-pane tabs in a modal,
+  // committing on Ctrl-release (Shift reverses). Ordered most-recently-USED
+  // first (Alt-Tab style), per worktree, so the first tap lands on the tab you
+  // were last on; before any switch this session it keeps the tab-bar order.
+  const tabsMruScope = `tabs:${project.encoded}`;
   const mruVersion = useSyncExternalStore(
     subscribeMru,
     getMruVersion,
     getMruVersion,
   );
-  const sessionsByMru = useMemo(
-    () => orderByMru(mruScope, activeSessions, (s) => s.sessionId),
-    [mruScope, activeSessions, mruVersion],
+  const tabsByMru = useMemo(
+    () => orderByMru(tabsMruScope, tabs, (t) => t.id),
+    [tabsMruScope, tabs, mruVersion],
   );
   useEffect(() => {
-    if (selectedSessionId) recordUse(mruScope, selectedSessionId);
-  }, [mruScope, selectedSessionId]);
-  const sessionIndex = Math.max(
+    if (activeId) recordUse(tabsMruScope, activeId);
+  }, [tabsMruScope, activeId]);
+  const tabIndex = Math.max(
     0,
-    sessionsByMru.findIndex((s) => s.sessionId === selectedSessionId),
+    tabsByMru.findIndex((t) => t.id === activeId),
   );
-  const sessionSwitcher = useTabSwitcher({
-    id: "sessions",
-    enabled: sessionsByMru.length > 1,
+  const tabSwitcher = useTabSwitcher({
+    id: "tabs",
+    enabled: tabsByMru.length > 1,
     triggerCode: "Tab",
-    items: sessionsByMru,
-    currentIndex: sessionIndex,
-    onCommit: (s) => {
-      openChatTab(s.sessionId);
-      setTab("chat");
-    },
+    items: tabsByMru,
+    currentIndex: tabIndex,
+    onCommit: (t) => setActive(t.id),
   });
 
   return (
@@ -2017,14 +2009,21 @@ export function ProjectWorkspace({
         items={switchItems}
         onClose={closePalette}
       />
-      {sessionSwitcher.active && (
+      {tabSwitcher.active && (
         <SwitcherOverlay
-          title="Chat sessions"
-          index={sessionSwitcher.index}
-          items={sessionsByMru.map((s) => ({
-            key: s.sessionId,
-            label: s.title ?? "Untitled chat",
-            sub: `${s.messageCount} message${s.messageCount === 1 ? "" : "s"}`,
+          title="Open tabs"
+          index={tabSwitcher.index}
+          items={tabsByMru.map((t) => ({
+            key: t.id,
+            label: titleForTab(t),
+            sub:
+              t.kind === "chat"
+                ? "Chat"
+                : t.kind === "diff"
+                  ? t.staged
+                    ? "Diff · staged"
+                    : "Diff"
+                  : t.path,
           }))}
         />
       )}
@@ -2295,16 +2294,23 @@ export function ProjectWorkspace({
 
             {/* Unified compose buffer: code-diff + chat annotations combined.
                 Persists across tabs. "Add to chat" drops it into the chat
-                composer (so it's sent through the chat → terminal path). */}
+                composer (so it's sent through the chat → terminal path).
+                The button (and its ⌘⏎ shortcut) only appear on a chat tab —
+                on a diff/file tab there's no chat in context to add to, so the
+                buffer just displays the collected comments. */}
             {totalComments > 0 && (
               <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
                 <MessageOutput
                   annotations={[]}
                   message={composedMessage}
                   count={totalComments}
-                  onSend={handleAddToChat}
+                  onSend={
+                    activeTab?.kind === "chat" ? handleAddToChat : undefined
+                  }
                   sendLabel="Add to chat"
-                  shortcutEnabled={!chatInputFocused}
+                  shortcutEnabled={
+                    activeTab?.kind === "chat" && !chatInputFocused
+                  }
                   onClear={handleClearComments}
                 />
               </div>

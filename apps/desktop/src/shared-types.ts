@@ -212,7 +212,7 @@ export interface ProjectDefaults {
   /** Optional command run before `runCommand` in the same Run terminal. */
   buildCommand?: string;
   /**
-   * When true, Claude sessions for this project start with `--enable-auto-mode`
+   * When true, Claude sessions for this project start with `--permission-mode auto`
    * so the agent runs without stopping for approvals.
    */
   autoMode?: boolean;
