@@ -77,10 +77,10 @@ export function FindWidget({
         {count}
       </span>
 
-      <IconBtn onClick={find.prev} disabled={total === 0} title="Previous match (⇧⏎)">
+      <IconBtn onClick={find.prev} disabled={total === 0} title="Previous match (⇧↵)">
         <ChevronUp />
       </IconBtn>
-      <IconBtn onClick={find.next} disabled={total === 0} title="Next match (⏎)">
+      <IconBtn onClick={find.next} disabled={total === 0} title="Next match (↵)">
         <ChevronDown />
       </IconBtn>
       <IconBtn onClick={find.close} title="Close (Esc)">

@@ -227,6 +227,22 @@ export function ProjectWorkspace({
         : activeTab?.kind === "file"
           ? "files"
           : null;
+  // The pending-comments composer floats over file/diff content as a header-only
+  // bar (minimized) and expands on chat. Auto-minimize fires ONLY on the
+  // chat→file edge: switching between files preserves a manual expand, and
+  // returning to chat resets it to expanded for the next file visit.
+  const [composerCollapsed, setComposerCollapsed] = useState(
+    () => activeTab != null && activeTab.kind !== "chat",
+  );
+  const prevTabKindRef = useRef(activeTab?.kind);
+  useEffect(() => {
+    const kind = activeTab?.kind;
+    const prev = prevTabKindRef.current;
+    prevTabKindRef.current = kind;
+    if (kind === "chat") setComposerCollapsed(false);
+    else if (prev === "chat") setComposerCollapsed(true);
+  }, [activeTab?.kind]);
+
   const selectedSessionId =
     activeTab?.kind === "chat" ? activeTab.sessionId : null;
   const selectedFile = useMemo(
@@ -2297,6 +2313,23 @@ export function ProjectWorkspace({
                       );
                     })}
                   </div>
+                  {totalComments > 0 && (
+                    <div className="shrink-0 px-3 pb-2">
+                      <div className="mx-auto w-full max-w-[820px]">
+                        <MessageOutput
+                          annotations={[]}
+                          message={composedMessage}
+                          count={totalComments}
+                          onSend={handleAddToChat}
+                          sendLabel="Add to chat"
+                          shortcutEnabled={
+                            activeTab?.kind === "chat" && !chatInputFocused
+                          }
+                          onClear={handleClearComments}
+                        />
+                      </div>
+                    </div>
+                  )}
                   {activeTab?.kind === "chat" && selectedSessionId && (
                     <ChatInput
                       ref={chatInputRef}
@@ -2313,34 +2346,29 @@ export function ProjectWorkspace({
                     />
                   )}
                 </div>
+                {/* Pending-comments composer. On a diff/file tab there's no chat
+                    in context to add to, so it just displays the collected
+                    comments (no "Add to chat" button). It floats as a card
+                    pinned to the bottom of the content — the code keeps its full
+                    height behind it rather than being shoved up by a docked bar.
+                    The empty side margins stay click-through so the code
+                    underneath remains selectable. */}
+                {totalComments > 0 && activeTab?.kind !== "chat" && (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3">
+                    <div className="pointer-events-auto mx-auto w-full max-w-[820px] rounded-lg shadow-2xl">
+                      <MessageOutput
+                        annotations={[]}
+                        message={composedMessage}
+                        count={totalComments}
+                        onClear={handleClearComments}
+                        collapsed={composerCollapsed}
+                        onToggleCollapse={() => setComposerCollapsed((v) => !v)}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Unified compose buffer: code-diff + chat annotations combined.
-                Persists across tabs. "Add to chat" drops it into the chat
-                composer (so it's sent through the chat → terminal path).
-                The button (and its ⌘⏎ shortcut) only appear on a chat tab —
-                on a diff/file tab there's no chat in context to add to, so the
-                buffer just displays the collected comments. */}
-            {totalComments > 0 && (
-              <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                <div className="mx-auto w-full max-w-[820px]">
-                <MessageOutput
-                  annotations={[]}
-                  message={composedMessage}
-                  count={totalComments}
-                  onSend={
-                    activeTab?.kind === "chat" ? handleAddToChat : undefined
-                  }
-                  sendLabel="Add to chat"
-                  shortcutEnabled={
-                    activeTab?.kind === "chat" && !chatInputFocused
-                  }
-                  onClear={handleClearComments}
-                />
-                </div>
-              </div>
-            )}
 
             {/* Resizable docked terminal (⌘J). Kept mounted once opened so
                 scrollback survives toggles; hidden (height 0) when closed. */}
