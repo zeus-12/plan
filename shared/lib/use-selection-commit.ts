@@ -18,7 +18,10 @@ import { useEffect, useRef } from "react";
  * `onCommit` may change identity every render; it's read through a ref so the
  * document listener is registered once.
  */
-export function useSelectionCommit(onCommit: () => void, enabled = true) {
+export function useSelectionCommit(
+  onCommit: (clickCount: number) => void,
+  enabled = true
+) {
   const cb = useRef(onCommit);
   cb.current = onCommit;
 
@@ -27,11 +30,18 @@ export function useSelectionCommit(onCommit: () => void, enabled = true) {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onMouseUp = (e: MouseEvent) => {
       if (timer) clearTimeout(timer);
-      const delay = e.detail >= 2 ? 320 : 0;
+      // Wait out the rest of a multi-click. Each click in the sequence clears
+      // the previous timer, so the commit only runs once no further click
+      // lands within this window. Kept above the OS multi-click interval
+      // (~500ms on macOS) so a triple-click's third click reliably cancels the
+      // double-click's pending commit — otherwise the box pops for the word
+      // first, then re-opens for the sentence, causing a layout shift.
+      const clickCount = e.detail;
+      const delay = clickCount >= 2 ? 500 : 0;
       timer = setTimeout(() => {
         timer = null;
         // rAF so the browser has finalized the selection for this frame.
-        requestAnimationFrame(() => cb.current());
+        requestAnimationFrame(() => cb.current(clickCount));
       }, delay);
     };
     document.addEventListener("mouseup", onMouseUp);

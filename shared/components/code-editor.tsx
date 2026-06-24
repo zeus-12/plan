@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import Editor from "react-simple-code-editor";
 import { highlightToHtml } from "../lib/highlight";
-import { useShikiReady } from "../lib/shiki";
+import { useActiveShikiTheme, useShikiReady } from "../lib/shiki";
 
 interface CodeEditorProps {
   value: string;
@@ -28,10 +28,11 @@ export function CodeEditor({
   textareaClassName,
 }: CodeEditorProps) {
   const shikiReady = useShikiReady();
+  const shikiTheme = useActiveShikiTheme();
   const highlight = useMemo(
     () => (v: string) => highlightToHtml(v, language),
-    // Re-render once shiki finishes loading so existing content gains color.
-    [language, shikiReady]
+    // Re-render once shiki finishes loading, and re-tokenize on theme change.
+    [language, shikiReady, shikiTheme]
   );
 
   return (

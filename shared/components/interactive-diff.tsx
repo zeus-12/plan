@@ -34,7 +34,7 @@ import {
 } from "../lib/diff-merge";
 import type { GitHunk } from "../lib/git-hunks";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
-import { useShikiReady } from "../lib/shiki";
+import { useActiveShikiTheme, useShikiReady } from "../lib/shiki";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
@@ -448,8 +448,13 @@ const LineContent = memo(function LineContent({
 
     const classNames: string[] = [];
     if (synTok?.className) classNames.push(synTok.className);
-    if (synTok?.lightColor || synTok?.darkColor) classNames.push("shiki-tok");
-    if (wantsBg) classNames.push("rounded-sm");
+    if (synTok?.color) classNames.push("shiki-tok");
+    // Round only the discrete word-diff pills. A range highlight (selection,
+    // annotation, find) spans many syntax-token segments, so rounding each one
+    // scallops the highlight into separate boxes with gaps — it must read as a
+    // single continuous bar (square edges, like a native text selection).
+    const isRangeHl = isAnn || isPending || isFind || isFindCurrent;
+    if (wantsBg && !isRangeHl) classNames.push("rounded-sm");
     if (isAnn)
       classNames.push(
         "cursor-pointer",
@@ -461,8 +466,7 @@ const LineContent = memo(function LineContent({
     if (background) style.background = background;
     if (isFindCurrent)
       style.outline = "1px solid var(--find-current-border, #f59e0b)";
-    if (synTok?.lightColor) style["--shiki-light"] = synTok.lightColor;
-    if (synTok?.darkColor) style["--shiki-dark"] = synTok.darkColor;
+    if (synTok?.color) style["--shiki-color"] = synTok.color;
     if (synTok?.italic) style.fontStyle = "italic";
     if (synTok?.bold) style.fontWeight = "600";
 
@@ -716,6 +720,7 @@ export function InteractiveDiff({
   // Triggers re-render once shiki finishes loading so first-paint tokens
   // (which were empty) get replaced with colored ones.
   const shikiReady = useShikiReady();
+  const shikiTheme = useActiveShikiTheme();
   // Tokenizing both sides of a large diff is a synchronous main-thread cost
   // that froze the pane on open. Defer it: the diff paints instantly without
   // colors, then a low-priority render fills them in. `tokensStale` keeps the
@@ -725,15 +730,15 @@ export function InteractiveDiff({
   const tokensStale = deferredOld !== oldText || deferredNew !== newText;
   const oldLineTokens = useMemo(
     () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(oldText, language)),
-    // shikiReady is part of the deps so memo invalidates when the highlighter
-    // becomes ready.
+    // shikiReady / shikiTheme are deps so the memo invalidates when the
+    // highlighter becomes ready and re-tokenizes when the theme changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [oldText, tokensStale, language, shikiReady]
+    [oldText, tokensStale, language, shikiReady, shikiTheme]
   );
   const newLineTokens = useMemo(
     () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(newText, language)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [newText, tokensStale, language, shikiReady]
+    [newText, tokensStale, language, shikiReady, shikiTheme]
   );
 
   function tokensForDiffLine(line: DiffLine): SyntaxToken[] {
@@ -1173,18 +1178,16 @@ export function InteractiveDiff({
     const line = dLines[lineIdx];
     if (!line) return -1;
 
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let within = 0;
-    let cur: Node | null = walker.nextNode();
-    while (cur) {
-      if (cur === node) {
-        within += nodeOff;
-        break;
-      }
-      within += cur.textContent?.length ?? 0;
-      cur = walker.nextNode();
-    }
-    return line.flatOffset + within;
+    // Characters from the line's start up to the boundary. A Range lets the
+    // browser flatten the line's nested span stack (syntax + word-diff +
+    // highlight wrappers) and resolve element-node boundaries — a triple-click
+    // ends at the *start* of the next line's element, which the old manual
+    // text-node walk mis-counted as that whole line's length, bleeding the
+    // selection/annotation onto the line below.
+    const r = document.createRange();
+    r.setStart(el, 0);
+    r.setEnd(node, nodeOff);
+    return line.flatOffset + r.toString().length;
   }
 
   /* ── Split-side validation ──────────────────────────────── */
@@ -1225,7 +1228,7 @@ export function InteractiveDiff({
 
   // Timing (settle multi-clicks, catch releases outside the pane) lives in
   // useCommentSelection; this just maps a settled selection to a diff anchor.
-  function resolveSelection(range: Range, sel: Selection) {
+  function resolveSelection(range: Range, sel: Selection, clickCount: number) {
     if (!contentRef.current) return null;
     if (!contentRef.current.contains(range.commonAncestorContainer)) return null;
 
@@ -1240,12 +1243,36 @@ export function InteractiveDiff({
       if (startSide === "left") side = "left";
     }
 
-    const text = sel.toString();
-    if (!text.trim()) return null;
-
-    const start = getAbsoluteOffset(range.startContainer, range.startOffset);
-    const end = getAbsoluteOffset(range.endContainer, range.endOffset);
+    let start = getAbsoluteOffset(range.startContainer, range.startOffset);
+    let end = getAbsoluteOffset(range.endContainer, range.endOffset);
     if (start === -1 || end === -1) return null;
+    if (start > end) [start, end] = [end, start];
+
+    let selectedText: string;
+    if (clickCount >= 3) {
+      // A triple-click is a whole-line gesture, but the table layout makes the
+      // browser over-extend it a character into the next row's cell. Don't
+      // trust the raw endpoints: snap to the lines the selection fully covers.
+      // A following line is included only when the selection spans its entire
+      // content, so the stray one-char spill (which never does) is excluded.
+      const firstIdx = getDiffLineForOffset(start, dLines);
+      let lastIdx = firstIdx;
+      while (
+        lastIdx + 1 < dLines.length &&
+        end >= dLines[lastIdx + 1].flatOffset + dLines[lastIdx + 1].content.length
+      ) {
+        lastIdx++;
+      }
+      start = dLines[firstIdx].flatOffset;
+      end = dLines[lastIdx].flatOffset + dLines[lastIdx].content.length;
+      selectedText = dLines
+        .slice(firstIdx, lastIdx + 1)
+        .map((l) => l.content)
+        .join("\n");
+    } else {
+      selectedText = sel.toString().trim();
+    }
+    if (!selectedText) return null;
 
     // In unified view, determine side from the diff line type
     if (effectiveViewMode === "unified") {
@@ -1256,7 +1283,7 @@ export function InteractiveDiff({
     const rect = range.getBoundingClientRect();
     return {
       data: { startOffset: start, endOffset: end, side },
-      selectedText: text.trim(),
+      selectedText,
       position: {
         top: rect.bottom + 8,
         left: Math.max(

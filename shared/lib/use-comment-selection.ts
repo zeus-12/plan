@@ -24,7 +24,9 @@ export interface UseCommentSelectionOptions<T> {
    */
   resolve: (
     range: Range,
-    selection: Selection
+    selection: Selection,
+    /** How many clicks produced this selection (3 = triple-click / line gesture). */
+    clickCount: number
   ) => {
     data: T;
     selectedText: string;
@@ -62,25 +64,28 @@ export function useCommentSelection<T>(
   const { enabled = true, resolve, onCreate } = opts;
   const [pending, setPending] = useState<SelectionAnchor<T> | null>(null);
 
-  const handle = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0)
-      return;
-    const range = selection.getRangeAt(0);
-    const resolved = resolve(range, selection);
-    if (!resolved) return;
-    const position =
-      resolved.position ??
-      (() => {
-        const r = range.getBoundingClientRect();
-        return { top: r.bottom + 8, left: r.left };
-      })();
-    setPending({
-      data: resolved.data,
-      selectedText: resolved.selectedText,
-      position,
-    });
-  }, [resolve]);
+  const handle = useCallback(
+    (clickCount: number) => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0)
+        return;
+      const range = selection.getRangeAt(0);
+      const resolved = resolve(range, selection, clickCount);
+      if (!resolved) return;
+      const position =
+        resolved.position ??
+        (() => {
+          const r = range.getBoundingClientRect();
+          return { top: r.bottom + 8, left: r.left };
+        })();
+      setPending({
+        data: resolved.data,
+        selectedText: resolved.selectedText,
+        position,
+      });
+    },
+    [resolve]
+  );
 
   useSelectionCommit(handle, enabled);
 

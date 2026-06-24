@@ -7,12 +7,22 @@ import {
   useEffect,
   useState,
 } from "react";
+import { setActiveShikiTheme } from "../lib/shiki";
 
+/**
+ * UI themes. `shiki` is the syntax-highlight theme that ships with each — the
+ * picker swaps both at once, so the user never selects a code theme separately.
+ * The original four keep the default github pair; new themes carry their own.
+ */
 export const THEMES = [
-  { id: "soft-dark", label: "Soft Dark", dark: true },
-  { id: "soft-light", label: "Soft Light", dark: false },
-  { id: "dark", label: "Contrast Dark", dark: true },
-  { id: "light", label: "Contrast Light", dark: false },
+  { id: "soft-dark", label: "Soft Dark", dark: true, shiki: "github-dark" },
+  { id: "soft-light", label: "Soft Light", dark: false, shiki: "github-light" },
+  {
+    id: "pierre-dark-soft",
+    label: "Pierre Dark Soft",
+    dark: true,
+    shiki: "pierre-dark-soft",
+  },
 ] as const;
 
 export type Theme = (typeof THEMES)[number]["id"];
@@ -35,6 +45,9 @@ function applyTheme(t: Theme) {
   el.classList.toggle("dark", themeIsDark(t));
   el.classList.toggle("theme-soft-dark", t === "soft-dark");
   el.classList.toggle("theme-soft-light", t === "soft-light");
+  el.classList.toggle("theme-pierre-dark-soft", t === "pierre-dark-soft");
+  // Keep syntax highlighting in lockstep with the UI theme.
+  setActiveShikiTheme(THEMES.find((x) => x.id === t)?.shiki ?? "github-dark");
 }
 
 const STORAGE_KEY = "plan-theme-v2";
@@ -64,10 +77,9 @@ function flip(t: Theme): Theme {
       return "soft-light";
     case "soft-light":
       return "soft-dark";
-    case "dark":
-      return "light";
-    case "light":
-      return "dark";
+    // Pierre is dark-only; flip to the nearest light theme.
+    case "pierre-dark-soft":
+      return "soft-light";
   }
 }
 

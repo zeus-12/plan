@@ -1,7 +1,7 @@
 import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { highlightToHtml, useShikiReady } from "../lib/highlight";
+import { highlightToHtml, useActiveShikiTheme, useShikiReady } from "../lib/highlight";
 import { cn } from "../lib/utils";
 import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
 
@@ -29,6 +29,7 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   const [copied, setCopied] = useState(false);
   const [copiedLine, setCopiedLine] = useState(false);
   const shikiReady = useShikiReady();
+  const shikiTheme = useActiveShikiTheme();
 
   // react-markdown nests the fenced text in a <code class="language-xxx">.
   const codeEl = isValidElement(children) ? children : null;
@@ -39,9 +40,9 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
 
   const html = useMemo(
     () => highlightToHtml(code, lang),
-    // Re-render once shiki finishes loading so existing code gains color.
+    // Re-render once shiki finishes loading, and re-tokenize on theme change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [code, lang, shikiReady]
+    [code, lang, shikiReady, shikiTheme]
   );
 
   const copy = () => {

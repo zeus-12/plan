@@ -117,6 +117,40 @@
   --diff-remove-word: rgba(207, 118, 112, 0.36);
 }
 
+/* Pierre Dark Soft — ported from the pierre-dark-soft VS Code theme: low-glare
+   near-black surfaces, soft #d4d4d4 text, a blue (#69b1ff) accent. Applied with
+   `.dark`; declared after the soft themes so these vars win. Its companion
+   syntax theme (pierre-dark-soft) is selected automatically — see
+   theme-provider's THEMES[].shiki. */
+.theme-pierre-dark-soft {
+  --bg: #101010;
+  --bg-surface: #171717;
+  --bg-surface-hover: #1f1f1f;
+  --border: #262626;
+  --border-strong: #333333;
+  --text: #d4d4d4;
+  --text-secondary: #8a8a8a;
+  --text-tertiary: #636363;
+  --accent: #69b1ff;
+  --accent-hover: #8cc2ff;
+  --added-text: #8cda94;
+  --removed-text: #ff91a8;
+  --selection-bg: #1f3e5e;
+  --popover-bg: #1d1d1d;
+  --popover-border: #2c2c2c;
+  --highlight-bg: rgba(255, 255, 255, 0.06);
+  --highlight-bg-hover: rgba(255, 255, 255, 0.12);
+
+  --diff-add-bg: rgba(96, 209, 153, 0.12);
+  --diff-add-gutter: rgba(96, 209, 153, 0.22);
+  --diff-add-bar: #60d199;
+  --diff-add-word: rgba(96, 209, 153, 0.38);
+  --diff-remove-bg: rgba(255, 145, 168, 0.12);
+  --diff-remove-gutter: rgba(255, 145, 168, 0.22);
+  --diff-remove-bar: #ff91a8;
+  --diff-remove-word: rgba(255, 145, 168, 0.36);
+}
+
 * {
   box-sizing: border-box;
 }

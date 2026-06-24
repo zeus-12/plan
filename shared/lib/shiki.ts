@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Highlighter } from "shiki";
+import pierreDarkSoft from "./shiki-themes/pierre-dark-soft.json";
 
 // We deliberately type as string[] rather than BundledLanguage[] — the latter
 // is a 200-element union that triggers OOM during workspace typecheck.
@@ -35,8 +36,26 @@ const SUPPORTED_LANGS: string[] = [
   "graphql",
 ];
 
-const LIGHT_THEME = "github-light";
-const DARK_THEME = "github-dark";
+// Bundled shiki themes loaded by name. The original (default) light/dark pair
+// the existing UI themes map to.
+const BUNDLED_THEMES = ["github-light", "github-dark"] as const;
+
+// Custom shiki themes loaded from VS Code theme JSON, keyed by their `name`
+// field (the id shiki registers them under). Add a theme here, then point a UI
+// theme at it via THEMES[].shiki in theme-provider.tsx.
+const CUSTOM_THEMES: Record<string, unknown> = {
+  "pierre-dark-soft": pierreDarkSoft,
+};
+
+const DEFAULT_THEME = "github-dark";
+
+/**
+ * The shiki theme tokens are currently colored with. Driven by the active UI
+ * theme — `applyTheme` in theme-provider calls `setActiveShikiTheme`. We bake a
+ * single color per token (not a light+dark pair) and re-tokenize when this
+ * changes, so each UI theme can carry its own, arbitrary syntax theme.
+ */
+let activeShikiTheme: string = DEFAULT_THEME;
 
 // Shiki uses its own canonical language names. Map our app's ids — and the
 // short forms that show up as markdown code-fence languages (```js, ```py) —
@@ -83,7 +102,7 @@ export async function ensureHighlighter(): Promise<Highlighter | null> {
     try {
       const { createHighlighter } = await import("shiki");
       const h = await createHighlighter({
-        themes: [LIGHT_THEME, DARK_THEME],
+        themes: [...BUNDLED_THEMES, ...Object.values(CUSTOM_THEMES)] as never,
         // Cast through unknown — shiki expects a BundledLanguage[] union
         // which is a 200-element string union that blows up TS memory.
         langs: SUPPORTED_LANGS as unknown as never,
@@ -98,6 +117,39 @@ export async function ensureHighlighter(): Promise<Highlighter | null> {
   })();
 
   return highlighterPromise;
+}
+
+/**
+ * Point tokenization at a different shiki theme. Called by the theme provider
+ * when the UI theme changes. Notifies subscribers so mounted code blocks
+ * re-tokenize with the new theme's colors. Unknown names fall back to the
+ * default so a misconfigured mapping never leaves code uncolored.
+ */
+export function setActiveShikiTheme(name: string): void {
+  const next = BUNDLED_THEMES.includes(name as never) || name in CUSTOM_THEMES
+    ? name
+    : DEFAULT_THEME;
+  if (next === activeShikiTheme) return;
+  activeShikiTheme = next;
+  for (const cb of subscribers) cb();
+}
+
+/**
+ * The active shiki theme name, kept in React state so a component re-renders
+ * (and its highlight memo re-runs) when the UI theme changes. Use the returned
+ * value as a memo dependency wherever tokens are computed.
+ */
+export function useActiveShikiTheme(): string {
+  const [name, setName] = useState<string>(activeShikiTheme);
+  useEffect(() => {
+    const cb = () => setName(activeShikiTheme);
+    subscribers.add(cb);
+    cb();
+    return () => {
+      subscribers.delete(cb);
+    };
+  }, []);
+  return name;
 }
 
 /**
@@ -128,8 +180,8 @@ export interface SyntaxToken {
   end: number;
   /** Optional class name (for non-shiki fallback paths). */
   className?: string;
-  lightColor?: string;
-  darkColor?: string;
+  /** Color from the active shiki theme. */
+  color?: string;
   italic?: boolean;
   bold?: boolean;
 }
@@ -153,11 +205,12 @@ export function highlightTokens(code: string, languageId: string): SyntaxToken[]
 
   let lines;
   try {
-    lines = highlighter.codeToTokensWithThemes(code, {
-      themes: { light: LIGHT_THEME, dark: DARK_THEME },
+    ({ tokens: lines } = highlighter.codeToTokens(code, {
+      theme: activeShikiTheme,
+      includeExplanation: false,
       // Same union-type-avoidance dance as above.
       lang: lang as unknown as never,
-    });
+    }));
   } catch {
     return [];
   }
@@ -169,16 +222,11 @@ export function highlightTokens(code: string, languageId: string): SyntaxToken[]
     for (const tok of line) {
       const len = tok.content.length;
       if (len === 0) continue;
-      const light = (tok as { variants?: { light?: { color?: string; fontStyle?: number } } })
-        .variants?.light;
-      const dark = (tok as { variants?: { dark?: { color?: string; fontStyle?: number } } })
-        .variants?.dark;
-      const fs = light?.fontStyle ?? dark?.fontStyle ?? 0;
+      const fs = tok.fontStyle ?? 0;
       out.push({
         start: offset,
         end: offset + len,
-        lightColor: light?.color,
-        darkColor: dark?.color,
+        color: tok.color,
         italic: (fs & FS_ITALIC) !== 0,
         bold: (fs & FS_BOLD) !== 0,
       });
@@ -221,11 +269,10 @@ export function highlightToHtml(value: string, language: string): string {
 
     const classes: string[] = [];
     if (t.className) classes.push(t.className);
-    if (t.lightColor || t.darkColor) classes.push("shiki-tok");
+    if (t.color) classes.push("shiki-tok");
 
     const styleBits: string[] = [];
-    if (t.lightColor) styleBits.push(`--shiki-light:${t.lightColor}`);
-    if (t.darkColor) styleBits.push(`--shiki-dark:${t.darkColor}`);
+    if (t.color) styleBits.push(`--shiki-color:${t.color}`);
     if (t.italic) styleBits.push("font-style:italic");
     if (t.bold) styleBits.push("font-weight:600");
 
@@ -274,8 +321,7 @@ export function highlightPerLine(value: string, languageId: string): SyntaxToken
         perLine[lineIdx].push({
           start: s - lineStart,
           end: sliceEnd - lineStart,
-          lightColor: tok.lightColor,
-          darkColor: tok.darkColor,
+          color: tok.color,
           italic: tok.italic,
           bold: tok.bold,
         });

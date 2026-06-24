@@ -8,15 +8,13 @@
 }
 
 /*
- * Shiki tokens: each span carries its own `--shiki-light` / `--shiki-dark`
- * CSS variables as inline style. We pick which one applies based on the
- * theme class on the root element.
+ * Shiki tokens: each span carries a `--shiki-color` CSS variable as inline
+ * style, baked from the active theme's syntax colors at tokenization time.
+ * Switching the UI theme re-tokenizes, so this single variable is always the
+ * right color for the current theme.
  */
 .shiki-tok {
-  color: var(--shiki-light, currentColor);
-}
-.dark .shiki-tok {
-  color: var(--shiki-dark, currentColor);
+  color: var(--shiki-color, currentColor);
 }
 
 /* Theme-aware syntax-highlight token colors. Mirrors highlight.js class names. */

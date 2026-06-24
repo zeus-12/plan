@@ -8,6 +8,8 @@ export {
   highlightToHtml,
   ensureHighlighter,
   useShikiReady,
+  setActiveShikiTheme,
+  useActiveShikiTheme,
   type SyntaxToken,
 } from "./shiki";
 
