@@ -1489,20 +1489,28 @@ export function ProjectWorkspace({
     }
     const tid = `${chatPrefix}${selectedSessionId}`;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
+      let proc: string | null = null;
       try {
         const st = await window.electronAPI.terminalStatus(tid);
-        if (alive) setAgentProcess(st.running ? st.process : null);
+        proc = st.running ? st.process : null;
+        if (alive) setAgentProcess(proc);
       } catch {
         // Status unavailable — show the neutral state, not a wrong one.
         if (alive) setAgentProcess(null);
       }
+      if (!alive) return;
+      // Poll quickly until Claude is detected so the composer (which holds send
+      // until the agent is live) unlocks right as the session finishes booting;
+      // ease off to a slow heartbeat once it's up.
+      const live = /claude|node/i.test(proc ?? "");
+      timer = setTimeout(poll, live ? 5_000 : 1_000);
     };
     void poll();
-    const interval = setInterval(poll, 5_000);
     return () => {
       alive = false;
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
     };
   }, [chatTerminalReady, selectedSessionId, chatPrefix]);
   // Claude's CLI runs under node; either name means the agent process is live.
@@ -2295,6 +2303,7 @@ export function ProjectWorkspace({
                       sessionId={selectedSessionId}
                       projectEncoded={project.encoded}
                       inactive={!chatTerminalReady}
+                      notReady={chatTerminalReady && !agentLive}
                       onStart={handleResumeChat}
                       onSend={handleSendChat}
                       blocked={awaitingSelection}

@@ -44,6 +44,11 @@ interface Props {
   /** No live terminal yet — clicking the box starts one (see onStart). */
   inactive?: boolean;
   onStart?: () => void;
+  /** Terminal is open but Claude hasn't finished booting yet. Composing stays
+   *  enabled so a message can be drafted, but send is held back: a TUI that
+   *  isn't ready drops the trailing Enter, leaving the message pasted-but-unsent.
+   *  Driven by the same agent-live signal the header status badge shows. */
+  notReady?: boolean;
   /** Focus the editor when this session becomes the composer's session. */
   autoFocus?: boolean;
   /** EXPERIMENTAL: Claude appears to be on a selection menu (no text box), so
@@ -139,6 +144,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       onSend,
       inactive,
       onStart,
+      notReady,
       autoFocus,
       blocked,
       onBlocked,
@@ -184,6 +190,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     const pendingSaves = attachments.some((a) => a.path === null);
     const canSend =
       !inactive &&
+      !notReady &&
       !blocked &&
       !pendingSaves &&
       (!isEmpty || attachments.length > 0);
@@ -247,7 +254,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
         onBlocked?.();
         return;
       }
-      if (inactive || pendingSavesRef.current) return;
+      if (inactive || notReady || pendingSavesRef.current) return;
       const editor = editorRef.current;
       if (!editor) return;
       const text = editor
@@ -273,7 +280,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       clearAttachments();
       window.localStorage.removeItem(draftKey(sessionId));
       window.localStorage.removeItem(imagesKey(sessionId));
-    }, [blocked, inactive, onBlocked, onSend, sessionId, clearAttachments]);
+    }, [
+      blocked,
+      inactive,
+      notReady,
+      onBlocked,
+      onSend,
+      sessionId,
+      clearAttachments,
+    ]);
 
     const sendRef = useRef(send);
     sendRef.current = send;
@@ -449,7 +464,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
                 onClick={send}
                 disabled={!canSend}
                 aria-label="Send"
-                title={pendingSaves ? "Saving image…" : "Send (Enter)"}
+                title={
+                  notReady
+                    ? "Waiting for Claude to finish loading…"
+                    : pendingSaves
+                      ? "Saving image…"
+                      : "Send (Enter)"
+                }
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--bg)] transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 <SendIcon />
