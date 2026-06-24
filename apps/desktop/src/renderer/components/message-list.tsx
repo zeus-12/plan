@@ -202,6 +202,122 @@ function CollapsibleBlock({
   );
 }
 
+function ChevronRight({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn(
+        "shrink-0 text-[var(--text-tertiary)] transition-transform duration-200",
+        open && "rotate-90"
+      )}
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+/** The basename of a path (last segment), for compact tool-call headers. */
+function baseName(p: string): string {
+  const parts = p.split("/");
+  return parts[parts.length - 1] || p;
+}
+
+/**
+ * A tool call → a short verb + target for the header line, e.g.
+ * Read → ("Read", "file.ts"), Bash → ("Ran", "<description>"). Tools without a
+ * special case fall back to the raw tool name + a generic input preview.
+ */
+function toolHeader(tool: string, input: unknown): { verb: string; target: string } {
+  const obj =
+    input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const fp = asStr(obj.file_path);
+  switch (tool) {
+    case "Read":
+      return { verb: "Read", target: fp ? baseName(fp) : "" };
+    case "Edit":
+    case "MultiEdit":
+      return { verb: "Edit", target: fp ? baseName(fp) : "" };
+    case "Write":
+      return { verb: "Write", target: fp ? baseName(fp) : "" };
+    case "Bash":
+      return {
+        verb: "Ran",
+        target: asStr(obj.description) || truncate(asStr(obj.command), 120),
+      };
+    case "Grep":
+      return { verb: "Grep", target: asStr(obj.pattern) };
+    case "Glob":
+      return { verb: "Glob", target: asStr(obj.pattern) };
+    default:
+      return { verb: tool, target: previewInput(input) };
+  }
+}
+
+/**
+ * A tool call rendered as a borderless one-line summary — a muted verb, the
+ * target (filename / command description), and a chevron. Clicking expands the
+ * raw input (and paired result) inside a bordered panel.
+ */
+function ToolCallBlock({
+  tool,
+  input,
+  inputJson,
+  result,
+}: {
+  tool: string;
+  input: unknown;
+  inputJson: string;
+  result?: ToolResult;
+}) {
+  const [open, setOpen] = useState(false);
+  const { verb, target } = toolHeader(tool, input);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
+      >
+        <span className="shrink-0 text-[var(--text-tertiary)]">{verb}</span>
+        {target && (
+          <span
+            className="min-w-0 truncate text-[var(--text-secondary)]"
+            data-find-skip=""
+          >
+            {target}
+          </span>
+        )}
+        <ChevronRight open={open} />
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+        data-find-skip=""
+      >
+        <div className="overflow-hidden">
+          <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2">
+            <CodeBody text={inputJson} />
+            {result && (
+              <div className="mt-2 border-t border-[var(--border)] pt-2">
+                <div className="mb-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+                  {result.isError ? "result (error)" : "result"}
+                </div>
+                <CodeBody text={result.output} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Monospace, scrollable code body used inside disclosure blocks. */
 function CodeBody({
   text,
@@ -636,23 +752,12 @@ const MessagePartView = memo(function MessagePartView({
         inputJson = String(part.input);
       }
       return (
-        <CollapsibleBlock
-          label={`🔧 ${part.tool}`}
-          preview={previewInput(part.input)}
-          skipFindContent
-        >
-          <div className="px-3 pb-3 pt-1">
-            <CodeBody text={inputJson} />
-            {result && (
-              <div className="mt-2 border-t border-[var(--border)] pt-2">
-                <div className="mb-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-                  {result.isError ? "result (error)" : "result"}
-                </div>
-                <CodeBody text={result.output} />
-              </div>
-            )}
-          </div>
-        </CollapsibleBlock>
+        <ToolCallBlock
+          tool={part.tool}
+          input={part.input}
+          inputJson={inputJson}
+          result={result}
+        />
       );
     }
     case "tool_result":
@@ -1120,7 +1225,7 @@ export const MessageList = memo(function MessageList({
     <>
       <div className="relative h-full">
       <FindWidget find={find} revealTrigger={findReveal} />
-      <div ref={parentRef} className="h-full overflow-auto py-3">
+      <div ref={parentRef} className="h-full overflow-auto pt-3 pb-6">
         {/* Centered reading column (ChatGPT-style): the scrollbar stays at the
             pane edge while message width is capped for readability. Diff/file
             tabs are separate views and keep their full width. */}
@@ -1196,6 +1301,17 @@ export const MessageList = memo(function MessageList({
         {working && <TypingIndicator />}
         </div>
       </div>
+      {/* Soft blur-fade where messages scroll up under the composer — the
+          bottom rows dissolve into the background instead of cutting off hard.
+          pointer-events-none so it never blocks scrolling/selection. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 backdrop-blur-[2px]"
+        style={{
+          background: "linear-gradient(to top, var(--bg) 20%, transparent)",
+          WebkitMaskImage: "linear-gradient(to top, black 40%, transparent)",
+          maskImage: "linear-gradient(to top, black 40%, transparent)",
+        }}
+      />
       {showScrollDown && (
         <button
           onClick={scrollToBottom}

@@ -31,6 +31,9 @@ export interface RepoFileGroup {
 
 interface Props {
   groups: RepoFileGroup[];
+  /** Renders the commit box for a repo, shown above its staged changes. Owned by
+   * the parent so the draft survives this virtualized row unmounting on scroll. */
+  renderCommit?: (group: RepoFileGroup) => React.ReactNode;
   selected: { subPath: string; path: string; staged: boolean } | null;
   /** Project-relative path of the file of interest from another tab (e.g. a
    * file open in the Files tab) — highlighted distinctly from the selection. */
@@ -50,9 +53,12 @@ interface Props {
 const REPO_H = 34;
 const SECTION_H = 30;
 const FILE_H = 36;
+// Estimate only — commit rows are measured dynamically (resizable textarea).
+const COMMIT_H = 104;
 
 type Row =
   | { kind: "repo"; key: string; group: RepoFileGroup }
+  | { kind: "commit"; key: string; group: RepoFileGroup }
   | {
       kind: "section";
       key: string;
@@ -213,6 +219,7 @@ function ActionButton({
 
 export function FileList({
   groups,
+  renderCommit,
   selected,
   activeFilePath,
   onSelect,
@@ -237,6 +244,7 @@ export function FileList({
     [groups]
   );
   const multiRepo = nonEmpty.length > 1;
+  const hasCommit = !!renderCommit;
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -245,6 +253,10 @@ export function FileList({
       if (multiRepo) {
         out.push({ kind: "repo", key: `repo:${repoKey}`, group: g });
         if (collapsedRepos.has(repoKey)) continue;
+      }
+      // Commit box sits directly above this repo's staged changes.
+      if (hasCommit && g.staged.length > 0) {
+        out.push({ kind: "commit", key: `commit:${repoKey}`, group: g });
       }
       const pushSection = (section: "staged" | "unstaged", files: FileEntry[]) => {
         if (files.length === 0) return;
@@ -263,7 +275,7 @@ export function FileList({
       pushSection("unstaged", g.unstaged);
     }
     return out;
-  }, [nonEmpty, multiRepo, collapsedRepos, collapsedSections]);
+  }, [nonEmpty, multiRepo, hasCommit, collapsedRepos, collapsedSections]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -271,6 +283,7 @@ export function FileList({
     estimateSize: (i) => {
       const r = rows[i];
       if (r.kind === "repo") return REPO_H;
+      if (r.kind === "commit") return COMMIT_H;
       if (r.kind === "section") return SECTION_H;
       return FILE_H;
     },
@@ -311,6 +324,26 @@ export function FileList({
             height: vi.size,
             transform: `translateY(${vi.start}px)`,
           };
+
+          if (row.kind === "commit") {
+            // Measured (not fixed height) so the resizable textarea reflows.
+            return (
+              <div
+                key={row.key}
+                ref={virtualizer.measureElement}
+                data-index={vi.index}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                {renderCommit?.(row.group)}
+              </div>
+            );
+          }
 
           if (row.kind === "repo") {
             const repoKey = row.group.subPath || "/";

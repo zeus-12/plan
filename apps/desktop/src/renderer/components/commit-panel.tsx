@@ -7,6 +7,10 @@ interface Props {
   branch: string | null;
   /** Repo name to display next to "Commit · N files" — null hides it (single-repo project). */
   repoLabel: string | null;
+  /** Draft is owned by the parent so it survives the row unmounting while the
+   * virtualized file list scrolls. */
+  message: string;
+  onMessageChange: (message: string) => void;
   onCommit: (message: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -14,9 +18,10 @@ export function CommitPanel({
   stagedCount,
   branch,
   repoLabel,
+  message,
+  onMessageChange,
   onCommit,
 }: Props) {
-  const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,14 +32,14 @@ export function CommitPanel({
     try {
       const res = await onCommit(message);
       if (res.ok) {
-        setMessage("");
+        onMessageChange("");
       } else {
         setError(res.error ?? "Commit failed");
       }
     } finally {
       setPending(false);
     }
-  }, [message, onCommit]);
+  }, [message, onMessageChange, onCommit]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -50,7 +55,7 @@ export function CommitPanel({
     <div className="shrink-0 border-b border-[var(--border)] bg-[var(--bg-surface)] p-2.5">
       <textarea
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
+        onChange={(e) => onMessageChange(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={
           repoLabel
