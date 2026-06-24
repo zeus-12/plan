@@ -278,8 +278,12 @@ export const MiddleSidebar = memo(function MiddleSidebar({
     return () => window.removeEventListener("keydown", handler);
   }, [sidebar, terminals.length, onNewTerminal]);
 
-  const stagedGroups = repoGroups.filter((g) => g.staged.length > 0);
   const multiRepo = repos.length > 1;
+  // Commit drafts live here, keyed by repo subPath, so a draft survives its
+  // commit box unmounting as the virtualized file list scrolls.
+  const [commitDrafts, setCommitDrafts] = useState<Record<string, string>>({});
+  const setDraft = (key: string, message: string) =>
+    setCommitDrafts((prev) => ({ ...prev, [key]: message }));
 
   return (
     <Sidebar
@@ -321,22 +325,24 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col">
-                {/* Commit message lives at the TOP, VS Code style. */}
-                {stagedGroups.map((g) => {
-                  const repo = repos.find((r) => r.subPath === g.subPath);
-                  return (
-                    <CommitPanel
-                      key={g.subPath || "/"}
-                      stagedCount={g.staged.length}
-                      branch={repo?.branch ?? null}
-                      repoLabel={multiRepo ? g.repoName : null}
-                      onCommit={(msg) => onCommit(msg, g.subPath)}
-                    />
-                  );
-                })}
+                {/* Each repo's commit box sits directly above its own files. */}
                 <div className="min-h-0 flex-1">
                   <FileList
                     groups={repoGroups}
+                    renderCommit={(g) => {
+                      const repo = repos.find((r) => r.subPath === g.subPath);
+                      const key = g.subPath || "/";
+                      return (
+                        <CommitPanel
+                          stagedCount={g.staged.length}
+                          branch={repo?.branch ?? null}
+                          repoLabel={multiRepo ? g.repoName : null}
+                          message={commitDrafts[key] ?? ""}
+                          onMessageChange={(msg) => setDraft(key, msg)}
+                          onCommit={(msg) => onCommit(msg, g.subPath)}
+                        />
+                      );
+                    }}
                     selected={selectedFile}
                     activeFilePath={activeFilePath}
                     onSelect={onSelectFile}
