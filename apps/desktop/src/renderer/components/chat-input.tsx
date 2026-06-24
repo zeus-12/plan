@@ -65,7 +65,7 @@ interface Attachment {
   path: string | null;
 }
 
-const MIN_HEIGHT = 72;
+const MIN_HEIGHT = 40;
 const MAX_HEIGHT = 260;
 const draftKey = (sid: string) => `plan.draft.${sid}`;
 
@@ -254,11 +254,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       : "What would you like to make?  @ files · / skills";
 
     return (
-      <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
+      <div className="shrink-0 px-3 pb-3 pt-0">
         {blocked && (
           <button
             onClick={onBlocked}
-            className="mb-2 flex w-full items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
+            className="mx-auto mb-2 flex w-full max-w-[820px] items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
           >
             <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
             <span>
@@ -270,7 +270,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
             </span>
           </button>
         )}
-        <div className="flex flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] transition-colors focus-within:border-[var(--border-strong)]">
+        {/* Centered to match the message column's max width (see message-list). */}
+        <div className="mx-auto flex w-full max-w-[820px] flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] transition-colors focus-within:border-[var(--border-strong)]">
           <div
             className="relative"
             onMouseDown={inactive ? onStart : undefined}

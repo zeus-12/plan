@@ -2300,6 +2300,7 @@ export function ProjectWorkspace({
                 buffer just displays the collected comments. */}
             {totalComments > 0 && (
               <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                <div className="mx-auto w-full max-w-[820px]">
                 <MessageOutput
                   annotations={[]}
                   message={composedMessage}
@@ -2313,6 +2314,7 @@ export function ProjectWorkspace({
                   }
                   onClear={handleClearComments}
                 />
+                </div>
               </div>
             )}
 
