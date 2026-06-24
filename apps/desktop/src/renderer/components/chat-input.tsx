@@ -81,6 +81,43 @@ function readDraft(sid: string): string | undefined {
   }
 }
 
+// Pasted images are part of the draft too: persist their saved temp-file paths
+// alongside the text so a project/session switch can restore them. The blob
+// object URL dies with the component, so a restored chip previews from the file
+// itself (file://) instead — the temp file is what actually gets sent anyway.
+const imagesKey = (sid: string) => `${draftKey(sid)}.images`;
+
+function readAttachmentPaths(sid: string): string[] {
+  const raw = window.localStorage.getItem(imagesKey(sid));
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr)
+      ? arr.filter((p): p is string => typeof p === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeAttachmentPaths(sid: string, paths: string[]) {
+  if (paths.length === 0) window.localStorage.removeItem(imagesKey(sid));
+  else window.localStorage.setItem(imagesKey(sid), JSON.stringify(paths));
+}
+
+function attachmentsFromPaths(paths: string[]): Attachment[] {
+  return paths.map((path) => ({
+    id: crypto.randomUUID(),
+    previewUrl: `file://${path}`,
+    path,
+  }));
+}
+
+/** Object URLs need freeing; restored file:// previews don't. */
+const revokeIfBlob = (url: string) => {
+  if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+};
+
 /**
  * Message composer. Enter sends, Shift+Enter inserts a newline.
  *
@@ -124,18 +161,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
 
     const clearAttachments = useCallback(() => {
       setAttachments((prev) => {
-        prev.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+        prev.forEach((a) => revokeIfBlob(a.previewUrl));
         return [];
       });
       setPreview(null);
     }, []);
-
-    // Attachments belong to one conversation — drop them on session switch and
-    // on unmount; reset the undo buffer so ⌘Z never restores another chat's text.
-    useEffect(() => {
-      lastSentRef.current = null;
-      return clearAttachments;
-    }, [sessionId, clearAttachments]);
 
     // Browsers don't reliably fire `blur` when the editor unmounts (tab switch,
     // session change), so tell the parent the composer is gone — otherwise it
@@ -145,7 +175,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     const removeAttachment = useCallback((id: string) => {
       setAttachments((prev) => {
         const target = prev.find((a) => a.id === id);
-        if (target) URL.revokeObjectURL(target.previewUrl);
+        if (target) revokeIfBlob(target.previewUrl);
         return prev.filter((a) => a.id !== id);
       });
       setPreview((p) => (p?.id === id ? null : p));
@@ -164,6 +194,53 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     attachmentsRef.current = attachments;
     const pendingSavesRef = useRef(pendingSaves);
     pendingSavesRef.current = pendingSaves;
+
+    const sessionRef = useRef(sessionId);
+    sessionRef.current = sessionId;
+    // True once the current session's stored attachments have been restored.
+    // The persist effect below waits on this so the transient empty state
+    // during a switch never overwrites the session we're switching *into*.
+    const loadedRef = useRef(false);
+
+    // Restore (or clear, on session switch) the pasted images for this session,
+    // verifying each temp file still exists — the OS can purge it, and we never
+    // show or send a path we can't confirm. The undo buffer resets too so ⌘Z
+    // can't pull another chat's text back.
+    useEffect(() => {
+      loadedRef.current = false;
+      lastSentRef.current = null;
+      let cancelled = false;
+      setAttachments((prev) => {
+        prev.forEach((a) => revokeIfBlob(a.previewUrl));
+        return [];
+      });
+      setPreview(null);
+      void (async () => {
+        const paths = readAttachmentPaths(sessionId);
+        const present = await Promise.all(
+          paths.map((p) => window.electronAPI.fileExists(p)),
+        );
+        if (cancelled) return;
+        const live = paths.filter((_, i) => present[i]);
+        if (live.length !== paths.length) writeAttachmentPaths(sessionId, live);
+        setAttachments(attachmentsFromPaths(live));
+        loadedRef.current = true;
+      })();
+      return () => {
+        cancelled = true;
+        attachmentsRef.current.forEach((a) => revokeIfBlob(a.previewUrl));
+      };
+    }, [sessionId]);
+
+    // Persist saved attachment paths whenever they change, so a switch can
+    // restore them. Gated on loadedRef so the clear above can't wipe the set.
+    useEffect(() => {
+      if (!loadedRef.current) return;
+      writeAttachmentPaths(
+        sessionRef.current,
+        attachments.map((a) => a.path).filter((p): p is string => p !== null),
+      );
+    }, [attachments]);
 
     const send = useCallback(() => {
       if (blocked) {
@@ -195,6 +272,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       });
       clearAttachments();
       window.localStorage.removeItem(draftKey(sessionId));
+      window.localStorage.removeItem(imagesKey(sessionId));
     }, [blocked, inactive, onBlocked, onSend, sessionId, clearAttachments]);
 
     const sendRef = useRef(send);
