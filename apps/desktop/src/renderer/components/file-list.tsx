@@ -280,6 +280,11 @@ export function FileList({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
+    // Key measurements by stable row identity, not index. The commit row is
+    // dynamically measured (~104px); without this, when it disappears (staged
+    // count → 0 after a commit) its cached height bleeds onto whatever row
+    // slides into its old index — bloating the Changes header.
+    getItemKey: (i) => rows[i].key,
     estimateSize: (i) => {
       const r = rows[i];
       if (r.kind === "repo") return REPO_H;
