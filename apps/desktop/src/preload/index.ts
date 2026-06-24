@@ -63,6 +63,13 @@ const electronAPI = {
     return () => ipcRenderer.removeListener("watcher:event", handler);
   },
 
+  // Start/stop watching the active project's real worktree on disk (file edits,
+  // git ops made outside the app). Scoped to the mounted workspace.
+  watchWorktree: (encoded: string) =>
+    ipcRenderer.invoke("worktree:watch", encoded),
+  unwatchWorktree: (encoded: string) =>
+    ipcRenderer.invoke("worktree:unwatch", encoded),
+
   // Ctrl+Tab (sessions) / Ctrl+` (projects) cycles, forwarded from main since
   // Chromium swallows Ctrl+Tab before the page sees it. `key` is the
   // KeyboardEvent.code of the trigger; `shift` reverses direction.
@@ -138,6 +145,8 @@ const electronAPI = {
   terminalList: () => ipcRenderer.invoke("terminal:list"),
   saveTempImage: (data: Uint8Array, ext: string) =>
     ipcRenderer.invoke("terminal:saveTempImage", data, ext),
+  fileExists: (path: string) =>
+    ipcRenderer.invoke("terminal:fileExists", path),
   onTerminalData: (cb: (chunk: { id: string; data: string }) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

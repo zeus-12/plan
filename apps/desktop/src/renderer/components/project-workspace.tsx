@@ -69,6 +69,7 @@ import {
   subscribeMru,
 } from "../lib/mru-store";
 import { mergeSession } from "../lib/merge-session";
+import { bumpWorktreeRevision } from "../lib/worktree-revision";
 import { osNotify, pushToast } from "../lib/toast-store";
 
 /**
@@ -740,6 +741,16 @@ export function ProjectWorkspace({
     });
   }, [chatSessionIds, refreshTranscript]);
 
+  // Watch this project's real worktree on disk while its workspace is mounted.
+  // Scoped to the active project (real repos are heavier to watch than the
+  // session dirs), started/stopped here rather than eagerly for every project.
+  useEffect(() => {
+    void window.electronAPI.watchWorktree(project.encoded);
+    return () => {
+      void window.electronAPI.unwatchWorktree(project.encoded);
+    };
+  }, [project.encoded]);
+
   // Watcher: re-pull what's relevant. Debounced — a streaming session fires
   // events continuously, and refreshing (git + session list + transcript) on
   // every single one stalls the renderer.
@@ -749,6 +760,10 @@ export function ProjectWorkspace({
     const changedSids = new Set<string>();
     const off = window.electronAPI.onWatcherEvent((e) => {
       if (e.encoded !== project.encoded) return;
+      // A worktree change (file edit / git op on disk) bumps the content
+      // revision so open diff/file/image panes re-fetch — refreshDiff below
+      // covers the sidebar status, this covers the mounted content panes.
+      if (e.kind === "worktree-changed") bumpWorktreeRevision(e.encoded);
       // Refresh the transcript of any OPEN chat tab whose JSONL changed.
       if (e.sessionId && chatSessionIdsRef.current.includes(e.sessionId)) {
         wantSelected = true;

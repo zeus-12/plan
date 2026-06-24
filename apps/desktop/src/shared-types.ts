@@ -125,7 +125,14 @@ export interface SessionListEntry {
   updatedAt: number | string | null;
 }
 
-export type SessionEventKind = "new-session" | "session-changed" | "project-added";
+export type SessionEventKind =
+  | "new-session"
+  | "session-changed"
+  | "project-added"
+  // Emitted by worktree-watcher when the real repo on disk changes (file edit,
+  // git stage/commit/checkout). Carries no sessionId — the renderer treats it
+  // as "re-pull git + bump content revision for this project".
+  | "worktree-changed";
 
 export interface SessionEvent {
   kind: SessionEventKind;

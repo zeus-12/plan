@@ -70,6 +70,8 @@ interface ElectronAPI {
     opts: SearchOptions
   ) => Promise<SearchResult>;
   onWatcherEvent: (cb: (e: SessionEvent) => void) => () => void;
+  watchWorktree: (encoded: string) => Promise<void>;
+  unwatchWorktree: (encoded: string) => Promise<void>;
   onSwitcherCycle: (
     cb: (e: { key: string; shift: boolean }) => void
   ) => () => void;
@@ -133,6 +135,7 @@ interface ElectronAPI {
   terminalKill: (id: string) => void;
   terminalList: () => Promise<{ id: string; cwd: string; pid: number }[]>;
   saveTempImage: (data: Uint8Array, ext: string) => Promise<string | null>;
+  fileExists: (path: string) => Promise<boolean>;
   onTerminalData: (
     cb: (chunk: { id: string; data: string }) => void
   ) => () => void;

@@ -35,6 +35,12 @@ import {
   startRootWatch,
   stopAll,
 } from "./session-watcher";
+import {
+  setWorktreeCallbacks,
+  startWorktreeWatch,
+  stopWorktreeWatch,
+  stopAllWorktreeWatches,
+} from "./worktree-watcher";
 import { readSessionFile, type ParsedSession } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
@@ -709,17 +715,38 @@ function registerIpc() {
       }
     },
   );
+
+  // Does a path still exist on disk? Used to verify a restored draft's pasted
+  // images are still present before showing/sending them (the OS can purge tmp).
+  ipcMain.handle("terminal:fileExists", async (_e, path: string) => {
+    try {
+      await stat(path);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // Worktree watching is scoped to whatever project workspace is mounted —
+  // real repos are heavier to watch than the session JSONL dirs, so we only
+  // watch the active one. The renderer calls these on mount/unmount.
+  ipcMain.handle("worktree:watch", (_e, encoded: string) => {
+    void startWorktreeWatch(encoded);
+  });
+  ipcMain.handle("worktree:unwatch", (_e, encoded: string) => {
+    stopWorktreeWatch(encoded);
+  });
 }
 
 // ── Watcher → renderer bridge ──────────────────────────────────────
 
 function bridgeWatcher() {
-  setCallbacks({
-    onEvent(e) {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send("watcher:event", e);
-    },
-  });
+  const send = (e: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("watcher:event", e);
+  };
+  setCallbacks({ onEvent: send });
+  setWorktreeCallbacks({ onEvent: send });
 }
 
 function bridgeTerminal() {
@@ -764,12 +791,14 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   if (!isMac) {
     stopAll();
+    stopAllWorktreeWatches();
     app.quit();
   }
 });
 
 app.on("before-quit", () => {
   stopAll();
+  stopAllWorktreeWatches();
   killAllTerminals();
 });
 

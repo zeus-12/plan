@@ -12,6 +12,8 @@
     "release": "bash scripts/release.sh"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["node-pty"]
+    "onlyBuiltDependencies": [
+      "node-pty"
+    ]
   }
 }

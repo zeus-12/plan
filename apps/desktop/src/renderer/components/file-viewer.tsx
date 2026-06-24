@@ -24,6 +24,7 @@ import { FindWidget } from "@plan/shared/components/find-widget";
 import { cn } from "@plan/shared/lib/utils";
 import { FileIcon } from "./file-icon";
 import { ImageLightbox } from "./image-lightbox";
+import { useWorktreeRevision } from "../lib/worktree-revision";
 
 const LINE_HEIGHT = 20;
 const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
@@ -229,6 +230,11 @@ export function FileViewer({
   const measureRef = useRef<HTMLSpanElement>(null);
 
   const isImage = useMemo(() => isImagePath(path), [path]);
+  // Bumps when the worktree changes on disk. For text it re-reads; for images
+  // it doubles as a cache-buster — Chromium caches a `file://` URL forever, so
+  // a re-written image at the same path would otherwise stay stale until the
+  // app restarts. Folding the revision into the URL forces a fresh read.
+  const revision = useWorktreeRevision(encoded);
 
   useEffect(() => {
     let cancelled = false;
@@ -245,7 +251,9 @@ export function FileViewer({
         if (!abs) {
           setStatus("missing");
         } else {
-          setImageUrl(`file://${encodeURI(abs)}`);
+          // `?v=` is ignored by the file loader but makes the URL unique per
+          // revision so the browser re-reads instead of serving its cache.
+          setImageUrl(`file://${encodeURI(abs)}?v=${revision}`);
           setStatus("ok");
         }
       });
@@ -265,7 +273,7 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [encoded, path, isImage]);
+  }, [encoded, path, isImage, revision]);
 
   const language = useMemo(() => languageFromPath(path) ?? "plaintext", [path]);
   const text = data?.text ?? "";

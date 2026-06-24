@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
 import { cn } from "@plan/shared/lib/utils";
+import { useWorktreeRevision } from "../lib/worktree-revision";
 import {
   detectLanguage,
   languageFromPath,
@@ -82,6 +83,9 @@ export function FileDiffViewer({
   // Bumped after a per-hunk op to re-fetch this file's view in place (so the
   // staged hunk leaves "Changes" immediately) without remounting the viewer.
   const [reloadKey, setReloadKey] = useState(0);
+  // Bumps when the worktree changes on disk (edit/git op outside the app) so
+  // the view re-fetches — treated like reloadKey: re-fetch without flashing.
+  const revision = useWorktreeRevision(encoded);
 
   // Hunks parsed from the diff for *this stage* (staged vs unstaged) so a
   // partially-staged file shows only the relevant hunks in each section.
@@ -222,7 +226,7 @@ export function FileDiffViewer({
     return () => {
       cancelled = true;
     };
-  }, [encoded, file.path, mode, subPath, reloadKey]);
+  }, [encoded, file.path, mode, subPath, reloadKey, revision]);
 
   const annotations = annotationsByFile[file.path] ?? [];
 
