@@ -238,6 +238,50 @@ export function highlightTokens(code: string, languageId: string): SyntaxToken[]
   return out;
 }
 
+/**
+ * Return `code` with comment tokens removed, using shiki's scope analysis so a
+ * marker inside a string or URL (`"https://…"`, `'--not a comment'`, `"# x"`)
+ * is never mistaken for a comment. Works for any supported language without
+ * per-language comment-syntax rules — the grammar already knows what a comment
+ * is. Lines that were pure comment become empty (callers drop them when
+ * joining); inline comments leave their code prefix intact.
+ *
+ * Returns null when shiki isn't ready or the language is unsupported, so
+ * callers can fall back to the original text rather than falsely imply the
+ * comments were stripped.
+ */
+export function stripComments(code: string, languageId: string): string | null {
+  if (!highlighter) return null;
+  const lang = resolveLang(languageId);
+  if (!lang) return null;
+
+  let lines;
+  try {
+    ({ tokens: lines } = highlighter.codeToTokens(code, {
+      theme: activeShikiTheme,
+      // Scope-only explanation is the cheap path — we only need scope names,
+      // not the full theme-match reasoning behind each token's color.
+      includeExplanation: "scopeName",
+      lang: lang as unknown as never,
+    }));
+  } catch {
+    return null;
+  }
+
+  const out: string[] = [];
+  for (const line of lines) {
+    let text = "";
+    for (const tok of line) {
+      const isComment = tok.explanation?.some((e) =>
+        e.scopes.some((s) => s.scopeName.startsWith("comment"))
+      );
+      if (!isComment) text += tok.content;
+    }
+    out.push(text);
+  }
+  return out.join("\n");
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

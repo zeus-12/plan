@@ -1,7 +1,7 @@
 import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { highlightToHtml, useActiveShikiTheme, useShikiReady } from "../lib/highlight";
+import { highlightToHtml, stripComments, useActiveShikiTheme, useShikiReady } from "../lib/highlight";
 import { cn } from "../lib/utils";
 import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
 
@@ -53,12 +53,20 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Collapse every line into one, joined by spaces — handy for pasting
-  // multi-line commands straight into a terminal.
+  // Collapse the block into a single line for terminal pasting: drop comments
+  // first, then join the remaining lines with spaces. Comment removal is
+  // scope-accurate (see `stripComments`) so a `//`/`#`/`--` inside a string or
+  // URL is preserved; it falls back to the raw text when shiki can't tokenize
+  // the language, so we never fake having stripped comments.
   const copyOneLine = () => {
     const text = ref.current?.textContent ?? "";
     if (!text) return;
-    const oneLine = text.split("\n").join(" ").trim();
+    const oneLine = (stripComments(text, lang) ?? text)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" ");
+    if (!oneLine) return;
     void navigator.clipboard.writeText(oneLine);
     setCopiedLine(true);
     setTimeout(() => setCopiedLine(false), 1500);
@@ -82,7 +90,7 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
             title={
               copiedLine
                 ? "Copied as one line"
-                : "Copy as one line — joins all lines with spaces (paste-ready for the terminal)"
+                : "Copy as one line — strips comments and joins with spaces (paste-ready for the terminal)"
             }
             className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
           >

@@ -6,6 +6,7 @@ export {
   highlightTokens,
   highlightPerLine,
   highlightToHtml,
+  stripComments,
   ensureHighlighter,
   useShikiReady,
   setActiveShikiTheme,
