@@ -59,6 +59,12 @@ export interface FileView {
   binary: boolean;
 }
 
+/** Absolute filesystem paths to the before/after image files for an image diff. */
+export interface FileImageDiff {
+  oldPath: string | null;
+  newPath: string | null;
+}
+
 /** Match options for the project-wide Search tab (mirrors VS Code's toggles). */
 export interface SearchOptions {
   caseSensitive: boolean;

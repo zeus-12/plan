@@ -44,6 +44,7 @@ import {
 import { readSessionFile, type ParsedSession } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
+import { getFileImageDiff } from "./file-media";
 import {
   listProjectFiles,
   readProjectFile,
@@ -536,6 +537,16 @@ function registerIpc() {
       mode: "staged" | "unstaged",
       subPath: string = "",
     ) => getFileView(encoded, path, mode, subPath),
+  );
+  ipcMain.handle(
+    "project:fileImageDiff",
+    async (
+      _e,
+      encoded: string,
+      path: string,
+      mode: "staged" | "unstaged",
+      subPath: string = "",
+    ) => getFileImageDiff(encoded, path, mode, subPath),
   );
 
   ipcMain.handle("files:list", async (_e, encoded: string) =>

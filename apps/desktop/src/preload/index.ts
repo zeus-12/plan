@@ -45,6 +45,13 @@ const electronAPI = {
     mode: "staged" | "unstaged",
     subPath: string = ""
   ) => ipcRenderer.invoke("project:fileView", encoded, path, mode, subPath),
+  getFileImageDiff: (
+    encoded: string,
+    path: string,
+    mode: "staged" | "unstaged",
+    subPath: string = ""
+  ) =>
+    ipcRenderer.invoke("project:fileImageDiff", encoded, path, mode, subPath),
 
   listProjectFiles: (encoded: string) =>
     ipcRenderer.invoke("files:list", encoded),

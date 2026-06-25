@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "@plan/shared/lib/diff-parser";
-import type { FileView } from "../../shared-types";
+import type { FileView, FileImageDiff } from "../../shared-types";
 import type { Annotation } from "@plan/shared/lib/store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff, type HunkRange } from "@plan/shared/components/interactive-diff";
@@ -217,6 +217,9 @@ export function FileDiffViewer({
   }, [encoded, file.path, mode, subPath]);
 
   useEffect(() => {
+    // Image files render visually (ImageDiffView) — skip pulling their bytes
+    // into a string here.
+    if (isImagePath(file.path)) return;
     let cancelled = false;
     window.electronAPI
       .getFileView(encoded, file.path, mode, subPath)
@@ -454,7 +457,16 @@ export function FileDiffViewer({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        {file.binary ? (
+        {isImagePath(file.path) ? (
+          <ImageDiffView
+            encoded={encoded}
+            subPath={subPath}
+            path={file.path}
+            status={file.status}
+            mode={mode}
+            cacheKey={`${revision}-${reloadKey}`}
+          />
+        ) : file.binary ? (
           <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
             Binary file
           </div>
@@ -510,6 +522,136 @@ function statusLabel(s: FileDiff["status"]): string {
     default:
       return "modified";
   }
+}
+
+/** Image file types we render visually (before/after) instead of as a diff. */
+const IMAGE_EXTS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif", "svg", "apng",
+]);
+
+function isImagePath(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  const slash = path.lastIndexOf("/");
+  if (dot <= slash) return false;
+  return IMAGE_EXTS.has(path.slice(dot + 1).toLowerCase());
+}
+
+/** Absolute local path → cache-busted `file://` URL (same approach as transcript images). */
+function imageUrl(path: string, cacheKey: string): string {
+  return `file://${encodeURI(path)}?v=${encodeURIComponent(cacheKey)}`;
+}
+
+function ImagePane({
+  label,
+  path,
+  cacheKey,
+}: {
+  label: string;
+  path: string;
+  cacheKey: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
+      <div className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+        {label}
+      </div>
+      {failed ? (
+        <div className="rounded-md border border-dashed border-[var(--border)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+          Image unavailable
+        </div>
+      ) : (
+        <img
+          src={imageUrl(path, cacheKey)}
+          alt={label}
+          onError={() => setFailed(true)}
+          className="max-h-[70vh] max-w-full rounded-md border border-[var(--border)] object-contain"
+          style={{
+            background:
+              "repeating-conic-gradient(var(--bg-surface) 0% 25%, transparent 0% 50%) 50% / 16px 16px",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Render an image change as its visual before/after rather than a binary code
+ * diff. Sides come from the main process as readable file paths (git blobs are
+ * materialized to temp files); we load them via `file://` like transcript images.
+ */
+function ImageDiffView({
+  encoded,
+  subPath,
+  path,
+  status,
+  mode,
+  cacheKey,
+}: {
+  encoded: string;
+  subPath: string;
+  path: string;
+  status: FileDiff["status"];
+  mode: "staged" | "unstaged";
+  cacheKey: string;
+}) {
+  const [paths, setPaths] = useState<FileImageDiff | null>(null);
+
+  useEffect(() => {
+    setPaths(null);
+  }, [encoded, path, mode, subPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI
+      .getFileImageDiff(encoded, path, mode, subPath)
+      .then((p) => {
+        if (!cancelled) setPaths(p);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [encoded, path, mode, subPath, cacheKey]);
+
+  if (!paths) {
+    return (
+      <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+        Loading…
+      </div>
+    );
+  }
+
+  const { oldPath, newPath } = paths;
+  if (!oldPath && !newPath) {
+    return (
+      <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+        Image unavailable
+      </div>
+    );
+  }
+
+  // A single image when only one side exists (added or deleted), otherwise a
+  // before/after pair.
+  const single =
+    oldPath && newPath
+      ? null
+      : oldPath
+        ? { label: status === "deleted" ? "Removed" : "Before", path: oldPath }
+        : { label: status === "added" ? "Added" : "After", path: newPath! };
+
+  return (
+    <div className="flex h-full items-start justify-center gap-6 p-2">
+      {single ? (
+        <ImagePane label={single.label} path={single.path} cacheKey={cacheKey} />
+      ) : (
+        <>
+          <ImagePane label="Before" path={oldPath!} cacheKey={cacheKey} />
+          <ImagePane label="After" path={newPath!} cacheKey={cacheKey} />
+        </>
+      )}
+    </div>
+  );
 }
 
 /** 1-based line number for a character offset in `text`. */

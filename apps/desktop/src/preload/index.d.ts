@@ -6,6 +6,7 @@ import type {
   SessionEvent,
   FileContents,
   FileView,
+  FileImageDiff,
   GitStatusResult,
   GitOpResult,
   DiscoveredRepo,
@@ -54,6 +55,12 @@ interface ElectronAPI {
     mode: "staged" | "unstaged",
     subPath?: string
   ) => Promise<FileView>;
+  getFileImageDiff: (
+    encoded: string,
+    path: string,
+    mode: "staged" | "unstaged",
+    subPath?: string
+  ) => Promise<FileImageDiff>;
   listProjectFiles: (encoded: string) => Promise<string[]>;
   readProjectFile: (
     encoded: string,
