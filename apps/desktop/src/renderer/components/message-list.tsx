@@ -255,6 +255,8 @@ function toolHeader(tool: string, input: unknown): { verb: string; target: strin
       return { verb: "Grep", target: asStr(obj.pattern) };
     case "Glob":
       return { verb: "Glob", target: asStr(obj.pattern) };
+    case "Skill":
+      return { verb: "Skill", target: asStr(obj.skill) };
     default:
       return { verb: tool, target: previewInput(input) };
   }
