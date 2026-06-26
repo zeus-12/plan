@@ -821,6 +821,7 @@ export function ProjectWorkspace({
     colStart: number;
     colEnd: number;
     nonce: number;
+    focusCaret?: boolean;
   } | null>(null);
 
   const indexProjectFiles = useCallback(async () => {
@@ -856,11 +857,18 @@ export function ProjectWorkspace({
     [openTab],
   );
 
-  // A Search-tab hit: open the file in a tab and scroll/highlight the match.
-  // Keeps the sidebar on the Search tab (VS Code behaviour) — only the content
-  // pane changes.
+  // A Search-tab hit (or Cmd-P "path:line" jump): open the file in a tab and
+  // scroll/highlight the match. Keeps the sidebar where it is (VS Code
+  // behaviour) — only the content pane changes. `focusCaret` additionally lands
+  // a focused caret on the line (the line-jump wants the file keyboard-ready).
   const handleOpenSearchResult = useCallback(
-    (path: string, line: number, colStart: number, colEnd: number) => {
+    (
+      path: string,
+      line: number,
+      colStart: number,
+      colEnd: number,
+      focusCaret = false,
+    ) => {
       openTab(makeFileTab(path));
       setFileReveal((prev) => ({
         path,
@@ -868,6 +876,7 @@ export function ProjectWorkspace({
         colStart,
         colEnd,
         nonce: (prev?.nonce ?? 0) + 1,
+        focusCaret,
       }));
     },
     [openTab],
@@ -922,7 +931,7 @@ export function ProjectWorkspace({
           // line is 1-based; col is 1-based in the query but 0-based offsets
           // in the reveal range. No col → place the caret at the line start.
           const col0 = targetCol != null ? Math.max(targetCol - 1, 0) : 0;
-          handleOpenSearchResult(f, targetLine, col0, col0);
+          handleOpenSearchResult(f, targetLine, col0, col0, true);
         } else {
           // openKind (not tab) drives the content pane — set both so the file
           // actually opens instead of just highlighting in the sidebar.

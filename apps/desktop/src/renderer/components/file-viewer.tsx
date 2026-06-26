@@ -90,6 +90,8 @@ interface Props {
     colStart: number;
     colEnd: number;
     nonce: number;
+    /** Also drop a focused caret on the line (Cmd-P "path:line" jump). */
+    focusCaret?: boolean;
   } | null;
 }
 
@@ -623,7 +625,22 @@ export function FileViewer({
     if (!revealTarget || status !== "ok") return;
     const idx = Math.min(Math.max(revealTarget.line - 1, 0), lines.length - 1);
     const ls = lineStarts[idx] ?? 0;
-    setRevealRange({ s: ls + revealTarget.colStart, e: ls + revealTarget.colEnd });
+    const caret = ls + revealTarget.colStart;
+    setRevealRange({ s: caret, e: ls + revealTarget.colEnd });
+    // Cmd-P "path:line" jump: leave a real, focused caret on the line so the
+    // file opens ready for keyboard navigation, not just a passive highlight.
+    // Only possible in editor mode (the caret lives in the overlay textarea;
+    // huge files fall back to the read-only view and just get the highlight).
+    // preventScroll because the textarea spans the whole file — a plain focus
+    // would yank the view to its top; we centre the line via the virtualizer.
+    if (revealTarget.focusCaret && editorMode) {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus({ preventScroll: true });
+        ta.setSelectionRange(caret, caret);
+        setEditorSel({ start: caret, end: caret });
+      }
+    }
     virtualizer.scrollToIndex(idx, { align: "center" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealNonce, status]);
