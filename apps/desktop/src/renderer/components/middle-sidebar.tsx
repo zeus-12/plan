@@ -392,6 +392,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             <SessionList
               sessions={sessions}
               selected={selectedSession}
+              encoded={encoded}
               onSelect={onSelectSession}
               onSetArchived={onSetSessionArchived}
               onRename={onRenameSession}

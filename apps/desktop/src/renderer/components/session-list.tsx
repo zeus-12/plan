@@ -1,5 +1,7 @@
 import { cn } from "@plan/shared/lib/utils";
 import { relativeTime } from "../lib/time";
+import { useTerminalWorking } from "../lib/terminal-activity-store";
+import { WorkingIcon } from "./working-icon";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -26,6 +28,8 @@ export interface SessionListItem {
 interface Props {
   sessions: SessionListItem[];
   selected: string | null;
+  /** Project encoded dir — used to build each session's terminal id. */
+  encoded: string;
   onSelect: (sessionId: string) => void;
   onSetArchived: (sessionId: string, archived: boolean) => void;
   onRename: (sessionId: string, currentTitle: string) => void;
@@ -36,6 +40,7 @@ interface Props {
 export function SessionList({
   sessions,
   selected,
+  encoded,
   onSelect,
   onSetArchived,
   onRename,
@@ -116,58 +121,17 @@ export function SessionList({
           </div>
         ) : (
           <div className="flex flex-col">
-            {shown.map((s) => {
-              const isSelected = s.sessionId === selected;
-              return (
-                <ContextMenu key={s.sessionId}>
-                  <ContextMenuTrigger asChild>
-                    <button
-                      onClick={() => onSelect(s.sessionId)}
-                      className={cn(
-                        "flex flex-col gap-0.5 border-l-2 px-3 py-2 text-left transition-colors",
-                        isSelected
-                          ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                          : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "truncate font-[family-name:var(--font-mono)] text-[12px]",
-                          isSelected
-                            ? "text-[var(--text)]"
-                            : "text-[var(--text-secondary)]"
-                        )}
-                      >
-                        {s.title ?? "Untitled session"}
-                      </span>
-                      <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                        {relativeTime(s.updatedAt)}
-                      </span>
-                    </button>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <ContextMenuItem
-                      onSelect={() => onRename(s.sessionId, s.title ?? "")}
-                    >
-                      Rename…
-                    </ContextMenuItem>
-                    {s.archived ? (
-                      <ContextMenuItem
-                        onSelect={() => onSetArchived(s.sessionId, false)}
-                      >
-                        Unarchive
-                      </ContextMenuItem>
-                    ) : (
-                      <ContextMenuItem
-                        onSelect={() => onSetArchived(s.sessionId, true)}
-                      >
-                        Archive
-                      </ContextMenuItem>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>
-              );
-            })}
+            {shown.map((s) => (
+              <SessionRow
+                key={s.sessionId}
+                session={s}
+                isSelected={s.sessionId === selected}
+                termId={`chat:${encoded}:${s.sessionId}`}
+                onSelect={onSelect}
+                onRename={onRename}
+                onSetArchived={onSetArchived}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -204,6 +168,78 @@ export function SessionList({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * One row in the session list. Split out so each can subscribe to its own
+ * agent's working-state (a hook). While busy, an animated icon appears at the
+ * trailing edge of the title — the title's left edge never moves, so working and
+ * idle rows stay perfectly aligned and nothing shifts when it toggles.
+ */
+function SessionRow({
+  session: s,
+  isSelected,
+  termId,
+  onSelect,
+  onRename,
+  onSetArchived,
+}: {
+  session: SessionListItem;
+  isSelected: boolean;
+  termId: string;
+  onSelect: (sessionId: string) => void;
+  onRename: (sessionId: string, currentTitle: string) => void;
+  onSetArchived: (sessionId: string, archived: boolean) => void;
+}) {
+  const working = useTerminalWorking(termId);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          onClick={() => onSelect(s.sessionId)}
+          className={cn(
+            "flex flex-col gap-0.5 border-l-2 px-3 py-2 text-left transition-colors",
+            isSelected
+              ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
+              : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
+          )}
+        >
+          <span className="flex items-center gap-2">
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[12px]",
+                isSelected
+                  ? "text-[var(--text)]"
+                  : "text-[var(--text-secondary)]"
+              )}
+            >
+              {s.title ?? "Untitled session"}
+            </span>
+            {working && (
+              <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+            )}
+          </span>
+          <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+            {relativeTime(s.updatedAt)}
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onRename(s.sessionId, s.title ?? "")}>
+          Rename…
+        </ContextMenuItem>
+        {s.archived ? (
+          <ContextMenuItem onSelect={() => onSetArchived(s.sessionId, false)}>
+            Unarchive
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={() => onSetArchived(s.sessionId, true)}>
+            Archive
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

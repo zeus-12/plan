@@ -1,6 +1,8 @@
-import { memo, useEffect, useRef, type ReactNode } from "react";
+import { forwardRef, memo, useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { FileIcon } from "./file-icon";
+import { WorkingIcon } from "./working-icon";
+import { useTerminalWorking } from "../lib/terminal-activity-store";
 import type { Tab } from "../lib/tabs-store";
 
 function basename(path: string): string {
@@ -62,9 +64,78 @@ export interface TabBarProps {
   activeId: string | null;
   /** Resolve a tab's display title from live data (session titles, etc.). */
   titleFor: (tab: Tab) => string;
+  /**
+   * Terminal id whose working-state drives this tab's icon (chat tabs only).
+   * Return null for tabs with no agent, so the icon never animates.
+   */
+  termIdFor?: (tab: Tab) => string | null;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
 }
+
+/**
+ * One content-pane tab. Split out so each can subscribe to its own session's
+ * working-state (a hook, so it can't live inside the parent's `tabs.map`). While
+ * the agent is busy the leading icon swaps to the animated WorkingIcon — same
+ * fixed-size slot, so nothing shifts.
+ */
+const TabItem = forwardRef<
+  HTMLDivElement,
+  {
+    tab: Tab;
+    active: boolean;
+    title: string;
+    termId: string | null;
+    onActivate: (id: string) => void;
+    onClose: (id: string) => void;
+  }
+>(function TabItem({ tab, active, title, termId, onActivate, onClose }, ref) {
+  const working = useTerminalWorking(termId);
+  return (
+    <div
+      ref={ref}
+      role="tab"
+      aria-selected={active}
+      title={title}
+      onClick={() => onActivate(tab.id)}
+      onMouseDown={(e) => {
+        // Middle-click closes, matching browsers / editors.
+        if (e.button === 1) {
+          e.preventDefault();
+          onClose(tab.id);
+        }
+      }}
+      className={cn(
+        "group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
+        active
+          ? "bg-[var(--bg)] text-[var(--text)]"
+          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]",
+      )}
+    >
+      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {working ? <WorkingIcon className="h-3.5 w-3.5" /> : tabIcon(tab)}
+      </span>
+      <span className="truncate">{title}</span>
+      <span
+        role="button"
+        aria-label={`Close ${title}`}
+        title="Close tab (⌘W)"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose(tab.id);
+        }}
+        className={cn(
+          "-mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[13px] leading-none transition-opacity hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
+          active
+            ? "text-[var(--text-tertiary)]"
+            : "opacity-0 group-hover:opacity-100",
+        )}
+      >
+        ×
+      </span>
+    </div>
+  );
+});
 
 /**
  * The strip of content-pane tabs above the editor. Each tab carries its own
@@ -75,6 +146,7 @@ export const TabBar = memo(function TabBar({
   tabs,
   activeId,
   titleFor,
+  termIdFor,
   onActivate,
   onClose,
 }: TabBarProps) {
@@ -105,51 +177,17 @@ export const TabBar = memo(function TabBar({
     >
       {tabs.map((tab) => {
         const active = tab.id === activeId;
-        const title = titleFor(tab);
         return (
-          <div
+          <TabItem
             key={tab.id}
             ref={active ? activeRef : undefined}
-            role="tab"
-            aria-selected={active}
-            title={title}
-            onClick={() => onActivate(tab.id)}
-            onMouseDown={(e) => {
-              // Middle-click closes, matching browsers / editors.
-              if (e.button === 1) {
-                e.preventDefault();
-                onClose(tab.id);
-              }
-            }}
-            className={cn(
-              "group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
-              active
-                ? "bg-[var(--bg)] text-[var(--text)]"
-                : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]",
-            )}
-          >
-            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-              {tabIcon(tab)}
-            </span>
-            <span className="truncate">{title}</span>
-            <span
-              role="button"
-              aria-label={`Close ${title}`}
-              title="Close tab (⌘W)"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(tab.id);
-              }}
-              className={cn(
-                "-mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[13px] leading-none transition-opacity hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
-                active
-                  ? "text-[var(--text-tertiary)]"
-                  : "opacity-0 group-hover:opacity-100",
-              )}
-            >
-              ×
-            </span>
-          </div>
+            tab={tab}
+            active={active}
+            title={titleFor(tab)}
+            termId={termIdFor ? termIdFor(tab) : null}
+            onActivate={onActivate}
+            onClose={onClose}
+          />
         );
       })}
     </div>
