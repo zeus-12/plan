@@ -387,27 +387,43 @@ export function dumpTerminal(id: string): string {
 //   - Unlike the "✻ Worked for 2s" summaries (which linger in scrollback), it's
 //     only ever present live, so it never produces a stale match.
 //
-// We scan ONLY the FOOTER — the last couple of non-empty rows. Claude's
-// input/footer region stays pinned to the bottom of the frame even when the
-// transcript is scrolled, so this is scroll-independent. Restricting to the
-// footer is also what keeps the match honest: the phrase "esc to interrupt" can
-// legitimately appear in the TRANSCRIPT itself (e.g. a chat that's literally
-// discussing it — which pinned one session to "working" forever). The live hint
-// only ever sits in the footer; transcript text is always above the input box,
-// so it can't be the last non-empty rows. This reads the real rendered screen
-// (a headless emulator fed the same bytes, kept current for every session incl.
-// backgrounded ones), not an inference off a user action.
+// The hint lives in the FOOTER — the live region BELOW the input box. Everything
+// ABOVE the input box is transcript, which can legitimately contain the words
+// "esc to interrupt" (e.g. a chat discussing this very feature — which once
+// pinned a session to "working" forever), so we never scan there. The footer is
+// NOT always the last row or two, though: while Claude runs sub-agents it draws
+// an agent-management panel ("← for agents · ↓ to manage", then a list of
+// agents) BELOW the hint, so a fixed "last N rows" window slid right past it and
+// the status fell back to idle. Anchoring to the input box instead covers the
+// whole footer no matter how tall that panel grows. Reads the real rendered
+// screen (a headless emulator fed the same bytes, kept current for every session
+// incl. backgrounded ones), not an inference off a user action.
 const WORKING_HINT_RE = /esc to interrupt/i;
-// How many trailing non-empty rows count as the footer. The hint is the last
-// line; 2 gives a small margin without reaching the input box / transcript.
-const FOOTER_ROWS = 2;
+// The input-prompt line — the boundary between transcript (above) and the live
+// footer (below). Matches the bordered box ("│ > ", "│ ❯ ") and the borderless
+// prompt ("› ", "❯ ", "> "). We take the LOWEST match: the real input box is
+// always the bottom-most prompt-looking line (a markdown blockquote "> " in the
+// transcript only ever sits above it, and scanning from there down still lands
+// on the same footer).
+const PROMPT_LINE_RE = /^\s*(?:[│|]\s*)?[>❯›](?:\s|$)/;
+// Fallback footer window when no input prompt can be found (unexpected frame).
+const FOOTER_ROWS = 3;
 
 /** Whether terminal `id`'s rendered screen currently shows Claude's working hint. */
 export function isTerminalBusy(id: string): boolean {
-  const footer = readScreen(id)
-    .filter((line) => line.trim().length > 0)
-    .slice(-FOOTER_ROWS);
-  return footer.some((line) => WORKING_HINT_RE.test(line));
+  const rows = readScreen(id);
+  let boundary = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (PROMPT_LINE_RE.test(rows[i])) {
+      boundary = i;
+      break;
+    }
+  }
+  const region =
+    boundary >= 0
+      ? rows.slice(boundary + 1)
+      : rows.filter((line) => line.trim().length > 0).slice(-FOOTER_ROWS);
+  return region.some((line) => WORKING_HINT_RE.test(line));
 }
 
 /** Ids of every live pty currently showing the "working" hint. */
