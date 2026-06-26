@@ -1296,6 +1296,13 @@ export function ProjectWorkspace({
   const chatPrefix = `chat:${project.encoded}:`;
   const shellPrefix = `term:${project.encoded}:`;
   const sessionTermId = (sid: string) => `${chatPrefix}${sid}`;
+  // Drives each chat tab's working icon: the terminal id of its agent, or null
+  // for non-chat tabs (which have no agent to be busy).
+  const termIdForTab = useCallback(
+    (t: Tab): string | null =>
+      t.kind === "chat" ? `${chatPrefix}${t.sessionId}` : null,
+    [chatPrefix],
+  );
   const initialCommandFor = (tid: string): string | undefined => {
     if (!tid.startsWith(chatPrefix)) return undefined;
     const sid = tid.slice(chatPrefix.length);
@@ -1935,7 +1942,10 @@ export function ProjectWorkspace({
     return () => window.removeEventListener("keydown", handler);
   }, [selectedSessionId, sessions]);
 
-  // ⌘L focuses the chat composer.
+  // ⌘L focuses the chat composer. If the chat has no live terminal (e.g. an old
+  // chat), start the session too — mirroring a click on the inactive input. The
+  // composer parks the focus and lands the caret once the session turns it
+  // editable; the send button stays disabled until then.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (
@@ -1945,12 +1955,13 @@ export function ProjectWorkspace({
       ) {
         e.preventDefault();
         setTab("chat");
+        if (!chatTerminalReady) handleResumeChat();
         requestAnimationFrame(() => chatInputRef.current?.focus());
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [chatTerminalReady, handleResumeChat]);
 
   // ⌘N starts a new chat in this project.
   useEffect(() => {
@@ -1986,6 +1997,86 @@ export function ProjectWorkspace({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [activeId, closeActive]);
+
+  // ⌘⇧D cycles the content pane between a file and its diffs:
+  //   file → unstaged diff → staged diff → file
+  // Stages with no changes are skipped (so a file with only unstaged changes
+  // cycles file → unstaged → file). The file view always exists, so coming
+  // from a diff tab there's always a next stage and never a dead end; only the
+  // file→diff step can fail, when the file has no changes at all — that's the
+  // single case we toast. Each stage is its own tab (focus-or-create), matching
+  // how clicking a file/diff in the sidebar opens a tab.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "d")
+        return;
+      if (!activeTab || activeTab.kind === "chat") return;
+      e.preventDefault();
+
+      // Resolve the repo (subPath) + repo-relative path + which stages are
+      // changed, plus where we are in the cycle right now.
+      let subPath: string;
+      let repoPath: string;
+      let projectRelPath: string;
+      let hasUnstaged: boolean;
+      let hasStaged: boolean;
+      let current: "file" | "unstaged" | "staged";
+
+      if (activeTab.kind === "file") {
+        // A file tab's path is project-relative (repo subPath prefixed). Find
+        // the status entry whose full path matches it.
+        current = "file";
+        projectRelPath = activeTab.path;
+        let found: { subPath: string; path: string } | null = null;
+        let status: GitFileStatus | undefined;
+        for (const [sp, state] of filesByRepo) {
+          const match = state.status.find(
+            (s) => (sp ? `${sp}/${s.path}` : s.path) === activeTab.path,
+          );
+          if (match) {
+            found = { subPath: sp, path: match.path };
+            status = match;
+            break;
+          }
+        }
+        if (!found || !status || (!status.staged && !status.unstaged)) {
+          pushToast(
+            { title: "No diff found for that file." },
+            3_000,
+          );
+          return;
+        }
+        subPath = found.subPath;
+        repoPath = found.path;
+        hasUnstaged = status.unstaged;
+        hasStaged = status.staged;
+      } else {
+        subPath = activeTab.subPath;
+        repoPath = activeTab.path;
+        projectRelPath = subPath ? `${subPath}/${repoPath}` : repoPath;
+        current = activeTab.staged ? "staged" : "unstaged";
+        const status = filesByRepo
+          .get(subPath)
+          ?.status.find((s) => s.path === repoPath);
+        hasUnstaged = status?.unstaged ?? false;
+        hasStaged = status?.staged ?? false;
+      }
+
+      // The cycle is the existing stages in order; advance to the next one,
+      // wrapping back to the file.
+      const cycle: Array<"file" | "unstaged" | "staged"> = ["file"];
+      if (hasUnstaged) cycle.push("unstaged");
+      if (hasStaged) cycle.push("staged");
+      const idx = cycle.indexOf(current);
+      const next = cycle[(idx + 1) % cycle.length];
+
+      if (next === "file") openTab(makeFileTab(projectRelPath));
+      else openTab(makeDiffTab(subPath, repoPath, next === "staged"));
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeTab, filesByRepo, openTab]);
 
   const startTerminalResize = useCallback(
     (e: React.PointerEvent) => {
@@ -2148,6 +2239,7 @@ export function ProjectWorkspace({
                 tabs={tabs}
                 activeId={activeId}
                 titleFor={titleForTab}
+                termIdFor={termIdForTab}
                 onActivate={setActive}
                 onClose={closeTab}
               />
