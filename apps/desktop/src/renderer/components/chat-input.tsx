@@ -60,6 +60,10 @@ interface Props {
   /** Reports the composer's focus state so siblings can adjust their own
    *  shortcuts (e.g. the compose buffer only claims ⌘⏎ when this is blurred). */
   onFocusChange?: (focused: boolean) => void;
+  /** ⌘Z right after "Add to chat" (while the inserted text is untouched) undoes
+   *  the move: the composer strips the text it appended and calls this so the
+   *  parent can restore the comments it cleared. */
+  onAddToChatUndo?: () => void;
 }
 
 interface Attachment {
@@ -72,6 +76,9 @@ interface Attachment {
 
 const MIN_HEIGHT = 40;
 const MAX_HEIGHT = 260;
+// Marks the editor update that "Add to chat" performs, so the dirty-watcher can
+// tell our own insertion apart from a genuine user edit.
+const ADD_TO_CHAT_TAG = "add-to-chat";
 const draftKey = (sid: string) => `plan.draft.${sid}`;
 
 /** Validate then return a stored draft for use as Lexical's initial state. */
@@ -149,6 +156,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
       blocked,
       onBlocked,
       onFocusChange,
+      onAddToChatUndo,
     },
     ref,
   ) {
@@ -164,6 +172,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     // ⌘Z restores it, chips and all, into an empty box so an accidental send
     // (or lost text) can be recovered verbatim.
     const lastSentRef = useRef<string | null>(null);
+    // Serialized draft from just before an "Add to chat" insertion — what ⌘Z
+    // restores. Kept only while the inserted text is untouched: the update
+    // listener in {@link CommandsPlugin} clears it the moment the user edits the
+    // composer, so a later ⌘Z falls back to Lexical's own history instead.
+    const addToChatUndoRef = useRef<{ before: string } | null>(null);
+    // Latest parent restore callback, read (not closed over) by the command
+    // handler so it never needs re-registering.
+    const onAddToChatUndoRef = useRef(onAddToChatUndo);
+    onAddToChatUndoRef.current = onAddToChatUndo;
 
     const clearAttachments = useCallback(() => {
       setAttachments((prev) => {
@@ -327,16 +344,27 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
         focus: () => editorRef.current?.focus(),
         append: (text: string) => {
           const editor = editorRef.current;
-          editor?.update(() => {
-            const root = $getRoot();
-            const had = root.getTextContent().length > 0;
-            root.selectEnd();
-            const sel = $getSelection();
-            if ($isRangeSelection(sel)) {
-              sel.insertText((had ? "\n\n" : "") + text);
-            }
-          });
-          editor?.focus();
+          if (!editor) return;
+          // Snapshot the draft as it stands now (read before the update — the
+          // post-update state isn't reliably committed yet) so ⌘Z can restore
+          // it. The insert is tagged so the dirty-watcher below knows this
+          // change is ours and not a user edit that should void the undo.
+          addToChatUndoRef.current = {
+            before: JSON.stringify(editor.getEditorState().toJSON()),
+          };
+          editor.update(
+            () => {
+              const root = $getRoot();
+              const had = root.getTextContent().length > 0;
+              root.selectEnd();
+              const sel = $getSelection();
+              if ($isRangeSelection(sel)) {
+                sel.insertText((had ? "\n\n" : "") + text);
+              }
+            },
+            { tag: ADD_TO_CHAT_TAG },
+          );
+          editor.focus();
         },
       }),
       [],
@@ -402,7 +430,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
               <EditorRefPlugin editorRef={editorRef} />
               <EditablePlugin inactive={!!inactive} />
               <DraftPlugin sessionId={sessionId} onEmptyChange={setIsEmpty} />
-              <CommandsPlugin sendRef={sendRef} lastSentRef={lastSentRef} />
+              <CommandsPlugin
+                sendRef={sendRef}
+                lastSentRef={lastSentRef}
+                addToChatUndoRef={addToChatUndoRef}
+                onAddToChatUndoRef={onAddToChatUndoRef}
+              />
               <ImagePastePlugin addImageRef={addImageRef} inactive={!!inactive} />
               <FocusPlugin
                 autoFocus={!!autoFocus}
@@ -601,13 +634,17 @@ function DraftPlugin({
   return null;
 }
 
-/** Enter→send, Shift+Enter→newline, and ⌘Z-in-empty-box→restore-last-sent. */
+/** Enter→send, Shift+Enter→newline, and ⌘Z→undo-add-to-chat / restore-last-sent. */
 function CommandsPlugin({
   sendRef,
   lastSentRef,
+  addToChatUndoRef,
+  onAddToChatUndoRef,
 }: {
   sendRef: React.MutableRefObject<() => void>;
   lastSentRef: React.MutableRefObject<string | null>;
+  addToChatUndoRef: React.MutableRefObject<{ before: string } | null>;
+  onAddToChatUndoRef: React.MutableRefObject<(() => void) | undefined>;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -635,6 +672,21 @@ function CommandsPlugin({
     const unUndo = editor.registerCommand(
       UNDO_COMMAND,
       () => {
+        // First ⌘Z after "Add to chat" (the inserted text still untouched —
+        // the dirty-watcher below clears the snapshot once the user edits):
+        // pull the text back out and let the parent restore the comments.
+        const addUndo = addToChatUndoRef.current;
+        if (addUndo) {
+          addToChatUndoRef.current = null;
+          try {
+            editor.setEditorState(editor.parseEditorState(addUndo.before));
+            onAddToChatUndoRef.current?.();
+            return true;
+          } catch {
+            // Restoring failed — fall through to the normal undo paths.
+          }
+        }
+
         const snap = lastSentRef.current;
         if (!snap) return false;
         const empty = editor
@@ -652,11 +704,22 @@ function CommandsPlugin({
       COMMAND_PRIORITY_HIGH,
     );
 
+    // Void the "Add to chat" undo as soon as the user actually edits the
+    // composer. The insert itself carries ADD_TO_CHAT_TAG (skip it); a plain
+    // focus/selection change touches no leaves (skip it too) — only real text
+    // changes have dirty leaves, and those mean the snapshot is now stale.
+    const unDirty = editor.registerUpdateListener(({ tags, dirtyLeaves }) => {
+      if (!addToChatUndoRef.current) return;
+      if (tags.has(ADD_TO_CHAT_TAG)) return;
+      if (dirtyLeaves.size > 0) addToChatUndoRef.current = null;
+    });
+
     return () => {
       unEnter();
       unUndo();
+      unDirty();
     };
-  }, [editor, sendRef, lastSentRef]);
+  }, [editor, sendRef, lastSentRef, addToChatUndoRef, onAddToChatUndoRef]);
 
   return null;
 }

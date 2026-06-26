@@ -102,8 +102,14 @@ export function MessageOutput({
       e.preventDefault();
       setModal(null);
     }
-    if (e.key === "Enter" && e.metaKey) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      // Stop this stroke from also reaching the panel's window-level ⌘⏎ send
+      // listener. Closing the modal re-arms that listener, so without cutting
+      // propagation here the same keypress would save the edit AND immediately
+      // flush the buffer to chat — the edit should settle in the panel first.
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
       saveEdit();
     }
   }

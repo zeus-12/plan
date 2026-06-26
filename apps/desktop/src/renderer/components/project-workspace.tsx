@@ -1706,6 +1706,14 @@ export function ProjectWorkspace({
     [session],
   );
 
+  // Comments cleared by the last "Add to chat", kept so ⌘Z in the composer can
+  // put them back exactly where they were (see handleUndoAddToChat).
+  const addToChatUndoRef = useRef<{
+    byFile: typeof annotationsByFile;
+    chat: typeof chatAnnotations;
+    byProjectFile: typeof annotationsByProjectFile;
+  } | null>(null);
+
   // "Add to chat": move the composed comments into the chat composer, then
   // clear them — they now live in the composer text.
   const handleAddToChat = useCallback(
@@ -1719,6 +1727,12 @@ export function ProjectWorkspace({
         if (lastChat) setActive(lastChat.id);
         else handleNewChat();
       }
+      // Snapshot before clearing so an immediate ⌘Z can restore the comments.
+      addToChatUndoRef.current = {
+        byFile: annotationsByFile,
+        chat: chatAnnotations,
+        byProjectFile: annotationsByProjectFile,
+      };
       setAnnotationsByFile({});
       setChatAnnotations([]);
       setAnnotationsByProjectFile({});
@@ -1732,11 +1746,25 @@ export function ProjectWorkspace({
       tabs,
       setActive,
       handleNewChat,
+      annotationsByFile,
+      chatAnnotations,
+      annotationsByProjectFile,
       setAnnotationsByFile,
       setChatAnnotations,
       setAnnotationsByProjectFile,
     ],
   );
+
+  // The composer pulled the just-added text back out (⌘Z) — restore the
+  // comments it was made from, so they reappear in the panel.
+  const handleUndoAddToChat = useCallback(() => {
+    const snap = addToChatUndoRef.current;
+    if (!snap) return;
+    addToChatUndoRef.current = null;
+    setAnnotationsByFile(snap.byFile);
+    setChatAnnotations(snap.chat);
+    setAnnotationsByProjectFile(snap.byProjectFile);
+  }, [setAnnotationsByFile, setChatAnnotations, setAnnotationsByProjectFile]);
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
   // and chat. Gated behind a confirmation since it can't be undone.
@@ -2368,6 +2396,7 @@ export function ProjectWorkspace({
                       onBlocked={() => revealChatTerminal(selectedSessionId)}
                       autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
                       onFocusChange={setChatInputFocused}
+                      onAddToChatUndo={handleUndoAddToChat}
                     />
                   )}
                 </div>
