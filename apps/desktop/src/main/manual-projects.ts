@@ -1,4 +1,5 @@
 import { readPlanConfig, writePlanConfig } from "./plan-config";
+import { primeProjectCwd } from "./claude-projects";
 
 const CONFIG_NAME = "projects.json";
 
@@ -74,6 +75,9 @@ export async function getManualCwds(): Promise<string[]> {
 
 export async function addManualCwd(cwd: string): Promise<void> {
   const data = await load();
+  // The picked folder is the authoritative project root — seed it so the very
+  // first terminal/file request resolves to it instead of session history.
+  primeProjectCwd(encodeCwd(cwd), cwd);
   if (!data.manualCwds.includes(cwd)) {
     data.manualCwds.push(cwd);
     scheduleWrite();

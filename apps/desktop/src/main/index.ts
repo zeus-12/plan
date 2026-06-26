@@ -15,6 +15,7 @@ import { stat, writeFile } from "fs/promises";
 import {
   listProjects,
   resolveProjectCwd,
+  primeProjectCwd,
   CLAUDE_PROJECTS_DIR,
 } from "./claude-projects";
 import {
@@ -427,6 +428,12 @@ async function listAllProjects(): Promise<ProjectEntry[]> {
   return Promise.all(
     manualCwds.map(async (cwd) => {
       const encoded = encodeCwd(cwd);
+      // A manually-added project's cwd is the exact folder the user picked —
+      // it's authoritative. Seed the cache with it so resolveProjectCwd hands
+      // back this root rather than re-deriving a path from the newest session
+      // JSONL (which can land on an inner subfolder when the project root has
+      // no session of its own, or when the lossy encoding shares a bucket).
+      primeProjectCwd(encoded, cwd);
       return {
         encoded,
         cwd,
@@ -791,6 +798,11 @@ app.whenReady().then(async () => {
   // Register immediately too — the window opens focused, but don't rely solely
   // on the focus event's timing.
   registerSwitcherShortcuts();
+
+  // Seed the cwd cache from the authoritative manual-project paths before any
+  // terminal:open / files:list IPC can arrive, so those never resolve a project
+  // root from session history.
+  await listAllProjects().catch(() => {});
 
   // Auto-watch every existing project, plus the root for new ones.
   const projects = await listProjects();
