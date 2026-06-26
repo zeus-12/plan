@@ -30,9 +30,16 @@ const electronAPI = {
     ipcRenderer.invoke("worktrees:list", encoded),
   createWorktree: (
     encoded: string,
-    input: { name: string; branch: string; base: string }
+    input: {
+      name: string;
+      branch: string;
+      base: string;
+      bases?: Record<string, string>;
+    }
   ) => ipcRenderer.invoke("worktrees:create", encoded, input),
   removeWorktree: (id: string) => ipcRenderer.invoke("worktrees:remove", id),
+  addReposToWorktree: (id: string, input: { bases: Record<string, string> }) =>
+    ipcRenderer.invoke("worktrees:addRepos", id, input),
   createWorktreePr: (id: string, input: CreatePrInput) =>
     ipcRenderer.invoke("worktrees:createPr", id, input),
   getWorktreeDefaults: (encoded: string) =>

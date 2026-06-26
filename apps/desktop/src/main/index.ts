@@ -91,9 +91,10 @@ import {
   removeWorktree,
   listWorktrees,
   createWorktreePr,
+  addReposToWorktree,
   type CreateWorktreeInput,
 } from "./worktrees";
-import type { CreatePrInput } from "../shared-types";
+import type { CreatePrInput, AddReposToWorktreeInput } from "../shared-types";
 import {
   getProjectDefaults,
   setProjectDefaults,
@@ -594,6 +595,11 @@ function registerIpc() {
   );
   ipcMain.handle("worktrees:remove", async (_e, id: string) =>
     removeWorktree(id),
+  );
+  ipcMain.handle(
+    "worktrees:addRepos",
+    async (_e, id: string, input: AddReposToWorktreeInput) =>
+      addReposToWorktree(id, input),
   );
   ipcMain.handle(
     "worktrees:createPr",

@@ -6,7 +6,7 @@ import { homedir } from "os";
 import { createHash } from "crypto";
 import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
 import { encodeCwd } from "./manual-projects";
-import { discoverRepos } from "./git";
+import { discoverRepos, type DiscoveredRepo } from "./git";
 
 /**
  * Worktree checkouts live here. Kept dot/space-free for tidy, predictable
@@ -25,6 +25,7 @@ import {
   deleteWorktreeRecord,
   getWorktreeRecord,
   listWorktreeRecords,
+  updateWorktreeRecord,
   worktreeNameTaken,
   type WorktreeRecord,
   type WorktreeRepoRecord,
@@ -33,6 +34,7 @@ import type {
   CreatePrInput,
   CreatePrRepoResult,
   CreatePrResult,
+  AddReposToWorktreeInput,
 } from "../shared-types";
 
 const execFileP = promisify(execFile);
@@ -51,6 +53,35 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+/** Run git in `cwd`, capturing the outcome instead of throwing. */
+async function gitSafe(
+  cwd: string,
+  args: string[],
+): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileP("git", ["-C", cwd, ...args], {
+      maxBuffer: MAX_BUFFER,
+    });
+    return { ok: true, stdout, stderr };
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; message?: string };
+    return {
+      ok: false,
+      stdout: e.stdout ?? "",
+      stderr: (e.stderr || e.message || "git failed").trim(),
+    };
+  }
+}
+
+/** Remotes configured in a repo. */
+async function listRemotes(repoPath: string): Promise<string[]> {
+  const r = await gitSafe(repoPath, ["remote"]);
+  return r.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /**
  * Root dir for a project's worktrees: ~/plan-worktrees/<basename>-<hash>/.
  * The hash of the full cwd keeps two same-named projects from colliding.
@@ -65,12 +96,138 @@ export interface CreateWorktreeInput {
   name: string;
   branch: string;
   base: string;
+  /** Per-repo base overrides, keyed by repo subPath ("" = root). */
+  bases?: Record<string, string>;
+  /** SubPaths to include; omit to span every discovered repo. */
+  repos?: string[];
+}
+
+/** A repo plus the exact remote commit its checkout should fork from. */
+interface RepoStart {
+  repo: DiscoveredRepo;
+  base: string;
+  startSha: string;
 }
 
 /**
- * Create a worktree across every repo discovered in the project (one
- * `git worktree add` per repo, all on the same branch off the same base). On
- * any repo's failure, the partially-created checkouts are rolled back.
+ * For each (repo, base), fetch the base from the repo's remote and pin the
+ * exact commit fetched (FETCH_HEAD captured before the next repo's fetch
+ * overwrites it — robust even for single-branch clones whose refspec wouldn't
+ * update a `<remote>/<base>` ref). Worktrees fork from the *remote* tip, never
+ * a possibly-stale local branch. No checkouts are made, so a failure needs no
+ * rollback; instead we throw one aggregated error naming every repo whose base
+ * couldn't be resolved on its remote.
+ */
+async function resolveRemoteStarts(
+  items: { repo: DiscoveredRepo; base: string }[],
+): Promise<RepoStart[]> {
+  const resolved: RepoStart[] = [];
+  const failures: { label: string; base: string; reason: string }[] = [];
+
+  for (const { repo, base } of items) {
+    const label = repo.subPath || "repo root";
+    const remotes = await listRemotes(repo.path);
+    if (remotes.length === 0) {
+      failures.push({ label, base, reason: "this repo has no git remote" });
+      continue;
+    }
+    // Honor an explicit "<remote>/<branch>" base; otherwise prefer origin.
+    let remote = remotes.includes("origin") ? "origin" : remotes[0];
+    let branchName = base;
+    const slash = base.indexOf("/");
+    if (slash > 0 && remotes.includes(base.slice(0, slash))) {
+      remote = base.slice(0, slash);
+      branchName = base.slice(slash + 1);
+    }
+
+    const fetched = await gitSafe(repo.path, ["fetch", remote, branchName]);
+    if (!fetched.ok) {
+      failures.push({
+        label,
+        base,
+        reason:
+          fetched.stderr.split("\n").filter(Boolean).pop() ||
+          `couldn't fetch ${remote}/${branchName}`,
+      });
+      continue;
+    }
+    const head = await gitSafe(repo.path, ["rev-parse", "FETCH_HEAD"]);
+    if (!head.ok || !head.stdout.trim()) {
+      failures.push({
+        label,
+        base,
+        reason: `couldn't resolve ${remote}/${branchName} after fetch`,
+      });
+      continue;
+    }
+    resolved.push({ repo, base, startSha: head.stdout.trim() });
+  }
+
+  if (failures.length > 0) {
+    const lines = failures
+      .map((f) => `  • ${f.label} — base "${f.base}": ${f.reason}`)
+      .join("\n");
+    throw new Error(
+      `Couldn't fork the base branch from the remote in ${failures.length} of ` +
+        `${items.length} repo(s):\n\n${lines}\n\n` +
+        `Pick a base that exists on each repo's remote and try again.`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * `git worktree add -b <branch> <path> <sha>` for each start, under `rootPath`.
+ * On any failure, only the checkouts *this call* created are rolled back (the
+ * caller's pre-existing checkouts are left untouched), then the error rethrows.
+ */
+async function addCheckouts(
+  starts: RepoStart[],
+  rootPath: string,
+  branch: string,
+): Promise<WorktreeRepoRecord[]> {
+  const created: WorktreeRepoRecord[] = [];
+  try {
+    for (const { repo, base, startSha } of starts) {
+      const checkoutPath = repo.subPath
+        ? join(rootPath, repo.subPath)
+        : rootPath;
+      // -b creates the branch; fails loudly if it already exists, which is the
+      // safe default (the user picks a fresh branch name).
+      await git(repo.path, [
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        checkoutPath,
+        startSha,
+      ]);
+      created.push({ subPath: repo.subPath, path: checkoutPath, branch, base });
+    }
+  } catch (err) {
+    for (const c of created) {
+      const src = starts.find((s) => s.repo.subPath === c.subPath);
+      if (src) {
+        await git(src.repo.path, [
+          "worktree",
+          "remove",
+          "--force",
+          c.path,
+        ]).catch(() => {});
+      }
+    }
+    throw err;
+  }
+  return created;
+}
+
+/**
+ * Create a worktree spanning the chosen repos (one `git worktree add` per repo,
+ * each forked from the remote tip of its base — see `resolveRemoteStarts`).
+ * `input.repos` selects which repos to span (default: all discovered). If the
+ * base can't be resolved on the remote in any repo, nothing is created and the
+ * error names every offending repo. On a later failure, the partially-created
+ * checkouts are rolled back.
  */
 export async function createWorktree(
   encoded: string,
@@ -86,41 +243,30 @@ export async function createWorktree(
     throw new Error(`A worktree named "${name}" already exists.`);
   }
 
-  const repos = await discoverRepos(encoded);
-  if (repos.length === 0) {
+  const all = await discoverRepos(encoded);
+  if (all.length === 0) {
     throw new Error("No git repositories found in this project.");
   }
+  const repos = input.repos
+    ? all.filter((r) => input.repos!.includes(r.subPath))
+    : all;
+  if (repos.length === 0) {
+    throw new Error("Select at least one repo for the worktree.");
+  }
+
+  const starts = await resolveRemoteStarts(
+    repos.map((repo) => ({
+      repo,
+      base: input.bases?.[repo.subPath]?.trim() || base,
+    })),
+  );
 
   const rootPath = join(await projectWorktreesDir(encoded), safeSegment(name));
-  const created: WorktreeRepoRecord[] = [];
-
+  let created: WorktreeRepoRecord[];
   try {
-    for (const repo of repos) {
-      const checkoutPath = repo.subPath
-        ? join(rootPath, repo.subPath)
-        : rootPath;
-      // -b creates the branch; fails loudly if it already exists, which is the
-      // safe default (the user picks a fresh branch name).
-      await git(repo.path, [
-        "worktree",
-        "add",
-        "-b",
-        branch,
-        checkoutPath,
-        base,
-      ]);
-      created.push({ subPath: repo.subPath, path: checkoutPath, branch, base });
-    }
+    created = await addCheckouts(starts, rootPath, branch);
   } catch (err) {
-    // Roll back anything we managed to create so we don't leave orphans.
-    for (const c of created) {
-      const source = repos.find((r) => r.subPath === c.subPath);
-      if (source) {
-        await git(source.path, ["worktree", "remove", "--force", c.path]).catch(
-          () => {},
-        );
-      }
-    }
+    // The whole rootPath is ours and brand-new here, so clean it entirely.
     await rm(rootPath, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
@@ -134,6 +280,47 @@ export async function createWorktree(
     encoded: wtEncoded,
     repos: created,
   });
+}
+
+/**
+ * Add repos the worktree doesn't yet span. New checkouts reuse the worktree's
+ * existing branch name (a worktree is one branch across its repos) forked from
+ * each chosen base's remote tip, and are appended to the record. Repos already
+ * in the worktree are ignored. On any failure the just-added checkouts roll
+ * back; the existing ones are never touched.
+ */
+export async function addReposToWorktree(
+  id: string,
+  input: AddReposToWorktreeInput,
+): Promise<WorktreeRecord> {
+  const rec = await getWorktreeRecord(id);
+  if (!rec) throw new Error("Worktree not found.");
+  const branch = rec.repos[0]?.branch;
+  if (!branch) throw new Error("This worktree has no branch to extend.");
+
+  const all = await discoverRepos(rec.projectEncoded);
+  const have = new Set(rec.repos.map((r) => r.subPath));
+  const wanted = new Set(Object.keys(input.bases));
+  const toAdd = all.filter((r) => wanted.has(r.subPath) && !have.has(r.subPath));
+  if (toAdd.length === 0) {
+    throw new Error("No new repos to add to this worktree.");
+  }
+  for (const r of toAdd) {
+    if (!input.bases[r.subPath]?.trim()) {
+      throw new Error(
+        `Base branch is required for "${r.subPath || "repo root"}".`,
+      );
+    }
+  }
+
+  const starts = await resolveRemoteStarts(
+    toAdd.map((repo) => ({ repo, base: input.bases[repo.subPath].trim() })),
+  );
+  const created = await addCheckouts(starts, rec.rootPath, branch);
+
+  const updated: WorktreeRecord = { ...rec, repos: [...rec.repos, ...created] };
+  await updateWorktreeRecord(updated);
+  return updated;
 }
 
 /** Remove a worktree's checkouts (per repo) and its on-disk dir, then forget it. */

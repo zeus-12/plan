@@ -234,7 +234,27 @@ export interface ProjectDefaults {
 export interface CreateWorktreeInput {
   name: string;
   branch: string;
+  /** Default base branch, used for any repo without an entry in `bases`. */
   base: string;
+  /**
+   * Per-repo base-branch overrides, keyed by repo subPath ("" = root repo).
+   * Each value is a branch name resolved against that repo's remote — the
+   * worktree forks from `<remote>/<base>`, never a possibly-stale local branch.
+   * Lets a multi-repo worktree fork each repo from a branch that exists there.
+   */
+  bases?: Record<string, string>;
+  /**
+   * SubPaths of the repos this worktree should span. When omitted, every
+   * discovered repo is included. Lets the user skip repos they won't touch (and
+   * add them later via `addReposToWorktree`).
+   */
+  repos?: string[];
+}
+
+/** Add one or more not-yet-included repos to an existing worktree. */
+export interface AddReposToWorktreeInput {
+  /** subPath → base branch, for each repo to add to the worktree. */
+  bases: Record<string, string>;
 }
 
 /** Fields the user approves in the Create PR modal before `gh pr create` runs. */

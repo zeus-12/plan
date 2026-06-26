@@ -19,6 +19,7 @@ import { SessionsDashboard } from "./components/sessions-dashboard";
 import { SettingsModal } from "./components/settings-modal";
 import { WorktreeRail } from "./components/worktree-rail";
 import { NewWorktreeModal } from "./components/new-worktree-modal";
+import { AddReposModal } from "./components/add-repos-modal";
 import { CreatePrModal } from "./components/create-pr-modal";
 import { ProjectDefaultsModal } from "./components/project-defaults-modal";
 import { UpdateBanner } from "./components/update-banner";
@@ -156,6 +157,10 @@ function Shell() {
   const [showDefaults, setShowDefaults] = useState(false);
   // Worktree id whose Create-PR modal is open (null = closed).
   const [prWorktreeId, setPrWorktreeId] = useState<string | null>(null);
+  // Worktree id whose Add-repos modal is open (null = closed).
+  const [addReposWorktreeId, setAddReposWorktreeId] = useState<string | null>(
+    null,
+  );
   useEffect(() => {
     setActiveWorktreeId(null);
   }, [selectedEncoded]);
@@ -164,6 +169,8 @@ function Shell() {
     worktrees.worktrees.find((w) => w.id === activeWorktreeId) ?? null;
   const prWorktree =
     worktrees.worktrees.find((w) => w.id === prWorktreeId) ?? null;
+  const addReposWorktree =
+    worktrees.worktrees.find((w) => w.id === addReposWorktreeId) ?? null;
 
   // A worktree is just another cwd; the backend primed its `encoded`, so we
   // hand ProjectWorkspace a synthesized project + the worktree's own repos and
@@ -181,7 +188,9 @@ function Shell() {
     return () => {
       cancelled = true;
     };
-  }, [activeWorktree?.encoded]);
+    // Re-list when repos are added to this worktree (record grows but encoded
+    // stays the same), so the new checkout shows without reselecting.
+  }, [activeWorktree?.encoded, activeWorktree?.repos.length]);
 
   const effectiveProject: ProjectEntry | null = activeWorktree
     ? {
@@ -425,8 +434,12 @@ function Shell() {
               onSelectWorktree={setActiveWorktreeId}
               onNew={() => setShowNewWorktree(true)}
               onRemove={handleRemoveWorktree}
+              onAddRepos={setAddReposWorktreeId}
               onCreatePr={setPrWorktreeId}
               onOpenSettings={() => setShowDefaults(true)}
+              projectRepoCount={
+                reposByProject.get(selected.encoded)?.length ?? 0
+              }
             />
           </div>
           {worktreeRailOpen && (
@@ -505,6 +518,7 @@ function Shell() {
       {showNewWorktree && selected && (
         <NewWorktreeModal
           defaults={worktrees.defaults}
+          projectEncoded={selected.encoded}
           onCreate={async (input) => {
             const rec = await worktrees.create(input);
             setActiveWorktreeId(rec.id);
@@ -517,6 +531,14 @@ function Shell() {
           worktree={prWorktree}
           onCreate={(input) => worktrees.createPr(prWorktree.id, input)}
           onClose={() => setPrWorktreeId(null)}
+        />
+      )}
+      {addReposWorktree && selected && (
+        <AddReposModal
+          worktree={addReposWorktree}
+          projectEncoded={selected.encoded}
+          onAdd={(input) => worktrees.addRepos(addReposWorktree.id, input)}
+          onClose={() => setAddReposWorktreeId(null)}
         />
       )}
       {showDefaults && selected && (

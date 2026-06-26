@@ -15,6 +15,7 @@ import type {
   WorktreeRecord,
   ProjectDefaults,
   CreateWorktreeInput,
+  AddReposToWorktreeInput,
   CreatePrInput,
   CreatePrResult,
   SkillInfo,
@@ -43,6 +44,10 @@ interface ElectronAPI {
     input: CreateWorktreeInput
   ) => Promise<WorktreeRecord>;
   removeWorktree: (id: string) => Promise<void>;
+  addReposToWorktree: (
+    id: string,
+    input: AddReposToWorktreeInput
+  ) => Promise<WorktreeRecord>;
   createWorktreePr: (id: string, input: CreatePrInput) => Promise<CreatePrResult>;
   getWorktreeDefaults: (encoded: string) => Promise<ProjectDefaults>;
   setWorktreeDefaults: (

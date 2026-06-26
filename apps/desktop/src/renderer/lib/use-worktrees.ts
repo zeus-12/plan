@@ -3,6 +3,7 @@ import type {
   WorktreeRecord,
   ProjectDefaults,
   CreateWorktreeInput,
+  AddReposToWorktreeInput,
   CreatePrInput,
   CreatePrResult,
 } from "../../shared-types";
@@ -13,6 +14,10 @@ export interface UseWorktrees {
   refresh: () => Promise<void>;
   create: (input: CreateWorktreeInput) => Promise<WorktreeRecord>;
   remove: (id: string) => Promise<void>;
+  addRepos: (
+    id: string,
+    input: AddReposToWorktreeInput
+  ) => Promise<WorktreeRecord>;
   createPr: (id: string, input: CreatePrInput) => Promise<CreatePrResult>;
   defaults: ProjectDefaults;
   saveDefaults: (defaults: ProjectDefaults) => Promise<void>;
@@ -59,6 +64,15 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
     [refresh]
   );
 
+  const addRepos = useCallback(
+    async (id: string, input: AddReposToWorktreeInput) => {
+      const rec = await window.electronAPI.addReposToWorktree(id, input);
+      await refresh();
+      return rec;
+    },
+    [refresh]
+  );
+
   const createPr = useCallback(
     (id: string, input: CreatePrInput) =>
       window.electronAPI.createWorktreePr(id, input),
@@ -79,6 +93,7 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
     refresh,
     create,
     remove,
+    addRepos,
     createPr,
     defaults,
     saveDefaults,

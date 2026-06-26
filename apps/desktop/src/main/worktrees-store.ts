@@ -114,6 +114,15 @@ export async function addWorktreeRecord(
   return full;
 }
 
+/** Replace a worktree record in place (e.g. after adding repos to it). */
+export async function updateWorktreeRecord(rec: WorktreeRecord): Promise<void> {
+  const data = await load();
+  const idx = data.worktrees.findIndex((w) => w.id === rec.id);
+  if (idx === -1) return;
+  data.worktrees[idx] = rec;
+  scheduleWrite();
+}
+
 export async function deleteWorktreeRecord(id: string): Promise<void> {
   const data = await load();
   const next = data.worktrees.filter((w) => w.id !== id);

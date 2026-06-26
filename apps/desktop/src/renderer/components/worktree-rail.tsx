@@ -13,8 +13,11 @@ interface Props {
   onSelectWorktree: (id: string) => void;
   onNew: () => void;
   onRemove: (id: string) => void;
+  onAddRepos: (id: string) => void;
   onCreatePr: (id: string) => void;
   onOpenSettings: () => void;
+  /** Repos discovered in the project; the "+" shows when a worktree spans fewer. */
+  projectRepoCount: number;
   /**
    * True when the projects sidebar is collapsed, so this rail is flush against
    * the window's left edge and the macOS traffic lights would overlap the
@@ -44,8 +47,10 @@ export function WorktreeRail({
   onSelectWorktree,
   onNew,
   onRemove,
+  onAddRepos,
   onCreatePr,
   onOpenSettings,
+  projectRepoCount,
   trafficLightInset = false,
 }: Props) {
   const liveActive = activeWorktreeId === null;
@@ -141,6 +146,15 @@ export function WorktreeRail({
                   </span>
                 </span>
               </button>
+              {w.repos.length < projectRepoCount && (
+                <button
+                  onClick={() => onAddRepos(w.id)}
+                  title="Add repos to this worktree"
+                  className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)] group-hover:flex"
+                >
+                  <Plus size={13} />
+                </button>
+              )}
               <button
                 onClick={() => onCreatePr(w.id)}
                 title="Create pull request"
