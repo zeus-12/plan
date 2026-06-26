@@ -168,6 +168,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     );
 
     const editorRef = useRef<LexicalEditor | null>(null);
+    // A focus requested while the composer is still inactive (no live session)
+    // can't land a caret — the editor is read-only. We park it here and fire it
+    // the moment the session starts and the editor turns editable.
+    const pendingFocusRef = useRef<(() => void) | null>(null);
     // Last message sent from THIS session's composer (serialized editor state) —
     // ⌘Z restores it, chips and all, into an empty box so an accidental send
     // (or lost text) can be recovered verbatim.
@@ -341,7 +345,26 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     useImperativeHandle(
       ref,
       () => ({
-        focus: () => editorRef.current?.focus(),
+        focus: () => {
+          const editor = editorRef.current;
+          if (!editor) return;
+          if (editor.isEditable()) {
+            editor.focus();
+            return;
+          }
+          // Inactive composer (old chat with no live terminal): caller is
+          // expected to kick off the session in parallel. Hold the focus until
+          // the editor becomes editable, then place the caret so the user can
+          // type. Replaces any earlier pending focus.
+          pendingFocusRef.current?.();
+          const unregister = editor.registerEditableListener((editable) => {
+            if (!editable) return;
+            unregister();
+            pendingFocusRef.current = null;
+            editor.focus();
+          });
+          pendingFocusRef.current = unregister;
+        },
         append: (text: string) => {
           const editor = editorRef.current;
           if (!editor) return;
