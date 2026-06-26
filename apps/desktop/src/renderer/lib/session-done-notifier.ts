@@ -75,7 +75,8 @@ function fire(id: string) {
   osNotify("Claude is done", label, { silent: true, tag: id });
   pushToast({
     id,
-    text: `Claude finished — ${label}`,
+    title: "Session finished",
+    description: `Claude is done with “${label}”.`,
     actionLabel: navigate ? "View" : undefined,
     onAction: navigate ? () => navigate?.(id) : undefined,
   });

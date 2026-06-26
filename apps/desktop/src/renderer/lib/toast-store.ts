@@ -1,7 +1,11 @@
 import { toast } from "sonner";
 
 export interface Toast {
-  text: string;
+  /** Generic category line, rendered as the bold heading. */
+  title: string;
+  /** The specific data/detail shown under the title. Optional — omit for
+   *  one-liners (e.g. debug toasts) that have nothing extra to say. */
+  description?: string;
   actionLabel?: string;
   onAction?: () => void;
   /** Stable key — a repeat push with the same id refreshes the existing toast
@@ -14,8 +18,9 @@ export interface Toast {
  * timing are all handled there); this is just the thin call-site adapter.
  */
 export function pushToast(t: Toast, ttlMs = 12_000) {
-  toast(t.text, {
+  toast(t.title, {
     id: t.id,
+    description: t.description,
     duration: ttlMs,
     action: t.actionLabel
       ? { label: t.actionLabel, onClick: () => t.onAction?.() }

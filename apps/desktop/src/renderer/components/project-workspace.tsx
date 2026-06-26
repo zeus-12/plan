@@ -679,7 +679,8 @@ export function ProjectWorkspace({
 
     pushToast(
       {
-        text: `“${title}” archived. Undo to bring it back.`,
+        title: "Chat archived",
+        description: `“${title}” was moved to archive.`,
         actionLabel: "Unarchive",
         onAction: () => {
           void handleSetSessionArchived(sid, false);
@@ -1381,7 +1382,8 @@ export function ProjectWorkspace({
         timer: setTimeout(() => {
           sendWatchdogRef.current = null;
           pushToast({
-            text: "Your message hasn't appeared in the session log after 12s — Claude may be stuck on a prompt. Check the terminal.",
+            title: "Message may be stuck",
+            description: "Please check the terminal.",
             actionLabel: "Open terminal",
             onAction: () => revealChatTerminal(sid),
           });
@@ -1483,7 +1485,9 @@ export function ProjectWorkspace({
     const timer = setTimeout(() => {
       pushToast(
         {
-          text: "Claude may be waiting on a tool approval — check the terminal.",
+          title: "Waiting on approval",
+          description:
+            "Claude may be paused on a tool-approval prompt in the terminal.",
           actionLabel: "Open terminal",
           onAction: () => revealChatTerminal(sid),
         },
@@ -1568,7 +1572,7 @@ export function ProjectWorkspace({
           console.debug(`[input-detect] ${res.state}\n` + res.lines.join("\n"));
           pushToast(
             {
-              text: `[detect] ${res.state} — ${
+              title: `[detect] ${res.state} — ${
                 res.lines.slice(-3).join(" ⏎ ") || "(empty)"
               }`,
             },
@@ -1602,7 +1606,8 @@ export function ProjectWorkspace({
       autoRevealedRef.current = true;
       revealChatTerminal(selectedSessionId!);
       pushToast({
-        text: "Claude may be waiting on a menu selection — respond in the terminal.",
+        title: "Waiting on a selection",
+        description: "Claude has a menu open and needs you to choose an option.",
         actionLabel: "Open terminal",
         onAction: () => revealChatTerminal(selectedSessionId!),
       });
@@ -1640,14 +1645,14 @@ export function ProjectWorkspace({
     };
     try {
       const before = await snapshot("FRAME A (idle / before)");
-      pushToast({ text: "Captured frame A — scroll now (2s)…" }, 2_000);
+      pushToast({ title: "Captured frame A — scroll now (2s)…" }, 2_000);
       await new Promise((r) => setTimeout(r, 2_000));
       const after = await snapshot("FRAME B (after 2s / while scrolling)");
       const combined = `${before}\n\n${after}`;
       await navigator.clipboard.writeText(combined);
-      pushToast({ text: `Copied both frames (${combined.length} chars)` }, 3_000);
+      pushToast({ title: `Copied both frames (${combined.length} chars)` }, 3_000);
     } catch {
-      pushToast({ text: "Couldn't copy the terminal" }, 3_000);
+      pushToast({ title: "Couldn't copy the terminal" }, 3_000);
     }
   }, [selectedSessionId, chatPrefix]);
 
