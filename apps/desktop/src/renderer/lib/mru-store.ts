@@ -43,6 +43,20 @@ export function orderByMru<T>(
     .map((e) => e.item);
 }
 
+/**
+ * The most-recently-used id among `candidates`, or null if none of them have
+ * been used this session. Unlike `orderByMru`, this never falls back to a
+ * default order — a null result means "no real MRU history", letting callers
+ * choose their own fallback (e.g. Cmd+W dropping to the adjacent tab).
+ */
+export function mostRecentUsed(
+  scope: string,
+  candidates: Set<string>,
+): string | null {
+  const order = lists.get(scope) ?? [];
+  return order.find((id) => candidates.has(id)) ?? null;
+}
+
 /** useSyncExternalStore plumbing so React recomputes orderings on any change. */
 export function subscribeMru(l: () => void): () => void {
   listeners.add(l);

@@ -896,7 +896,14 @@ export function ProjectWorkspace({
   );
   const fileItems = useMemo<PaletteItem[]>(() => {
     if (paletteMode !== "files") return [];
-    const q = paletteQuery.trim();
+    // VS Code-style "path:line" (and "path:line:col") suffix: a trailing
+    // :number(s) targets a position; the rest fuzzy-matches the filename. A
+    // colon not followed by digits is left in the query as a literal char.
+    const raw = paletteQuery.trim();
+    const posMatch = raw.match(/^(.*?):(\d+)(?::(\d+))?$/);
+    const q = (posMatch ? posMatch[1] : raw).trim();
+    const targetLine = posMatch ? parseInt(posMatch[2], 10) : null;
+    const targetCol = posMatch?.[3] ? parseInt(posMatch[3], 10) : null;
     const matched = q
       ? fileFuse.search(q, { limit: 200 }).map((r) => r.item)
       : projectFiles.slice(0, 200);
@@ -904,11 +911,23 @@ export function ProjectWorkspace({
       id: f,
       label: fileBase(f),
       sublabel: fileDir(f),
+      // Surface the resolved jump target so it's clear the suffix was parsed.
+      badge:
+        targetLine != null
+          ? `:${targetLine}${targetCol != null ? `:${targetCol}` : ""}`
+          : undefined,
       icon: <FileIcon name={fileBase(f)} />,
       onSelect: () => {
-        // openKind (not tab) drives the content pane — set both so the file
-        // actually opens instead of just highlighting in the sidebar.
-        handleSelectProjectFile(f);
+        if (targetLine != null) {
+          // line is 1-based; col is 1-based in the query but 0-based offsets
+          // in the reveal range. No col → place the caret at the line start.
+          const col0 = targetCol != null ? Math.max(targetCol - 1, 0) : 0;
+          handleOpenSearchResult(f, targetLine, col0, col0);
+        } else {
+          // openKind (not tab) drives the content pane — set both so the file
+          // actually opens instead of just highlighting in the sidebar.
+          handleSelectProjectFile(f);
+        }
         setTab("files");
         closePalette();
       },
@@ -919,6 +938,7 @@ export function ProjectWorkspace({
     fileFuse,
     projectFiles,
     handleSelectProjectFile,
+    handleOpenSearchResult,
     closePalette,
   ]);
 

@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { mostRecentUsed } from "./mru-store";
 
 /**
  * Content-pane tabs, keyed by project `encoded`. Lives at module scope so it
@@ -55,6 +56,14 @@ interface TabsState {
 }
 
 const EMPTY: TabsState = { tabs: [], activeId: null };
+
+/**
+ * MRU scope shared with the Ctrl+Tab switcher: the same per-worktree usage
+ * order powers both, so Cmd+W lands on the tab you'd Ctrl+Tab back to.
+ */
+function mruScope(encoded: string): string {
+  return `tabs:${encoded}`;
+}
 
 const store = new Map<string, TabsState>();
 const listeners = new Set<() => void>();
@@ -160,7 +169,11 @@ export function openProjectTab(encoded: string, tab: Tab) {
   set(encoded, { tabs: [...cur.tabs, tab], activeId: tab.id });
 }
 
-/** Remove a tab; if it was active, fall back to its right/left neighbour. */
+/**
+ * Remove a tab. If it was active, focus the tab you'd Ctrl+Tab back to — the
+ * most-recently-used surviving tab — falling back to the tab immediately before
+ * it (then after it) when there's no usage history yet, e.g. right after a boot.
+ */
 export function closeProjectTab(encoded: string, id: string) {
   const cur = get(encoded);
   const idx = cur.tabs.findIndex((t) => t.id === id);
@@ -168,8 +181,10 @@ export function closeProjectTab(encoded: string, id: string) {
   const tabs = cur.tabs.filter((t) => t.id !== id);
   let activeId = cur.activeId;
   if (activeId === id) {
-    const next = cur.tabs[idx + 1] ?? cur.tabs[idx - 1] ?? null;
-    activeId = next?.id ?? null;
+    const survivors = new Set(tabs.map((t) => t.id));
+    const mruNext = mostRecentUsed(mruScope(encoded), survivors);
+    const before = cur.tabs[idx - 1]?.id ?? cur.tabs[idx + 1]?.id ?? null;
+    activeId = mruNext ?? before;
   }
   set(encoded, { tabs, activeId });
 }
