@@ -17,6 +17,7 @@ import { Markdown } from "@plan/shared/components/markdown";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
 import { ImageLightbox } from "./image-lightbox";
+import { UserMessageOverview } from "./user-message-overview";
 import type {
   ConversationMessage,
   MessagePart,
@@ -1227,6 +1228,9 @@ export const MessageList = memo(function MessageList({
     <>
       <div className="relative h-full">
       <FindWidget find={find} revealTrigger={findReveal} />
+      {!find.open && (
+        <UserMessageOverview messages={items} scrollRef={parentRef} />
+      )}
       <div ref={parentRef} className="h-full overflow-auto pt-3 pb-6">
         {/* Centered reading column (ChatGPT-style): the scrollbar stays at the
             pane edge while message width is capped for readability. Diff/file
@@ -1241,11 +1245,13 @@ export const MessageList = memo(function MessageList({
           return (
             <div
               key={m.uuid || idx}
+              data-msg-row={m.uuid}
               className={cn(
                 // content-visibility lets the browser skip layout/paint of
                 // off-screen rows — width changes (sidebar toggles) would
                 // otherwise reflow the entire transcript.
-                "flex px-4 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                // scroll-mt keeps a jumped-to message off the very top edge.
+                "flex px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
                 showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
                 isUser ? "justify-end" : "justify-start"
               )}
