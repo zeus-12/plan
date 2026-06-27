@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
+import { Kbd } from "@plan/shared/components/ui/kbd";
 import type {
   ProjectDefaults,
   CreateWorktreeInput,
@@ -116,11 +117,20 @@ export function NewWorktreeModal({
         className="w-[420px] rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4 shadow-lg"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === "Escape") {
+          // Keys the modal owns must not leak to listeners outside it (e.g.
+          // the global ⌘↵ a focused composer/textarea handles). stopPropagation
+          // alone leaves React's portal-bubbling and any native window/document
+          // listeners reachable, so also stop the native event immediately.
+          const stop = () => {
             e.preventDefault();
+            e.stopPropagation();
+            e.nativeEvent.stopImmediatePropagation();
+          };
+          if (e.key === "Escape") {
+            stop();
             onClose();
           } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
+            stop();
             void submit();
           }
         }}
@@ -224,15 +234,22 @@ export function NewWorktreeModal({
         <div className="mt-4 flex items-center justify-between">
           <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
             {multiRepo
-              ? `Spans ${selected.length} of ${repos!.length} repos · ⌘↵`
-              : "Creates a worktree · ⌘↵"}
+              ? `Spans ${selected.length} of ${repos!.length} repos`
+              : ""}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={onClose}>
               Cancel
             </Button>
             <Button size="sm" onClick={() => void submit()} disabled={!canSubmit}>
-              {busy ? "Creating…" : "Create"}
+              {busy ? (
+                "Creating…"
+              ) : (
+                <>
+                  Create
+                  <Kbd keys={["⌘", "↵"]} />
+                </>
+              )}
             </Button>
           </div>
         </div>
