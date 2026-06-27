@@ -2155,17 +2155,49 @@ export function ProjectWorkspace({
   useEffect(() => {
     if (activeId) recordUse(tabsMruScope, activeId);
   }, [tabsMruScope, activeId]);
-  const tabIndex = Math.max(
-    0,
-    tabsByMru.findIndex((t) => t.id === activeId),
-  );
+  // The switcher lists open tabs first, then chat sessions WITHOUT an open tab
+  // (newest-first — `sessions` is already sorted that way), so Ctrl+Tab can
+  // reach any chat without going through the ⌘A palette. Committing a tab
+  // activates it; committing a session opens it as a chat tab.
+  type SwitcherEntry =
+    | { type: "tab"; id: string; tab: Tab }
+    | { type: "session"; id: string; sessionId: string; title: string };
+  const switcherEntries = useMemo<SwitcherEntry[]>(() => {
+    const openSessionIds = new Set(
+      tabs.filter((t) => t.kind === "chat").map((t) => t.sessionId),
+    );
+    const tabEntries: SwitcherEntry[] = tabsByMru.map((t) => ({
+      type: "tab",
+      id: t.id,
+      tab: t,
+    }));
+    const sessionEntries: SwitcherEntry[] = sessions
+      .filter((s) => !s.archived && !openSessionIds.has(s.sessionId))
+      .map((s) => ({
+        type: "session",
+        id: `switch-session:${s.sessionId}`,
+        sessionId: s.sessionId,
+        title: s.title ?? "Chat",
+      }));
+    return [...tabEntries, ...sessionEntries];
+  }, [tabsByMru, tabs, sessions]);
+  // Index of the active tab, or -1 when nothing is open so the first tap lands
+  // on the first entry rather than skipping it.
+  const switcherCurrentIndex = activeId
+    ? switcherEntries.findIndex((e) => e.type === "tab" && e.id === activeId)
+    : -1;
+  // The first session entry carries the divider — but only when tabs precede
+  // it, so a tabs-only or sessions-only list shows no stray line.
+  const firstSessionId = switcherEntries.find((e) => e.type === "session")?.id;
+  const hasOpenTabs = tabsByMru.length > 0;
   const tabSwitcher = useTabSwitcher({
     id: "tabs",
-    enabled: tabsByMru.length > 1,
+    enabled: switcherEntries.length > 1,
     triggerCode: "Tab",
-    items: tabsByMru,
-    currentIndex: tabIndex,
-    onCommit: (t) => setActive(t.id),
+    items: switcherEntries,
+    currentIndex: switcherCurrentIndex,
+    onCommit: (e) =>
+      e.type === "tab" ? setActive(e.id) : openChatTab(e.sessionId),
   });
 
   return (
@@ -2203,20 +2235,32 @@ export function ProjectWorkspace({
       />
       {tabSwitcher.active && (
         <SwitcherOverlay
-          title="Open tabs"
+          title="Tabs & chats"
           index={tabSwitcher.index}
-          items={tabsByMru.map((t) => ({
-            key: t.id,
-            label: titleForTab(t),
-            sub:
-              t.kind === "chat"
-                ? "Chat"
-                : t.kind === "diff"
-                  ? t.staged
-                    ? "Diff · staged"
-                    : "Diff"
-                  : t.path,
-          }))}
+          items={switcherEntries.map((e) => {
+            if (e.type === "session") {
+              return {
+                key: e.id,
+                label: e.title,
+                sub: "Chat",
+                divider: hasOpenTabs && e.id === firstSessionId,
+                dividerLabel: "Recent chats",
+              };
+            }
+            const t = e.tab;
+            return {
+              key: e.id,
+              label: titleForTab(t),
+              sub:
+                t.kind === "chat"
+                  ? "Chat"
+                  : t.kind === "diff"
+                    ? t.staged
+                      ? "Diff · staged"
+                      : "Diff"
+                    : t.path,
+            };
+          })}
         />
       )}
       {renaming && (

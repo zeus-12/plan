@@ -5,6 +5,10 @@ export interface SwitcherItem {
   key: string;
   label: string;
   sub?: string;
+  /** Render a labeled separator above this row (groups the list visually). */
+  divider?: boolean;
+  /** Caption shown in the separator, e.g. "Recent chats". */
+  dividerLabel?: string;
 }
 
 interface Props {
@@ -35,35 +39,46 @@ export function SwitcherOverlay({ title, items, index }: Props) {
           {items.map((item, i) => {
             const active = i === index;
             return (
-              <div
-                key={item.key}
-                ref={active ? activeRef : undefined}
-                className={cn(
-                  "flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
-                  active ? "bg-[var(--accent)]" : "bg-transparent"
-                )}
-              >
-                <div className="flex min-w-0 flex-col">
-                  <span
-                    className={cn(
-                      "truncate font-[family-name:var(--font-mono)] text-[12px]",
-                      active ? "text-[var(--bg)]" : "text-[var(--text)]"
+              <div key={item.key}>
+                {item.divider && (
+                  <div className="my-1.5 flex items-center gap-2 px-1.5">
+                    {item.dividerLabel && (
+                      <span className="shrink-0 font-[family-name:var(--font-mono)] text-[9px] uppercase tracking-wider text-[var(--text-tertiary)]">
+                        {item.dividerLabel}
+                      </span>
                     )}
-                  >
-                    {item.label}
-                  </span>
-                  {item.sub && (
+                    <div className="h-px flex-1 bg-[var(--border-strong)]" />
+                  </div>
+                )}
+                <div
+                  ref={active ? activeRef : undefined}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
+                    active ? "bg-[var(--accent)]" : "bg-transparent"
+                  )}
+                >
+                  <div className="flex min-w-0 flex-col">
                     <span
                       className={cn(
-                        "truncate font-[family-name:var(--font-mono)] text-[10px]",
-                        active
-                          ? "text-[var(--bg)] opacity-70"
-                          : "text-[var(--text-tertiary)]"
+                        "truncate font-[family-name:var(--font-mono)] text-[12px]",
+                        active ? "text-[var(--bg)]" : "text-[var(--text)]"
                       )}
                     >
-                      {item.sub}
+                      {item.label}
                     </span>
-                  )}
+                    {item.sub && (
+                      <span
+                        className={cn(
+                          "truncate font-[family-name:var(--font-mono)] text-[10px]",
+                          active
+                            ? "text-[var(--bg)] opacity-70"
+                            : "text-[var(--text-tertiary)]"
+                        )}
+                      >
+                        {item.sub}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
