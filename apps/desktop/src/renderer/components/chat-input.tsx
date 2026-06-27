@@ -166,6 +166,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
     const [isEmpty, setIsEmpty] = useState(
       () => readDraft(sessionId) === undefined,
     );
+    // True while the draft's first non-space char is "!", mirroring Claude's TUI
+    // bash mode. The text is sent verbatim — the "!" is the trigger — this only
+    // drives the visual cue so the user knows the line goes to the shell.
+    const [bashMode, setBashMode] = useState(false);
 
     const editorRef = useRef<LexicalEditor | null>(null);
     // A focus requested while the composer is still inactive (no live session)
@@ -415,7 +419,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
           </button>
         )}
         {/* Centered to match the message column's max width (see message-list). */}
-        <div className="mx-auto flex w-full max-w-[820px] flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] transition-colors focus-within:border-[var(--border-strong)]">
+        <div
+          className={`mx-auto flex w-full max-w-[820px] flex-col rounded-lg border bg-[var(--bg)] transition-colors ${
+            bashMode
+              ? "border-[var(--accent)]"
+              : "border-[var(--border)] focus-within:border-[var(--border-strong)]"
+          }`}
+        >
           <div
             className="relative"
             onMouseDown={inactive ? onStart : undefined}
@@ -452,7 +462,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
               <HistoryPlugin />
               <EditorRefPlugin editorRef={editorRef} />
               <EditablePlugin inactive={!!inactive} />
-              <DraftPlugin sessionId={sessionId} onEmptyChange={setIsEmpty} />
+              <DraftPlugin
+                sessionId={sessionId}
+                onEmptyChange={setIsEmpty}
+                onBashModeChange={setBashMode}
+              />
               <CommandsPlugin
                 sendRef={sendRef}
                 lastSentRef={lastSentRef}
@@ -480,6 +494,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(
           {/* Bottom row: attachment chips (left) · ⌘L hint + send (right). */}
           <div className="flex items-end justify-between gap-2 px-2 pb-1.5">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {bashMode && (
+                <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                  bash
+                </span>
+              )}
               {attachments.map((a) => (
                 <div key={a.id} className="group relative">
                   <button
@@ -599,9 +618,11 @@ function EditablePlugin({ inactive }: { inactive: boolean }) {
 function DraftPlugin({
   sessionId,
   onEmptyChange,
+  onBashModeChange,
 }: {
   sessionId: string;
   onEmptyChange: (empty: boolean) => void;
+  onBashModeChange: (bash: boolean) => void;
 }) {
   const [editor] = useLexicalComposerContext();
   const firstSession = useRef(true);
@@ -634,13 +655,13 @@ function DraftPlugin({
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const unregister = editor.registerUpdateListener(({ editorState }) => {
-      const empty = editorState.read(
-        () => $getRoot().getTextContent().trim().length === 0,
-      );
-      onEmptyChange(empty);
+      const text = editorState.read(() => $getRoot().getTextContent());
+      onEmptyChange(text.trim().length === 0);
+      onBashModeChange(text.trimStart().startsWith("!"));
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        if (empty) window.localStorage.removeItem(draftKey(sessionId));
+        if (text.trim().length === 0)
+          window.localStorage.removeItem(draftKey(sessionId));
         else
           window.localStorage.setItem(
             draftKey(sessionId),
@@ -652,7 +673,7 @@ function DraftPlugin({
       if (timer) clearTimeout(timer);
       unregister();
     };
-  }, [editor, sessionId, onEmptyChange]);
+  }, [editor, sessionId, onEmptyChange, onBashModeChange]);
 
   return null;
 }

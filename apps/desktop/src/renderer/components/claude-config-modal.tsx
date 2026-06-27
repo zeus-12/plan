@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
+import { Kbd } from "@plan/shared/components/ui/kbd";
 import { CodeEditor } from "@plan/shared/components/code-editor";
 import { cn } from "@plan/shared/lib/utils";
 import type {
@@ -161,7 +162,7 @@ export function ClaudeConfigModal({ encoded, initialScope, onClose }: Props) {
             e.preventDefault();
             onClose();
           }
-          if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             void save();
           }
@@ -256,7 +257,14 @@ export function ClaudeConfigModal({ encoded, initialScope, onClose }: Props) {
                         onClick={() => void save()}
                         disabled={!dirty || saving}
                       >
-                        {saving ? "Saving…" : "Save"}
+                        {saving ? (
+                          "Saving…"
+                        ) : (
+                          <>
+                            Save
+                            <Kbd keys={["⌘", "↵"]} />
+                          </>
+                        )}
                       </Button>
                     </div>
                   </div>

@@ -35,6 +35,18 @@ function classify(m: ConversationMessage): MessageCategory {
   return hasNonToolResult ? "user-real" : "tool";
 }
 
+/**
+ * A "!" bash-mode turn (command or its output) — its parts are all bash-tagged
+ * text. Rendered left-aligned and full-width like terminal output, not in the
+ * right-hand user bubble. (parseBashBlock is hoisted.)
+ */
+function isBashMessage(m: ConversationMessage): boolean {
+  return (
+    m.parts.length > 0 &&
+    m.parts.every((p) => p.kind === "text" && parseBashBlock(p.text) !== null)
+  );
+}
+
 export interface ChatAnnotation {
   id: string;
   messageUuid: string;
@@ -636,6 +648,65 @@ function TranscriptImage({ path }: { path: string }) {
   );
 }
 
+/**
+ * Claude Code records a "!" bash-mode turn as tagged text:
+ *   <bash-input>cmd</bash-input>                                  the command
+ *   <bash-stdout>…</bash-stdout><bash-stderr>…</bash-stderr>      its output
+ * Detect those so we can render a terminal block instead of leaking raw tags.
+ */
+function parseBashBlock(
+  text: string,
+): { input: string | null; stdout: string | null; stderr: string | null } | null {
+  const t = text.trim();
+  if (!/^<bash-(input|stdout|stderr)>/.test(t)) return null;
+  const grab = (tag: string) => {
+    const m = t.match(new RegExp(`<bash-${tag}>([\\s\\S]*?)</bash-${tag}>`));
+    return m ? m[1] : null;
+  };
+  const input = grab("input");
+  const stdout = grab("stdout");
+  const stderr = grab("stderr");
+  if (input === null && stdout === null && stderr === null) return null;
+  return { input, stdout, stderr };
+}
+
+function BashBlock({
+  input,
+  stdout,
+  stderr,
+}: {
+  input: string | null;
+  stdout: string | null;
+  stderr: string | null;
+}) {
+  const out = stdout?.replace(/\n+$/, "") ?? "";
+  const err = stderr?.replace(/\n+$/, "") ?? "";
+  return (
+    <div className="select-text font-[family-name:var(--font-mono)] text-[12px] leading-relaxed [cursor:text]">
+      {input !== null && (
+        <div className="flex gap-2">
+          <span className="shrink-0 select-none text-[var(--text-tertiary)]">
+            $
+          </span>
+          <span className="min-w-0 whitespace-pre-wrap break-all text-[var(--text)]">
+            {input}
+          </span>
+        </div>
+      )}
+      {out !== "" && (
+        <pre className="whitespace-pre-wrap break-all text-[var(--text-secondary)]">
+          {out}
+        </pre>
+      )}
+      {err !== "" && (
+        <pre className="whitespace-pre-wrap break-all text-[var(--removed-text,#f87171)]">
+          {err}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 interface MessagePartViewProps {
   part: MessagePart;
   partIndex: number;
@@ -682,6 +753,16 @@ const MessagePartView = memo(function MessagePartView({
               <TranscriptImage key={`${i}:${p}`} path={p} />
             ))}
           </div>
+        );
+      }
+      const bash = parseBashBlock(part.text);
+      if (bash) {
+        return (
+          <BashBlock
+            input={bash.input}
+            stdout={bash.stdout}
+            stderr={bash.stderr}
+          />
         );
       }
       return (
@@ -1240,8 +1321,9 @@ export const MessageList = memo(function MessageList({
           const partMap = annotationsByMessage.get(m.uuid);
           const showHeader = showHeaderForRow[idx];
           // iMessage-style: user turns are a right-aligned bubble capped in
-          // width; assistant turns run full-width with no bubble.
-          const isUser = classify(m) === "user-real";
+          // width; assistant turns run full-width with no bubble. Bash-mode
+          // turns read as terminal output, so they go left/full-width too.
+          const isUser = !isBashMessage(m) && classify(m) === "user-real";
           return (
             <div
               key={m.uuid || idx}
