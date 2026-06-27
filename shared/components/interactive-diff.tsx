@@ -34,7 +34,12 @@ import {
 } from "../lib/diff-merge";
 import type { GitHunk } from "../lib/git-hunks";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
-import { useActiveShikiTheme, useShikiReady } from "../lib/shiki";
+import {
+  SYNC_HIGHLIGHT_MAX_CHARS,
+  useActiveShikiTheme,
+  useShikiReady,
+} from "../lib/shiki";
+import { computeFoldRanges, foldRangeMap, hiddenLineSet } from "../lib/folding";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
@@ -140,6 +145,29 @@ export interface HunkRange {
 }
 
 /* ── Style helpers ────────────────────────────────────────── */
+
+/** Fold toggle chevron: points down when open, right when collapsed. */
+function FoldChevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        transform: collapsed ? "rotate(-90deg)" : "none",
+        transition: "transform 120ms",
+      }}
+      aria-hidden
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
 
 function visualType(line: DiffLine): DiffLine["type"] {
   return line.whitespaceOnly ? "context" : line.type;
@@ -528,6 +556,8 @@ export function InteractiveDiff({
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
     new Set()
   );
+  // Start lines (DiffLine.idx) of the regions the user has collapsed.
+  const [collapsedFolds, setCollapsedFolds] = useState<Set<number>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
 
@@ -556,6 +586,42 @@ export function InteractiveDiff({
     () => buildDiffLines(oldText, newText, settings.ignoreWhitespace),
     [oldText, newText, settings.ignoreWhitespace]
   );
+
+  /* ── Code folding (VS Code-style indentation regions) ────── */
+
+  // Fold ranges over the diff's line sequence. DiffLine.idx === its position in
+  // dLines, so a fold start is just a DiffLine.idx. Same indentation model the
+  // file viewer uses, so a function/object folds the same way in both surfaces.
+  const foldByStart = useMemo(
+    () => foldRangeMap(computeFoldRanges(dLines.map((l) => l.content))),
+    [dLines]
+  );
+  // Drop any collapsed start that no longer begins a region (texts changed).
+  const liveFolds = useMemo(() => {
+    let changed = false;
+    const next = new Set<number>();
+    for (const s of collapsedFolds) {
+      if (foldByStart.has(s)) next.add(s);
+      else changed = true;
+    }
+    return changed ? next : collapsedFolds;
+  }, [collapsedFolds, foldByStart]);
+  const hiddenDlineIdx = useMemo(
+    () => hiddenLineSet(liveFolds, foldByStart),
+    [liveFolds, foldByStart]
+  );
+  const toggleFold = useCallback((idx: number) => {
+    setCollapsedFolds((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }, []);
+  // A real change to the texts invalidates the old fold starts entirely.
+  useEffect(() => {
+    setCollapsedFolds(new Set());
+  }, [dLines]);
 
   const filtered: FilteredItem[] = useMemo(() => {
     if (!settings.hideUnchanged) return dLines;
@@ -586,9 +652,20 @@ export function InteractiveDiff({
     return result;
   }, [filtered, expandedSeparators, dLines]);
 
+  // expandedFiltered with collapsed fold regions removed. Separators are always
+  // kept (their numbering must stay in step with expandedFiltered), so only
+  // folded code lines drop out — and they drop out of rendering, split-row
+  // pairing, and ⌘F search alike, since all three read this list.
+  const displayedItems: FilteredItem[] = useMemo(() => {
+    if (hiddenDlineIdx.size === 0) return expandedFiltered;
+    return expandedFiltered.filter(
+      (it) => it.type === "separator" || !hiddenDlineIdx.has(it.idx)
+    );
+  }, [expandedFiltered, hiddenDlineIdx]);
+
   const splitRows: SplitRow[] = useMemo(
-    () => buildSplitRows(expandedFiltered),
-    [expandedFiltered]
+    () => buildSplitRows(displayedItems),
+    [displayedItems]
   );
 
   /* ── In-view find (⌘F) ─────────────────────────────────────── */
@@ -602,11 +679,11 @@ export function InteractiveDiff({
   // match list and the widget's count recompute the moment the view changes.
   const buildFindText = useCallback(() => {
     const parts: string[] = [];
-    for (const it of expandedFiltered) {
+    for (const it of displayedItems) {
       if (it.type !== "separator") parts.push(it.content);
     }
     return parts.join("\n");
-  }, [expandedFiltered]);
+  }, [displayedItems]);
 
   const find = useTextFind(buildFindText);
   const [findReveal, setFindReveal] = useState(0);
@@ -619,11 +696,11 @@ export function InteractiveDiff({
   const visibleLines = useMemo(
     () =>
       find.open
-        ? expandedFiltered.filter(
+        ? displayedItems.filter(
             (it): it is DiffLine => it.type !== "separator"
           )
         : EMPTY_VISIBLE_LINES,
-    [find.open, expandedFiltered]
+    [find.open, displayedItems]
   );
   const findLineStarts = useMemo(() => {
     const arr = new Array<number>(visibleLines.length);
@@ -721,13 +798,17 @@ export function InteractiveDiff({
   // (which were empty) get replaced with colored ones.
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
-  // Tokenizing both sides of a large diff is a synchronous main-thread cost
-  // that froze the pane on open. Defer it: the diff paints instantly without
-  // colors, then a low-priority render fills them in. `tokensStale` keeps the
-  // previous file's tokens off the new rows during the one lagging frame.
+  // Tokenizing both sides is a synchronous main-thread cost. For small/medium
+  // diffs it's sub-frame, so we tokenize on the urgent (open) render and the
+  // diff appears already colored — no flash of plain text. Only large diffs
+  // defer: they paint instantly without colors, then a low-priority render fills
+  // them in so a huge diff never freezes the pane. `tokensStale` keeps the
+  // previous file's tokens off the new rows during the lagging frame.
   const deferredOld = useDeferredValue(oldText);
   const deferredNew = useDeferredValue(newText);
-  const tokensStale = deferredOld !== oldText || deferredNew !== newText;
+  const tokensStale =
+    oldText.length + newText.length > SYNC_HIGHLIGHT_MAX_CHARS &&
+    (deferredOld !== oldText || deferredNew !== newText);
   const oldLineTokens = useMemo(
     () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(oldText, language)),
     // shikiReady / shikiTheme are deps so the memo invalidates when the
@@ -1413,6 +1494,7 @@ export function InteractiveDiff({
   });
 
   const contentCellStyle = (type: DiffLine["type"]): React.CSSProperties => ({
+    position: "relative", // anchors the fold chevron in the left padding
     minHeight: LINE_HEIGHT_PX,
     lineHeight: `${LINE_HEIGHT_PX}px`,
     fontSize: settings.fontSize,
@@ -1420,7 +1502,9 @@ export function InteractiveDiff({
     background: lineBg(type),
     whiteSpace: settings.lineWrap ? "pre-wrap" : "pre",
     wordBreak: settings.lineWrap ? "break-all" : undefined,
-    paddingLeft: 12,
+    // Room for the fold chevron (w-5 = 20px) on the left, so it never overlaps
+    // the code and there's breathing room between the line numbers and the text.
+    paddingLeft: 22,
     paddingRight: 16,
   });
 
@@ -1432,6 +1516,45 @@ export function InteractiveDiff({
     padding: 0,
     background: barColor(type),
   });
+
+  /* ── Fold toggle (lives in the content cell's left padding, never in the
+        code text, and only on a region's start line) ───────────── */
+
+  function renderFoldToggle(idx: number) {
+    if (!foldByStart.has(idx)) return null;
+    const isCollapsed = liveFolds.has(idx);
+    return (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleFold(idx);
+        }}
+        aria-label={isCollapsed ? "Expand region" : "Collapse region"}
+        title={isCollapsed ? "Expand" : "Collapse"}
+        data-fold-collapsed={isCollapsed}
+        className="absolute left-0 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-[var(--text-tertiary)] opacity-0 transition-all duration-100 hover:scale-110 hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] active:scale-90 group-hover:opacity-100 data-[fold-collapsed=true]:opacity-100"
+      >
+        <FoldChevron collapsed={isCollapsed} />
+      </button>
+    );
+  }
+
+  /** "⋯" affordance appended to a collapsed region's start line. */
+  function renderFoldEllipsis(idx: number) {
+    if (!liveFolds.has(idx)) return null;
+    return (
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleFold(idx);
+        }}
+        className="ml-1 cursor-pointer select-none rounded-sm bg-[var(--bg-surface-hover)] px-1 text-[var(--text-tertiary)]"
+        title="Expand"
+      >
+        ⋯
+      </span>
+    );
+  }
 
   /* ── Inline comment card ─────────────────────────────────── */
 
@@ -1680,7 +1803,7 @@ export function InteractiveDiff({
   function renderUnified() {
     const sepIndices: number[] = [];
     let si = 0;
-    for (const item of expandedFiltered) {
+    for (const item of displayedItems) {
       sepIndices.push(item.type === "separator" ? si++ : -1);
     }
 
@@ -1692,7 +1815,7 @@ export function InteractiveDiff({
           className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]"
         >
           <tbody>
-            {expandedFiltered.map((item, i) => {
+            {displayedItems.map((item, i) => {
               if (item.type === "separator") {
                 return (
                   <tr key={`us${i}`}>
@@ -1706,7 +1829,7 @@ export function InteractiveDiff({
 
               return (
                 <Fragment key={`u${i}`}>
-                  <tr data-dline={item.idx}>
+                  <tr data-dline={item.idx} className="group">
                     <td style={barCellStyle(vt)} />
                     {!isFirstVersion && (
                       <td style={numCellStyle(vt, item.type === "add")}>
@@ -1725,6 +1848,7 @@ export function InteractiveDiff({
                       data-dline={item.idx}
                       style={contentCellStyle(vt)}
                     >
+                      {renderFoldToggle(item.idx)}
                       <LineContent
                         text={item.content}
                         lineType={item.type}
@@ -1739,6 +1863,7 @@ export function InteractiveDiff({
                         onClickAnn={handleClickAnn}
                         onHoverAnn={handleHoverAnn}
                       />
+                      {renderFoldEllipsis(item.idx)}
                     </td>
                   </tr>
                   {lineAnns?.map(({ annotation: ann, index }) => (
@@ -1793,9 +1918,13 @@ export function InteractiveDiff({
       (side === "left" && line.type === "add") ||
       (side === "right" && line.type === "remove");
     const vt = visualType(line);
+    // Render the chevron once per fold start: on the right column for
+    // context/added starts, on the left for removed ones (the only side they
+    // appear on), so a context line never shows two toggles.
+    const foldHere = side === "right" || line.type === "remove";
 
     return (
-      <tr key={key} data-dline={line.idx}>
+      <tr key={key} data-dline={line.idx} className="group">
         <td
           style={{
             ...numCellStyle(vt, hideNum),
@@ -1809,6 +1938,7 @@ export function InteractiveDiff({
           data-dline={line.idx}
           style={contentCellStyle(vt)}
         >
+          {foldHere && renderFoldToggle(line.idx)}
           <LineContent
             text={line.content}
             lineType={line.type}
@@ -1821,6 +1951,7 @@ export function InteractiveDiff({
             onClickAnn={handleClickAnn}
             onHoverAnn={handleHoverAnn}
           />
+          {foldHere && renderFoldEllipsis(line.idx)}
         </td>
       </tr>
     );

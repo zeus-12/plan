@@ -11,6 +11,7 @@ export {
   useShikiReady,
   setActiveShikiTheme,
   useActiveShikiTheme,
+  SYNC_HIGHLIGHT_MAX_CHARS,
   type SyntaxToken,
 } from "./shiki";
 

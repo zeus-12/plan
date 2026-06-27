@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Highlighter } from "shiki";
-import pierreDarkSoft from "./shiki-themes/pierre-dark-soft.json";
+import type { ThemeDefinition } from "./themes";
 
 // We deliberately type as string[] rather than BundledLanguage[] — the latter
 // is a 200-element union that triggers OOM during workspace typecheck.
@@ -36,18 +36,47 @@ const SUPPORTED_LANGS: string[] = [
   "graphql",
 ];
 
-// Bundled shiki themes loaded by name. The original (default) light/dark pair
-// the existing UI themes map to.
-const BUNDLED_THEMES = ["github-light", "github-dark"] as const;
-
-// Custom shiki themes loaded from VS Code theme JSON, keyed by their `name`
-// field (the id shiki registers them under). Add a theme here, then point a UI
-// theme at it via THEMES[].shiki in theme-provider.tsx.
-const CUSTOM_THEMES: Record<string, unknown> = {
-  "pierre-dark-soft": pierreDarkSoft,
-};
-
 const DEFAULT_THEME = "github-dark";
+
+/**
+ * Files at or below this many characters are tokenized synchronously on the
+ * render that opens them, so they appear colored on first paint with no flash
+ * of plain text — and without slowing the open, because at this size
+ * tokenization stays under one frame (~10ms for ~300 lines of heavy TSX, the
+ * worst-case grammar; benchmarked). Larger files would block the open render
+ * noticeably (a 50k-char file is ~100ms), so they instead defer: paint plain
+ * immediately, color on a follow-up low-priority render. That keeps the open
+ * itself instant at every size — the only difference is whether colors land on
+ * the first paint (small files) or the very next one (large files).
+ */
+export const SYNC_HIGHLIGHT_MAX_CHARS = 10_000;
+
+/**
+ * Syntax themes available to the highlighter, derived from the UI themes the
+ * app registers (see `registerShikiThemes`). A theme's `syntax` is either a
+ * bundled shiki name (loaded by string) or a full VS Code theme object (loaded
+ * verbatim, registered under its `name`). The default pair is always present so
+ * tokenization works before any UI theme registers.
+ */
+const bundledNames = new Set<string>([DEFAULT_THEME, "github-light"]);
+const customThemes = new Map<string, object>();
+
+/**
+ * Record the syntax themes carried by the app's UI themes. Called during the
+ * ThemeProvider's render, before any code block asks shiki to tokenize. Must
+ * run before `ensureHighlighter` creates the (single, cached) highlighter — any
+ * theme registered afterwards won't be loaded into it.
+ */
+export function registerShikiThemes(themes: ThemeDefinition[]): void {
+  for (const t of themes) {
+    if (typeof t.syntax === "string") bundledNames.add(t.syntax);
+    else customThemes.set(t.syntax.name, t.syntax);
+  }
+}
+
+function knownThemeName(name: string): boolean {
+  return bundledNames.has(name) || customThemes.has(name);
+}
 
 /**
  * The shiki theme tokens are currently colored with. Driven by the active UI
@@ -102,7 +131,7 @@ export async function ensureHighlighter(): Promise<Highlighter | null> {
     try {
       const { createHighlighter } = await import("shiki");
       const h = await createHighlighter({
-        themes: [...BUNDLED_THEMES, ...Object.values(CUSTOM_THEMES)] as never,
+        themes: [...bundledNames, ...customThemes.values()] as never,
         // Cast through unknown — shiki expects a BundledLanguage[] union
         // which is a 200-element string union that blows up TS memory.
         langs: SUPPORTED_LANGS as unknown as never,
@@ -126,9 +155,7 @@ export async function ensureHighlighter(): Promise<Highlighter | null> {
  * default so a misconfigured mapping never leaves code uncolored.
  */
 export function setActiveShikiTheme(name: string): void {
-  const next = BUNDLED_THEMES.includes(name as never) || name in CUSTOM_THEMES
-    ? name
-    : DEFAULT_THEME;
+  const next = knownThemeName(name) ? name : DEFAULT_THEME;
   if (next === activeShikiTheme) return;
   activeShikiTheme = next;
   for (const cb of subscribers) cb();
