@@ -29,6 +29,7 @@ import {
   getSessionNames,
   setSessionName,
 } from "./manual-projects";
+import { readClaudeConfig, writeClaudeConfig } from "./claude-config";
 import type { ProjectEntry } from "../shared-types";
 import {
   setCallbacks,
@@ -568,6 +569,14 @@ function registerIpc() {
   );
   ipcMain.handle("skills:list", async (_e, encoded: string) =>
     listSkills(encoded),
+  );
+  ipcMain.handle(
+    "claudeConfig:read",
+    async (_e, encoded: string | null) => readClaudeConfig(encoded),
+  );
+  ipcMain.handle(
+    "claudeConfig:write",
+    async (_e, path: string, text: string) => writeClaudeConfig(path, text),
   );
   ipcMain.handle(
     "files:search",

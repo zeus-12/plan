@@ -49,6 +49,8 @@ interface Props {
   onSetArchived: (encoded: string, archived: boolean) => Promise<void> | void;
   onOpenDashboard: () => void;
   onOpenSettings: () => void;
+  /** Open the global ~/.claude/CLAUDE.md (and the rest of the config tree). */
+  onOpenClaudeConfig: () => void;
 }
 
 const LEAF_HEIGHT = 50;
@@ -133,6 +135,26 @@ function PanelLeftIcon() {
   );
 }
 
+/** Globe — the global ~/.claude/CLAUDE.md (machine-wide instructions). */
+function GlobeIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
 function ChevronLeftIcon() {
   return (
     <svg
@@ -177,6 +199,7 @@ export function ProjectSidebar({
   onSetArchived,
   onOpenDashboard,
   onOpenSettings,
+  onOpenClaudeConfig,
 }: Props) {
   const sidebar = useSidebar();
   // Pick a representative branch per project: first repo's branch.
@@ -313,6 +336,21 @@ export function ProjectSidebar({
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <span>Running Claude sessions</span>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenClaudeConfig}
+                aria-label="Claude instructions & memory"
+              >
+                <GlobeIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <span>Claude instructions &amp; memory</span>
             </TooltipContent>
           </Tooltip>
           <Tooltip>

@@ -292,3 +292,30 @@ export interface UpdateInfo {
   /** Release notes (markdown); may be empty. */
   notes: string;
 }
+
+/** Scope of a CLAUDE.md / memory file in the Claude config viewer. */
+export type ClaudeConfigScope = "global" | "project" | "memory";
+
+/** One editable Claude instruction/memory file surfaced in the config modal. */
+export interface ClaudeConfigFile {
+  /** Absolute path on disk. */
+  path: string;
+  /** Friendly label (home dir tildified). */
+  label: string;
+  scope: ClaudeConfigScope;
+  /** Current contents; "" when the file doesn't exist yet. */
+  text: string;
+  /** Whether the file currently exists on disk (false → editing creates it). */
+  exists: boolean;
+}
+
+/**
+ * The full set of files that shape Claude's behaviour for a project, resolved
+ * for the config viewer: the global user file, the project CLAUDE.md cascade
+ * (cwd up to root), and the per-project memory store.
+ */
+export interface ClaudeConfigBundle {
+  global: ClaudeConfigFile;
+  project: ClaudeConfigFile[];
+  memory: ClaudeConfigFile[];
+}

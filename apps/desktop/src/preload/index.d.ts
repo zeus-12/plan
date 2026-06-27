@@ -20,6 +20,7 @@ import type {
   CreatePrResult,
   SkillInfo,
   UpdateInfo,
+  ClaudeConfigBundle,
 } from "../shared-types";
 
 interface ElectronAPI {
@@ -76,6 +77,10 @@ interface ElectronAPI {
     relPath: string
   ) => Promise<string | null>;
   listSkills: (encoded: string) => Promise<SkillInfo[]>;
+  /** Resolve the global + project CLAUDE.md cascade and per-project memory. */
+  readClaudeConfig: (encoded: string | null) => Promise<ClaudeConfigBundle>;
+  /** Write one Claude config/memory file (guarded to those paths in main). */
+  writeClaudeConfig: (path: string, text: string) => Promise<{ ok: true }>;
   searchProjectFiles: (
     encoded: string,
     query: string,

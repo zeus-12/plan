@@ -418,7 +418,7 @@ function Shell() {
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenClaudeConfig={() => setClaudeConfigScope("global")}
+        onOpenClaudeConfig={() => setClaudeConfigScope("project")}
       />
       {selected && (
         <div
@@ -490,7 +490,6 @@ function Shell() {
                 buildCommand,
               })
             }
-            onOpenClaudeConfig={() => setClaudeConfigScope("project")}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
