@@ -461,7 +461,7 @@ export function FileList({
                 className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 pr-2 text-left"
               >
                 <FileIcon name={basename} />
-                <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
+                <span className="min-w-0 shrink truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
                   {basename}
                 </span>
                 {dirname && (
