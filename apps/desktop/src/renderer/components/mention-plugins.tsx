@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -42,20 +43,68 @@ const MENU_MAX_H = 280;
 const MENU_GAP = 6;
 
 /**
+ * Reads the caret's viewport rect — the live source of truth for where the menu
+ * should anchor. We measure the DOM selection directly rather than Lexical's
+ * anchor element: that anchor is created at the document origin and only moved
+ * to the caret in `positionMenu` (a *parent* effect that runs after this child),
+ * and it's reused across opens, so reading it races the positioning and can
+ * return a stale or (0,0) rect — which is exactly what pinned the popover to the
+ * top-left corner. The collapsed selection, by contrast, is always at the caret.
+ *
+ * Re-measured after every commit so the menu follows the caret as the query
+ * grows, plus on scroll/resize while it's open.
+ */
+function useCaretRect(): DOMRect | null {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  const measure = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    // A collapsed range with no laid-out geometry yet — don't anchor to (0,0).
+    if (r.top === 0 && r.left === 0 && r.width === 0 && r.height === 0) return;
+    setRect((prev) =>
+      prev &&
+      prev.top === r.top &&
+      prev.left === r.left &&
+      prev.bottom === r.bottom &&
+      prev.right === r.right
+        ? prev
+        : r,
+    );
+  }, []);
+
+  // No deps: re-run after every render so the rect tracks the caret per keystroke.
+  useLayoutEffect(measure);
+
+  useLayoutEffect(() => {
+    window.addEventListener("resize", measure);
+    document.addEventListener("scroll", measure, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      window.removeEventListener("resize", measure);
+      document.removeEventListener("scroll", measure, true);
+    };
+  }, [measure]);
+
+  return rect;
+}
+
+/**
  * Shared popover chrome. The composer sits at the bottom of the window, and
  * Lexical's built-in menu flip only considers room *inside* the (tiny)
  * contenteditable, so it never flips and the menu overflows the viewport.
  * Instead we position the menu ourselves with `fixed`, measuring the caret
- * anchor and opening upward whenever there isn't room below — like ChatGPT.
+ * ({@link useCaretRect}) and opening upward when there's no room below — like
+ * ChatGPT.
  */
-function MenuShell({
-  anchor,
-  children,
-}: {
-  anchor: HTMLElement;
-  children: ReactNode;
-}) {
-  const rect = anchor.getBoundingClientRect();
+function MenuShell({ children }: { children: ReactNode }) {
+  const rect = useCaretRect();
+
+  if (!rect) return null;
+
   const spaceBelow = window.innerHeight - rect.bottom;
   const spaceAbove = rect.top;
   const openUp = spaceBelow < MENU_MAX_H && spaceAbove > spaceBelow;
@@ -83,6 +132,9 @@ function MenuShell({
         maxHeight,
       };
 
+  // Portal to <body>, not into the anchor: the menu is `fixed` so it needn't
+  // live inside it, and as the anchor's only child Lexical's positionMenu would
+  // otherwise reposition the anchor from *our* menu's size — a feedback loop.
   return createPortal(
     <ul
       style={style}
@@ -90,7 +142,7 @@ function MenuShell({
     >
       {children}
     </ul>,
-    anchor,
+    document.body,
   );
 }
 
@@ -206,7 +258,7 @@ export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }
       options={options}
       menuRenderFn={(anchorRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
         anchorRef.current && options.length > 0 ? (
-          <MenuShell anchor={anchorRef.current}>
+          <MenuShell>
             {options.map((opt, i) => (
               <Row
                 key={opt.key}
@@ -291,7 +343,7 @@ export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string 
       options={options}
       menuRenderFn={(anchorRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
         anchorRef.current && options.length > 0 ? (
-          <MenuShell anchor={anchorRef.current}>
+          <MenuShell>
             {options.map((opt, i) => (
               <Row
                 key={opt.key}
