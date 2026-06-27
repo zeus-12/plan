@@ -32,7 +32,7 @@ import { usePersistentNumber } from "./lib/use-persistent-number";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
 import { openProjectTab, makeChatTab } from "./lib/tabs-store";
 import {
-  getMruVersion,
+  getMruScopeVersion,
   orderByMru,
   recordUse,
   subscribeMru,
@@ -44,6 +44,9 @@ import {
 } from "./lib/session-done-notifier";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
+
+// Stable getSnapshot for useSyncExternalStore — reads only the "projects" scope.
+const getProjectsMruVersion = () => getMruScopeVersion("projects");
 
 function projectShortName(p: ProjectEntry): string {
   return p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
@@ -378,14 +381,16 @@ function Shell() {
       projects.filter((p) => !p.archived).sort((a, b) => b.mtimeMs - a.mtimeMs),
     [projects],
   );
-  const mruVersion = useSyncExternalStore(
+  // Subscribe to the "projects" scope only — a content-tab or chat switch in
+  // the workspace bumps a different scope and must not re-render App/sidebar.
+  const projectsMruVersion = useSyncExternalStore(
     subscribeMru,
-    getMruVersion,
-    getMruVersion,
+    getProjectsMruVersion,
+    getProjectsMruVersion,
   );
   const projectsByMru = useMemo(
     () => orderByMru("projects", activeProjects, (p) => p.encoded),
-    [activeProjects, mruVersion],
+    [activeProjects, projectsMruVersion],
   );
   useEffect(() => {
     if (selectedEncoded) recordUse("projects", selectedEncoded);

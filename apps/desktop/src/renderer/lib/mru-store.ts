@@ -16,6 +16,13 @@
 const lists = new Map<string, string[]>();
 const listeners = new Set<() => void>();
 let version = 0;
+// Per-scope version counters. The global `version` bumps on ANY change, so a
+// consumer subscribing to it re-renders whenever ANY scope is touched — e.g.
+// switching a content tab ("tabs:<encoded>") needlessly re-rendered App and the
+// project sidebar, which only care about the "projects" scope. Each consumer
+// reads its own scope's version instead, re-rendering only when that scope
+// actually reorders.
+const scopeVersions = new Map<string, number>();
 
 /** Move `id` to the front of its scope's order. No-op if already in front. */
 export function recordUse(scope: string, id: string): void {
@@ -23,7 +30,13 @@ export function recordUse(scope: string, id: string): void {
   if (prev[0] === id) return;
   lists.set(scope, [id, ...prev.filter((x) => x !== id)]);
   version++;
+  scopeVersions.set(scope, (scopeVersions.get(scope) ?? 0) + 1);
   listeners.forEach((l) => l());
+}
+
+/** Version of a single scope — bumps only when THAT scope reorders. */
+export function getMruScopeVersion(scope: string): number {
+  return scopeVersions.get(scope) ?? 0;
 }
 
 /**

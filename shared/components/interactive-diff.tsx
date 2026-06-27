@@ -854,36 +854,57 @@ export function InteractiveDiff({
   // so one box per hunk means a click can never stage a neighbour.
   const hunkBlocks: HunkBlock[] = useMemo(() => {
     if (!hunkActionsEnabled || !hunkList?.length) return [];
+    // One pass instead of (hunks × lines): build sorted hunk extents per side,
+    // then walk dLines once, binary-searching each changed line to its hunk.
+    // Old O(n×m) re-scanned every line for every hunk — 200k+ comparisons on a
+    // big file with many hunks, synchronously on each diff open.
+    const oldRanges = hunkList.map((h) => ({
+      start: h.oldStart,
+      end: h.oldStart + Math.max(h.oldCount, 1) - 1,
+    }));
+    const newRanges = hunkList.map((h) => ({
+      start: h.newStart,
+      end: h.newStart + Math.max(h.newCount, 1) - 1,
+    }));
+    const findHunk = (
+      ranges: { start: number; end: number }[],
+      n: number
+    ): number => {
+      let lo = 0;
+      let hi = ranges.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (n < ranges[mid].start) hi = mid - 1;
+        else if (n > ranges[mid].end) lo = mid + 1;
+        else return mid;
+      }
+      return -1;
+    };
+    const first = new Array<number>(hunkList.length).fill(Infinity);
+    const last = new Array<number>(hunkList.length).fill(-Infinity);
+    for (const l of dLines) {
+      let hunkIdx = -1;
+      if (l.type === "remove" && l.oldNum != null) {
+        hunkIdx = findHunk(oldRanges, l.oldNum);
+      } else if (l.type === "add" && l.newNum != null) {
+        hunkIdx = findHunk(newRanges, l.newNum);
+      }
+      if (hunkIdx === -1) continue;
+      if (l.idx < first[hunkIdx]) first[hunkIdx] = l.idx;
+      if (l.idx > last[hunkIdx]) last[hunkIdx] = l.idx;
+    }
     const out: HunkBlock[] = [];
     hunkList.forEach((h, hunkIdx) => {
-      const oldEnd = h.oldStart + Math.max(h.oldCount, 1) - 1;
-      const newEnd = h.newStart + Math.max(h.newCount, 1) - 1;
-      let firstIdx = Infinity;
-      let lastIdx = -Infinity;
-      for (const l of dLines) {
-        const inHunk =
-          (l.type === "remove" &&
-            l.oldNum != null &&
-            l.oldNum >= h.oldStart &&
-            l.oldNum <= oldEnd) ||
-          (l.type === "add" &&
-            l.newNum != null &&
-            l.newNum >= h.newStart &&
-            l.newNum <= newEnd);
-        if (!inHunk) continue;
-        if (l.idx < firstIdx) firstIdx = l.idx;
-        if (l.idx > lastIdx) lastIdx = l.idx;
-      }
-      if (firstIdx === Infinity) return; // hunk with no changed lines (defensive)
+      if (first[hunkIdx] === Infinity) return; // hunk with no changed lines
       out.push({
         hunkIdx,
-        firstIdx,
-        lastIdx,
+        firstIdx: first[hunkIdx],
+        lastIdx: last[hunkIdx],
         range: {
           oldStart: h.oldCount > 0 ? h.oldStart : null,
-          oldEnd: h.oldCount > 0 ? oldEnd : null,
+          oldEnd: h.oldCount > 0 ? oldRanges[hunkIdx].end : null,
           newStart: h.newCount > 0 ? h.newStart : null,
-          newEnd: h.newCount > 0 ? newEnd : null,
+          newEnd: h.newCount > 0 ? newRanges[hunkIdx].end : null,
         },
       });
     });

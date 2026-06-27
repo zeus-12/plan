@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { relativeTime } from "../lib/time";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
@@ -177,7 +178,11 @@ export function SessionList({
  * trailing edge of the title — the title's left edge never moves, so working and
  * idle rows stay perfectly aligned and nothing shifts when it toggles.
  */
-function SessionRow({
+// Memoized: the list re-renders when `selected` or the sessions array changes,
+// but only the rows whose own props actually changed need to re-render (each
+// row also subscribes to its own working-state). The parent passes stable
+// (useCallback) handlers, so unchanged rows bail out.
+const SessionRow = memo(function SessionRow({
   session: s,
   isSelected,
   termId,
@@ -241,7 +246,7 @@ function SessionRow({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
 
 function ChevronLeftIcon() {
   return (

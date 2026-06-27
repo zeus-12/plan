@@ -1,10 +1,14 @@
 import {
+  memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import { generateMessage, type Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
@@ -63,7 +67,7 @@ import { ThemeMenu } from "./theme-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
 import {
-  getMruVersion,
+  getMruScopeVersion,
   orderByMru,
   recordUse,
   subscribeMru,
@@ -184,6 +188,185 @@ function PanelRightIcon() {
     </svg>
   );
 }
+
+/* ── Memoized tab panes ───────────────────────────────────────
+ * Every open tab keeps its content MOUNTED (hidden via CSS) so scroll, parsed
+ * transcripts and highlighted diffs survive tab switches. The catch: without
+ * memoization, ANY ProjectWorkspace re-render — clicking a different tab, a
+ * 250ms watcher tick, a terminal-status poll — re-rendered EVERY mounted pane.
+ * With a large file/diff or many tabs that's the multi-second freeze. These
+ * wrappers take a stable `tab` plus stable (useCallback) handlers and bind the
+ * per-tab callbacks INTERNALLY, so a pane only re-renders when its OWN data
+ * changes. The active-only props (`working`/`terminalReady`/`active`) are passed
+ * as `false` to inactive panes so a working-state flip touches just one. */
+
+const EMPTY_ANN: Annotation[] = [];
+
+type RevealTarget = {
+  line: number;
+  colStart: number;
+  colEnd: number;
+  nonce: number;
+  focusCaret?: boolean;
+} | null;
+
+const DiffTabPane = memo(function DiffTabPane({
+  tab,
+  active,
+  encoded,
+  diff,
+  annotationsByFile,
+  setAnnotationsByFile,
+  onStageFile,
+  onUnstageFile,
+  onDiscardFile,
+  onChanged,
+  confirm,
+}: {
+  tab: Extract<Tab, { kind: "diff" }>;
+  active: boolean;
+  encoded: string;
+  diff: FileDiff | null;
+  annotationsByFile: Record<string, Annotation[]>;
+  setAnnotationsByFile: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
+  onStageFile: (path: string, subPath: string) => void;
+  onUnstageFile: (path: string, subPath: string) => void;
+  onDiscardFile: (path: string, subPath: string) => void;
+  onChanged: () => void;
+  confirm: (opts: {
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+  }) => Promise<boolean>;
+}) {
+  return (
+    <div className={cn("absolute inset-0 min-h-0", !active && "hidden")}>
+      {diff ? (
+        <FileDiffViewer
+          encoded={encoded}
+          subPath={tab.subPath}
+          file={diff}
+          mode={tab.staged ? "staged" : "unstaged"}
+          active={active}
+          annotationsByFile={annotationsByFile}
+          setAnnotationsByFile={setAnnotationsByFile}
+          onStage={() => onStageFile(tab.path, tab.subPath)}
+          onUnstage={() => onUnstageFile(tab.path, tab.subPath)}
+          onDiscard={() => onDiscardFile(tab.path, tab.subPath)}
+          onChanged={onChanged}
+          confirm={confirm}
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+          No longer changed.
+        </div>
+      )}
+    </div>
+  );
+});
+
+const FileTabPane = memo(function FileTabPane({
+  tab,
+  active,
+  encoded,
+  annotations,
+  revealTarget,
+  onAddAnnotation,
+  onUpdateAnnotation,
+  onRemoveAnnotation,
+}: {
+  tab: Extract<Tab, { kind: "file" }>;
+  active: boolean;
+  encoded: string;
+  annotations: Annotation[];
+  revealTarget: RevealTarget;
+  onAddAnnotation: (
+    path: string,
+    selectedText: string,
+    startOffset: number,
+    endOffset: number,
+    startLine: number,
+    endLine: number,
+    comment: string
+  ) => void;
+  onUpdateAnnotation: (path: string, id: string, comment: string) => void;
+  onRemoveAnnotation: (path: string, id: string) => void;
+}) {
+  return (
+    <div className={cn("absolute inset-0 min-h-0", !active && "hidden")}>
+      <FileViewer
+        encoded={encoded}
+        path={tab.path}
+        annotations={annotations}
+        onAddAnnotation={(s, so, eo, sl, el, c) =>
+          onAddAnnotation(tab.path, s, so, eo, sl, el, c)
+        }
+        onUpdateAnnotation={(id, c) => onUpdateAnnotation(tab.path, id, c)}
+        onRemoveAnnotation={(id) => onRemoveAnnotation(tab.path, id)}
+        active={active}
+        revealTarget={revealTarget}
+      />
+    </div>
+  );
+});
+
+const ChatTabPane = memo(function ChatTabPane({
+  tab,
+  active,
+  encoded,
+  transcript,
+  annotations,
+  working,
+  terminalReady,
+  isNew,
+  onAddAnnotation,
+  onUpdateAnnotation,
+  onRemoveAnnotation,
+  onSendKeys,
+}: {
+  tab: Extract<Tab, { kind: "chat" }>;
+  active: boolean;
+  encoded: string;
+  transcript: ParsedSession | undefined;
+  annotations: ChatAnnotation[];
+  working: boolean;
+  terminalReady: boolean;
+  isNew: boolean;
+  onAddAnnotation: (
+    messageUuid: string,
+    partIndex: number,
+    selectedText: string,
+    startOffset: number,
+    endOffset: number,
+    comment: string
+  ) => void;
+  onUpdateAnnotation: (id: string, comment: string) => void;
+  onRemoveAnnotation: (id: string) => void;
+  onSendKeys: (keys: string[]) => void;
+}) {
+  return (
+    <div className={cn("absolute inset-0", !active && "hidden")}>
+      {transcript ? (
+        <MessageList
+          messages={transcript.messages}
+          encoded={encoded}
+          annotations={annotations}
+          onAddAnnotation={onAddAnnotation}
+          onUpdateAnnotation={onUpdateAnnotation}
+          onRemoveAnnotation={onRemoveAnnotation}
+          visible={active}
+          terminalReady={terminalReady}
+          working={working}
+          onSendKeys={onSendKeys}
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+          {isNew ? "New chat — send a message to start it." : "Loading…"}
+        </div>
+      )}
+    </div>
+  );
+});
 
 export function ProjectWorkspace({
   project,
@@ -893,6 +1076,12 @@ export function ProjectWorkspace({
     null,
   );
   const [paletteQuery, setPaletteQuery] = useState("");
+  // The input binds to the live `paletteQuery`, but the heavy results build
+  // (Fuse search + up to 200 rows, each with a FileIcon) runs off a DEFERRED
+  // copy. Typing stays responsive — keystrokes update the field immediately and
+  // the list catches up in a low-priority, interruptible render instead of
+  // re-running the whole filter on every key.
+  const deferredPaletteQuery = useDeferredValue(paletteQuery);
   const closePalette = useCallback(() => {
     setPaletteMode(null);
     setPaletteQuery("");
@@ -908,7 +1097,7 @@ export function ProjectWorkspace({
     // VS Code-style "path:line" (and "path:line:col") suffix: a trailing
     // :number(s) targets a position; the rest fuzzy-matches the filename. A
     // colon not followed by digits is left in the query as a literal char.
-    const raw = paletteQuery.trim();
+    const raw = deferredPaletteQuery.trim();
     const posMatch = raw.match(/^(.*?):(\d+)(?::(\d+))?$/);
     const q = (posMatch ? posMatch[1] : raw).trim();
     const targetLine = posMatch ? parseInt(posMatch[2], 10) : null;
@@ -943,7 +1132,7 @@ export function ProjectWorkspace({
     }));
   }, [
     paletteMode,
-    paletteQuery,
+    deferredPaletteQuery,
     fileFuse,
     projectFiles,
     handleSelectProjectFile,
@@ -1033,7 +1222,7 @@ export function ProjectWorkspace({
   );
   const switchItems = useMemo<PaletteItem[]>(() => {
     if (paletteMode !== "switch") return [];
-    const q = paletteQuery.trim();
+    const q = deferredPaletteQuery.trim();
     const matched = q
       ? switchFuse.search(q, { limit: 100 }).map((r) => r.item)
       : switchEntries.slice(0, 100);
@@ -1048,7 +1237,7 @@ export function ProjectWorkspace({
         closePalette();
       },
     }));
-  }, [paletteMode, paletteQuery, switchFuse, switchEntries, closePalette]);
+  }, [paletteMode, deferredPaletteQuery, switchFuse, switchEntries, closePalette]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -2143,10 +2332,17 @@ export function ProjectWorkspace({
   // first (Alt-Tab style), per worktree, so the first tap lands on the tab you
   // were last on; before any switch this session it keeps the tab-bar order.
   const tabsMruScope = `tabs:${project.encoded}`;
+  // Subscribe to THIS worktree's tab scope only — a project switch elsewhere
+  // bumps the "projects" scope and must not re-render the whole workspace's
+  // tab ordering.
+  const getTabsMruVersion = useCallback(
+    () => getMruScopeVersion(tabsMruScope),
+    [tabsMruScope],
+  );
   const mruVersion = useSyncExternalStore(
     subscribeMru,
-    getMruVersion,
-    getMruVersion,
+    getTabsMruVersion,
+    getTabsMruVersion,
   );
   const tabsByMru = useMemo(
     () => orderByMru(tabsMruScope, tabs, (t) => t.id),
@@ -2297,93 +2493,47 @@ export function ProjectWorkspace({
                   </div>
                 )}
 
-                {/* Diff tabs */}
-                {tabs.map((t) => {
-                  if (t.kind !== "diff") return null;
-                  const active = t.id === activeId;
-                  const diff = getFileDiff(t.subPath, t.path);
-                  return (
-                    <div
+                {/* Diff tabs — each pane is memoized (see DiffTabPane) so an
+                    unrelated re-render doesn't touch every mounted diff. */}
+                {tabs.map((t) =>
+                  t.kind === "diff" ? (
+                    <DiffTabPane
                       key={t.id}
-                      className={cn(
-                        "absolute inset-0 min-h-0",
-                        !active && "hidden",
-                      )}
-                    >
-                      {diff ? (
-                        <FileDiffViewer
-                          encoded={project.encoded}
-                          subPath={t.subPath}
-                          file={diff}
-                          mode={t.staged ? "staged" : "unstaged"}
-                          active={active}
-                          annotationsByFile={annotationsByFile}
-                          setAnnotationsByFile={setAnnotationsByFile}
-                          onStage={() => handleStageFile(t.path, t.subPath)}
-                          onUnstage={() => handleUnstageFile(t.path, t.subPath)}
-                          onDiscard={() => handleDiscardFile(t.path, t.subPath)}
-                          onChanged={refreshDiff}
-                          confirm={confirm}
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                          No longer changed.
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      tab={t}
+                      active={t.id === activeId}
+                      encoded={project.encoded}
+                      diff={getFileDiff(t.subPath, t.path)}
+                      annotationsByFile={annotationsByFile}
+                      setAnnotationsByFile={setAnnotationsByFile}
+                      onStageFile={handleStageFile}
+                      onUnstageFile={handleUnstageFile}
+                      onDiscardFile={handleDiscardFile}
+                      onChanged={refreshDiff}
+                      confirm={confirm}
+                    />
+                  ) : null,
+                )}
 
                 {/* File tabs */}
-                {tabs.map((t) => {
-                  if (t.kind !== "file") return null;
-                  const active = t.id === activeId;
-                  return (
-                    <div
+                {tabs.map((t) =>
+                  t.kind === "file" ? (
+                    <FileTabPane
                       key={t.id}
-                      className={cn(
-                        "absolute inset-0 min-h-0",
-                        !active && "hidden",
-                      )}
-                    >
-                      <FileViewer
-                        encoded={project.encoded}
-                        path={t.path}
-                        annotations={annotationsByProjectFile[t.path] ?? []}
-                        onAddAnnotation={(
-                          selectedText,
-                          startOffset,
-                          endOffset,
-                          startLine,
-                          endLine,
-                          comment,
-                        ) =>
-                          addProjectFileAnnotation(
-                            t.path,
-                            selectedText,
-                            startOffset,
-                            endOffset,
-                            startLine,
-                            endLine,
-                            comment,
-                          )
-                        }
-                        onUpdateAnnotation={(id, comment) =>
-                          updateProjectFileAnnotation(t.path, id, comment)
-                        }
-                        onRemoveAnnotation={(id) =>
-                          removeProjectFileAnnotation(t.path, id)
-                        }
-                        active={active}
-                        revealTarget={
-                          fileReveal && fileReveal.path === t.path
-                            ? fileReveal
-                            : null
-                        }
-                      />
-                    </div>
-                  );
-                })}
+                      tab={t}
+                      active={t.id === activeId}
+                      encoded={project.encoded}
+                      annotations={annotationsByProjectFile[t.path] ?? EMPTY_ANN}
+                      revealTarget={
+                        fileReveal && fileReveal.path === t.path
+                          ? fileReveal
+                          : null
+                      }
+                      onAddAnnotation={addProjectFileAnnotation}
+                      onUpdateAnnotation={updateProjectFileAnnotation}
+                      onRemoveAnnotation={removeProjectFileAnnotation}
+                    />
+                  ) : null,
+                )}
 
                 {/* Chat tabs: each keeps a mounted MessageList (transcript scroll
                     survives switching); the header + composer bind to the ACTIVE
@@ -2478,36 +2628,25 @@ export function ProjectWorkspace({
                     {tabs.map((t) => {
                       if (t.kind !== "chat") return null;
                       const active = t.id === activeId;
-                      const ts = transcripts.get(t.sessionId);
+                      // Active-only signals (working/terminalReady) are passed as
+                      // `false` to inactive panes, so a working-state flip on the
+                      // live chat re-renders only that one transcript — not all.
                       return (
-                        <div
+                        <ChatTabPane
                           key={t.id}
-                          className={cn(
-                            "absolute inset-0",
-                            !active && "hidden",
-                          )}
-                        >
-                          {ts ? (
-                            <MessageList
-                              messages={ts.messages}
-                              encoded={project.encoded}
-                              annotations={chatAnnotations}
-                              onAddAnnotation={addChatAnnotation}
-                              onUpdateAnnotation={updateChatAnnotation}
-                              onRemoveAnnotation={removeChatAnnotation}
-                              visible={active && activeTab?.kind === "chat"}
-                              terminalReady={chatTerminalReady}
-                              working={chatWorking}
-                              onSendKeys={handleSendKeysToChat}
-                            />
-                          ) : (
-                            <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                              {NEW_SESSION_IDS.has(t.sessionId)
-                                ? "New chat — send a message to start it."
-                                : "Loading…"}
-                            </div>
-                          )}
-                        </div>
+                          tab={t}
+                          active={active}
+                          encoded={project.encoded}
+                          transcript={transcripts.get(t.sessionId)}
+                          annotations={chatAnnotations}
+                          working={active ? chatWorking : false}
+                          terminalReady={active ? chatTerminalReady : false}
+                          isNew={NEW_SESSION_IDS.has(t.sessionId)}
+                          onAddAnnotation={addChatAnnotation}
+                          onUpdateAnnotation={updateChatAnnotation}
+                          onRemoveAnnotation={removeChatAnnotation}
+                          onSendKeys={handleSendKeysToChat}
+                        />
                       );
                     })}
                   </div>

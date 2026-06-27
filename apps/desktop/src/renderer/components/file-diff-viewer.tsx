@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "@plan/shared/lib/diff-parser";
 import type { FileView, FileImageDiff } from "../../shared-types";
 import type { Annotation } from "@plan/shared/lib/store";
@@ -61,7 +61,12 @@ interface FormattedState {
   changed: boolean;
 }
 
-export function FileDiffViewer({
+// Memoized: many diff tabs stay mounted at once (hidden via CSS). Without this,
+// any ProjectWorkspace re-render (clicking another tab, a watcher tick) would
+// re-render every mounted diff — the cost that scaled with open-tab count.
+export const FileDiffViewer = memo(FileDiffViewerImpl);
+
+function FileDiffViewerImpl({
   encoded,
   subPath,
   file,
