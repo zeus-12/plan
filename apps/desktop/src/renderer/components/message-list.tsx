@@ -47,6 +47,19 @@ function isBashMessage(m: ConversationMessage): boolean {
   );
 }
 
+/**
+ * A background-task notification turn (system-injected, not real user input) —
+ * rendered full-width as a status card, not in the right-hand user bubble.
+ */
+function isTaskNotificationMessage(m: ConversationMessage): boolean {
+  return (
+    m.parts.length > 0 &&
+    m.parts.every(
+      (p) => p.kind === "text" && parseTaskNotifications(p.text) !== null
+    )
+  );
+}
+
 export interface ChatAnnotation {
   id: string;
   messageUuid: string;
@@ -670,6 +683,126 @@ function parseBashBlock(
   return { input, stdout, stderr };
 }
 
+/**
+ * Claude Code injects a background-task completion as a user turn whose text is
+ * a raw `<task-notification>` block:
+ *   <task-notification>
+ *     <task-id>…</task-id><tool-use-id>…</tool-use-id>
+ *     <output-file>…</output-file><status>completed</status>
+ *     <summary>Background command "…" completed (exit code 0)</summary>
+ *   </task-notification>
+ * Parse those out (a turn may carry several) so we render a tidy status card
+ * instead of leaking the angle-bracket soup. `remainder` is any surrounding
+ * prose, rendered as normal markdown.
+ */
+interface TaskNotification {
+  taskId: string | null;
+  toolUseId: string | null;
+  outputFile: string | null;
+  status: string | null;
+  summary: string | null;
+}
+
+function parseTaskNotifications(
+  text: string
+): { notifications: TaskNotification[]; remainder: string } | null {
+  if (!text.includes("<task-notification>")) return null;
+  const re = /<task-notification>([\s\S]*?)<\/task-notification>/g;
+  const notifications: TaskNotification[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const body = m[1];
+    const grab = (tag: string) => {
+      const mm = body.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+      return mm ? mm[1].trim() : null;
+    };
+    notifications.push({
+      taskId: grab("task-id"),
+      toolUseId: grab("tool-use-id"),
+      outputFile: grab("output-file"),
+      status: grab("status"),
+      summary: grab("summary"),
+    });
+  }
+  if (notifications.length === 0) return null;
+  const remainder = text.replace(re, "").trim();
+  return { notifications, remainder };
+}
+
+/**
+ * A background-task notification rendered like a tool call (see ToolCallBlock):
+ * a borderless one-line summary — a muted "Task" verb, a ✓/✗ status icon, the
+ * summary text, and a chevron. It IS agent activity (a background process the
+ * agent spawned finished), not a user message, so it reads like the other tool
+ * rows. Expanding reveals the raw status / output-file / ids in a bordered panel.
+ */
+function TaskNotificationBlock({ n }: { n: TaskNotification }) {
+  const [open, setOpen] = useState(false);
+  // Success = status "completed" with a zero (or absent) exit code; anything
+  // else (failed/killed, or a non-zero exit code in the summary) is a problem.
+  const exitMatch = n.summary?.match(/exit code (\d+)/);
+  const nonZeroExit = exitMatch ? exitMatch[1] !== "0" : false;
+  const ok = (n.status ?? "completed") === "completed" && !nonZeroExit;
+  // Summaries read `Background command "<cmd>" <outcome>` — the "Task" verb
+  // already says it's a background command, so drop that prefix: show the
+  // command itself, with the outcome ("completed (exit code 0)") muted grey.
+  const summary = n.summary ?? `Background task ${n.status ?? "updated"}`;
+  const cmdMatch = summary.match(/^Background command "(.+)" (.+)$/);
+  const command = cmdMatch ? cmdMatch[1] : summary;
+  const outcome = cmdMatch ? cmdMatch[2] : null;
+  const details: Array<[string, string]> = [];
+  if (n.status) details.push(["status", n.status]);
+  if (n.outputFile) details.push(["output", n.outputFile]);
+  if (n.taskId) details.push(["task", n.taskId]);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
+      >
+        <span className="shrink-0 text-[var(--text-tertiary)]">Task</span>
+        <span
+          className="min-w-0 truncate text-[var(--text-secondary)]"
+          data-find-skip=""
+        >
+          {command}
+          {outcome && (
+            <span
+              className={cn(
+                "ml-1.5",
+                ok
+                  ? "text-[var(--text-tertiary)]"
+                  : "text-[var(--removed-text,#f87171)]"
+              )}
+            >
+              {outcome}
+            </span>
+          )}
+        </span>
+        <ChevronRight open={open} />
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+        data-find-skip=""
+      >
+        <div className="overflow-hidden">
+          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2 font-[family-name:var(--font-mono)] text-[11px]">
+            {details.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="text-[var(--text-tertiary)]">{k}</dt>
+                <dd className="min-w-0 break-all text-[var(--text-secondary)]">
+                  {v}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BashBlock({
   input,
   stdout,
@@ -763,6 +896,26 @@ const MessagePartView = memo(function MessagePartView({
             stdout={bash.stdout}
             stderr={bash.stderr}
           />
+        );
+      }
+      const tasks = parseTaskNotifications(part.text);
+      if (tasks) {
+        return (
+          <div className="flex flex-col gap-1.5">
+            {tasks.notifications.map((n, i) => (
+              <TaskNotificationBlock key={n.taskId ?? i} n={n} />
+            ))}
+            {tasks.remainder && (
+              <MarkdownText
+                text={tasks.remainder}
+                messageUuid={message.uuid}
+                partIndex={partIndex}
+                partAnnotations={annotations}
+                pendingRange={pendingRange}
+                onClickAnnotation={onClickAnnotation}
+              />
+            )}
+          </div>
         );
       }
       return (
@@ -1223,18 +1376,27 @@ export const MessageList = memo(function MessageList({
   const findSegsRef = useRef<FindSeg[]>([]);
 
   // (Re)snapshot the transcript text whenever find is open and the content
-  // settles, so offsets line up with what's currently on screen.
+  // settles, so offsets line up with what's currently on screen. The snapshot
+  // walks every text node — O(DOM size) — so we DON'T run it synchronously on
+  // the keypress that opens find (that was the lag on long transcripts), and we
+  // coalesce re-walks while a session streams. A short debounce both defers the
+  // first walk off the open frame and collapses a burst of streaming updates
+  // into one rebuild; transcript updates land ~quarter-second apart, so it
+  // settles between them rather than starving.
   useEffect(() => {
     if (!find.open) {
       setFindDomText("");
       findSegsRef.current = [];
       return;
     }
-    const el = parentRef.current;
-    if (!el) return;
-    const { text, segs } = collectFindable(el);
-    findSegsRef.current = segs;
-    setFindDomText(text);
+    const id = setTimeout(() => {
+      const el = parentRef.current;
+      if (!el) return;
+      const { text, segs } = collectFindable(el);
+      findSegsRef.current = segs;
+      setFindDomText(text);
+    }, 120);
+    return () => clearTimeout(id);
   }, [find.open, items, deferredMessages]);
 
   // Paint all matches; the active one gets the stronger highlight.
@@ -1323,7 +1485,10 @@ export const MessageList = memo(function MessageList({
           // iMessage-style: user turns are a right-aligned bubble capped in
           // width; assistant turns run full-width with no bubble. Bash-mode
           // turns read as terminal output, so they go left/full-width too.
-          const isUser = !isBashMessage(m) && classify(m) === "user-real";
+          const isUser =
+            !isBashMessage(m) &&
+            !isTaskNotificationMessage(m) &&
+            classify(m) === "user-real";
           return (
             <div
               key={m.uuid || idx}
