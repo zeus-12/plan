@@ -19,6 +19,8 @@ import { useAutoModeEnabled } from "../lib/auto-mode-settings";
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Open the keyboard-shortcuts reference (a separate, focused modal). */
+  onShowShortcuts: () => void;
 }
 
 /**
@@ -26,7 +28,7 @@ interface Props {
  * the "session finished" notification: a master toggle and the chime preset.
  * Same overlay/panel shell as the sessions dashboard for visual consistency.
  */
-export function SettingsModal({ open, onClose }: Props) {
+export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [settings, update] = useNotificationSettings();
   const [autoMode, setAutoMode] = useAutoModeEnabled();
 
@@ -136,6 +138,32 @@ export function SettingsModal({ open, onClose }: Props) {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </section>
+
+          <section className="mt-6 flex flex-col gap-3">
+            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+              Keyboard shortcuts
+            </h3>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-[12px] text-[var(--text)]">
+                  View all keyboard shortcuts
+                </span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Also reachable anywhere with{" "}
+                  <code className="font-[family-name:var(--font-mono)] text-[10px]">
+                    ⌘/
+                  </code>
+                  .
+                </span>
+              </div>
+              <button
+                onClick={onShowShortcuts}
+                className="shrink-0 rounded-md border border-[var(--border)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              >
+                Show
+              </button>
             </div>
           </section>
         </div>

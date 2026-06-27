@@ -17,6 +17,9 @@ import { Toaster } from "@plan/shared/components/ui/sonner";
 import { SwitcherOverlay } from "./components/switcher-overlay";
 import { SessionsDashboard } from "./components/sessions-dashboard";
 import { SettingsModal } from "./components/settings-modal";
+import { KeyboardShortcutsModal } from "./components/keyboard-shortcuts-modal";
+import { ClaudeConfigModal } from "./components/claude-config-modal";
+import type { ClaudeConfigScope } from "../shared-types";
 import { WorktreeRail } from "./components/worktree-rail";
 import { NewWorktreeModal } from "./components/new-worktree-modal";
 import { AddReposModal } from "./components/add-repos-modal";
@@ -271,6 +274,12 @@ function Shell() {
         setSettingsOpen(true);
         return;
       }
+      // ⌘/ → the keyboard-shortcuts reference, reachable from anywhere.
+      if (e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
       // ⌘D → toggle the worktrees rail. Fires even when a text input or the
       // Lexical chat composer is focused: ⌘D types nothing, so there's no
       // conflict, and bailing on focused inputs made the shortcut feel broken.
@@ -316,6 +325,11 @@ function Shell() {
   // Sessions dashboard: a control-center for every live Claude pty.
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Claude instructions/memory viewer; the scope decides which section it opens
+  // on. Global comes from the left sidebar, project/memory from the right.
+  const [claudeConfigScope, setClaudeConfigScope] =
+    useState<ClaudeConfigScope | null>(null);
 
   // Watch every live Claude session for completion and notify globally. Started
   // once here at the app root so it covers background sessions too, not just the
@@ -404,6 +418,7 @@ function Shell() {
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenClaudeConfig={() => setClaudeConfigScope("global")}
       />
       {selected && (
         <div
@@ -475,6 +490,7 @@ function Shell() {
                 buildCommand,
               })
             }
+            onOpenClaudeConfig={() => setClaudeConfigScope("project")}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -492,7 +508,24 @@ function Shell() {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onShowShortcuts={() => {
+          // Hand off to the focused reference rather than stacking modals (which
+          // would make Esc ambiguous).
+          setSettingsOpen(false);
+          setShortcutsOpen(true);
+        }}
       />
+      <KeyboardShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
+      {claudeConfigScope && (
+        <ClaudeConfigModal
+          encoded={selectedEncoded}
+          initialScope={claudeConfigScope}
+          onClose={() => setClaudeConfigScope(null)}
+        />
+      )}
       {projectSwitcher.active && (
         <SwitcherOverlay
           title="Projects"
