@@ -6,7 +6,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
-import { FileIcon } from "./file-icon";
+import { usePersistentString } from "../lib/use-persistent-string";
+import { FileIcon, FolderIcon } from "./file-icon";
+
+type ViewMode = "list" | "tree";
+const VIEW_MODES: readonly ViewMode[] = ["list", "tree"];
 
 export interface FileEntry {
   path: string;
@@ -53,6 +57,9 @@ interface Props {
 const REPO_H = 34;
 const SECTION_H = 30;
 const FILE_H = 36;
+const FOLDER_H = 32;
+// Each tree nesting level adds this much left padding.
+const INDENT = 12;
 // Estimate only — commit rows are measured dynamically (resizable textarea).
 const COMMIT_H = 104;
 
@@ -65,7 +72,101 @@ type Row =
       group: RepoFileGroup;
       section: "staged" | "unstaged";
     }
-  | { kind: "file"; key: string; file: FileEntry };
+  | {
+      kind: "folder";
+      key: string;
+      group: RepoFileGroup;
+      section: "staged" | "unstaged";
+      /** Repo-relative directory path — passed straight to git add/restore. */
+      dirPath: string;
+      /** Display label (single-child chains compacted, e.g. "src/main"). */
+      name: string;
+      depth: number;
+      collapseKey: string;
+    }
+  | { kind: "file"; key: string; file: FileEntry; depth: number };
+
+interface DirNode {
+  name: string;
+  path: string;
+  dirs: Map<string, DirNode>;
+  files: FileEntry[];
+}
+
+function basename(p: string): string {
+  return p.split("/").pop() ?? p;
+}
+
+/**
+ * Turn a section's flat file list into VSCode-style tree rows: folders (with
+ * single-child chains compacted into one row, like `explorer.compactFolders`)
+ * then files, sorted, depth-indented. Collapsed folders hide their descendants.
+ */
+function treeRows(
+  group: RepoFileGroup,
+  section: "staged" | "unstaged",
+  files: FileEntry[],
+  repoKey: string,
+  collapsedFolders: Set<string>
+): Row[] {
+  const root: DirNode = { name: "", path: "", dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.path.split("/");
+    parts.pop(); // drop the filename — only the directory chain builds nodes
+    let node = root;
+    let acc = "";
+    for (const part of parts) {
+      acc = acc ? `${acc}/${part}` : part;
+      let child = node.dirs.get(part);
+      if (!child) {
+        child = { name: part, path: acc, dirs: new Map(), files: [] };
+        node.dirs.set(part, child);
+      }
+      node = child;
+    }
+    node.files.push(f);
+  }
+
+  const out: Row[] = [];
+  const emit = (node: DirNode, depth: number) => {
+    const dirNames = [...node.dirs.keys()].sort((a, b) => a.localeCompare(b));
+    for (const dn of dirNames) {
+      let child = node.dirs.get(dn)!;
+      let name = child.name;
+      // Compact a chain of single-child folders: a → b → c shows as "a/b/c".
+      while (child.dirs.size === 1 && child.files.length === 0) {
+        const only = [...child.dirs.values()][0];
+        name = `${name}/${only.name}`;
+        child = only;
+      }
+      const collapseKey = `${repoKey}::${section}::dir::${child.path}`;
+      out.push({
+        kind: "folder",
+        key: `fold:${collapseKey}`,
+        group,
+        section,
+        dirPath: child.path,
+        name,
+        depth,
+        collapseKey,
+      });
+      if (!collapsedFolders.has(collapseKey)) emit(child, depth + 1);
+    }
+    const sorted = [...node.files].sort((a, b) =>
+      basename(a.path).localeCompare(basename(b.path))
+    );
+    for (const f of sorted) {
+      out.push({
+        kind: "file",
+        key: `file:${repoKey}:${section}:${f.path}`,
+        file: f,
+        depth,
+      });
+    }
+  };
+  emit(root, 0);
+  return out;
+}
 
 function statusColor(letter: FileEntry["letter"]) {
   switch (letter) {
@@ -86,14 +187,22 @@ function displayLetter(letter: FileEntry["letter"]): string {
 
 function Chevron({ open }: { open: boolean }) {
   return (
-    <span
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className={cn(
-        "inline-block shrink-0 text-[9px] text-[var(--text-tertiary)] transition-transform",
+        "shrink-0 text-[var(--text-tertiary)] transition-transform",
         open && "rotate-90"
       )}
     >
-      ▶
-    </span>
+      <polyline points="9 6 15 12 9 18" />
+    </svg>
   );
 }
 
@@ -146,6 +255,70 @@ function StashIcon() {
       <rect x="1" y="3" width="22" height="5" />
       <line x1="10" y1="12" x2="14" y2="12" />
     </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg {...svgProps()}>
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+function TreeIcon() {
+  // list-tree
+  return (
+    <svg {...svgProps()}>
+      <path d="M21 12h-8" />
+      <path d="M21 6H8" />
+      <path d="M21 18h-8" />
+      <path d="M3 6v4c0 1.1.9 2 2 2h3" />
+      <path d="M3 10v6c0 1.1.9 2 2 2h3" />
+    </svg>
+  );
+}
+
+/** Compact two-button segmented control switching the file list view mode. */
+function ViewModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: ViewMode;
+  onChange: (m: ViewMode) => void;
+}) {
+  const seg = (m: ViewMode, label: string, icon: React.ReactNode) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(m);
+          }}
+          aria-label={label}
+          aria-pressed={mode === m}
+          className={cn(
+            "flex h-[18px] w-[22px] items-center justify-center rounded-[4px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]",
+            mode === m
+              ? "bg-[var(--bg-surface-hover)] text-[var(--text)] shadow-sm"
+              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+          )}
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  );
+  return (
+    <div className="mr-1 flex items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--bg)] p-0.5">
+      {seg("list", "View as list", <ListIcon />)}
+      {seg("tree", "View as tree", <TreeIcon />)}
+    </div>
   );
 }
 
@@ -238,6 +411,14 @@ export function FileList({
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
     new Set()
   );
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
+    new Set()
+  );
+  const [viewMode, setViewMode] = usePersistentString<ViewMode>(
+    "plan.diffs.viewMode",
+    "list",
+    VIEW_MODES
+  );
 
   const nonEmpty = useMemo(
     () => groups.filter((g) => g.staged.length + g.unstaged.length > 0),
@@ -263,19 +444,32 @@ export function FileList({
         const sKey = `${repoKey}::${section}`;
         out.push({ kind: "section", key: `sec:${sKey}`, group: g, section });
         if (collapsedSections.has(sKey)) return;
-        for (const f of files) {
-          out.push({
-            kind: "file",
-            key: `file:${repoKey}:${section}:${f.path}`,
-            file: f,
-          });
+        if (viewMode === "tree") {
+          out.push(...treeRows(g, section, files, repoKey, collapsedFolders));
+        } else {
+          for (const f of files) {
+            out.push({
+              kind: "file",
+              key: `file:${repoKey}:${section}:${f.path}`,
+              file: f,
+              depth: 0,
+            });
+          }
         }
       };
       pushSection("staged", g.staged);
       pushSection("unstaged", g.unstaged);
     }
     return out;
-  }, [nonEmpty, multiRepo, hasCommit, collapsedRepos, collapsedSections]);
+  }, [
+    nonEmpty,
+    multiRepo,
+    hasCommit,
+    collapsedRepos,
+    collapsedSections,
+    collapsedFolders,
+    viewMode,
+  ]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -290,6 +484,7 @@ export function FileList({
       if (r.kind === "repo") return REPO_H;
       if (r.kind === "commit") return COMMIT_H;
       if (r.kind === "section") return SECTION_H;
+      if (r.kind === "folder") return FOLDER_H;
       return FILE_H;
     },
     overscan: 12,
@@ -311,6 +506,12 @@ export function FileList({
     });
   const toggleSection = (key: string) =>
     setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  const toggleFolder = (key: string) =>
+    setCollapsedFolders((prev) => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
@@ -397,6 +598,7 @@ export function FileList({
                   <span>{files.length}</span>
                 </button>
                 <div className="flex shrink-0 items-center gap-0.5 pl-2">
+                  <ViewModeToggle mode={viewMode} onChange={setViewMode} />
                   {isStaged ? (
                     <SectionIconButton
                       icon={<MinusIcon />}
@@ -429,6 +631,53 @@ export function FileList({
             );
           }
 
+          if (row.kind === "folder") {
+            const open = !collapsedFolders.has(row.collapseKey);
+            const isStaged = row.section === "staged";
+            return (
+              <div
+                key={row.key}
+                style={style}
+                className="group/folder flex items-center border-l-2 border-l-transparent transition-colors hover:bg-[var(--bg-surface-hover)]"
+              >
+                <button
+                  onClick={() => toggleFolder(row.collapseKey)}
+                  title={row.dirPath}
+                  style={{ paddingLeft: INDENT + row.depth * INDENT }}
+                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 pr-2 text-left"
+                >
+                  <Chevron open={open} />
+                  <FolderIcon open={open} />
+                  <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)]">
+                    {row.name}
+                  </span>
+                </button>
+                <div className="flex items-center gap-0.5 pl-1.5 pr-2 opacity-0 transition-opacity group-hover/folder:opacity-100">
+                  {isStaged ? (
+                    <ActionButton
+                      icon={<MinusIcon />}
+                      title="Unstage folder"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUnstage(row.dirPath, row.group.subPath);
+                      }}
+                    />
+                  ) : (
+                    <ActionButton
+                      icon={<PlusIcon />}
+                      title="Stage folder"
+                      accent
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStage(row.dirPath, row.group.subPath);
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           const file = row.file;
           const isSelected =
             selected?.subPath === file.subPath &&
@@ -438,7 +687,7 @@ export function FileList({
             ? `${file.subPath}/${file.path}`
             : file.path;
           const isActive = !isSelected && projPath === activeFilePath;
-          const basename = file.path.split("/").pop() ?? file.path;
+          const fileBasename = basename(file.path);
           const dirname = file.path.includes("/")
             ? file.path.slice(0, file.path.lastIndexOf("/"))
             : "";
@@ -458,13 +707,14 @@ export function FileList({
               <button
                 onClick={() => onSelect(file.subPath, file.path, file.staged)}
                 title={file.subPath ? `${file.subPath}/${file.path}` : file.path}
-                className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 pr-2 text-left"
+                style={{ paddingLeft: INDENT + row.depth * INDENT }}
+                className="flex h-full min-w-0 flex-1 items-center gap-2 pr-2 text-left"
               >
-                <FileIcon name={basename} />
+                <FileIcon name={fileBasename} />
                 <span className="min-w-0 shrink truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
-                  {basename}
+                  {fileBasename}
                 </span>
-                {dirname && (
+                {viewMode === "list" && dirname && (
                   <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                     {dirname}
                   </span>
