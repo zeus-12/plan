@@ -207,7 +207,13 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
     node?.scrollIntoView({ block: "nearest" });
   }, [open]);
 
-  useEffect(() => () => cancelClose(), [cancelClose]);
+  useEffect(
+    () => () => {
+      cancelClose();
+      cancelOpen();
+    },
+    [cancelClose, cancelOpen]
+  );
 
   const count = userMessages.length;
   const activeIndex = useMemo(() => {
@@ -233,9 +239,12 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
       className="absolute right-3 top-3 z-20"
       onMouseEnter={() => {
         cancelClose();
-        setOpen(true);
+        scheduleOpen();
       }}
-      onMouseLeave={scheduleClose}
+      onMouseLeave={() => {
+        cancelOpen();
+        scheduleClose();
+      }}
     >
       {/* Collapsed minimap: one equal-width line per message. */}
       <div className="flex w-[26px] flex-col items-stretch gap-[3px] rounded-md p-1.5">
