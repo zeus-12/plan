@@ -1,4 +1,7 @@
 import {
+  lazy,
+  startTransition,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -15,17 +18,52 @@ import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
 import { Toaster } from "@plan/shared/components/ui/sonner";
 import { SwitcherOverlay } from "./components/switcher-overlay";
-import { SessionsDashboard } from "./components/sessions-dashboard";
-import { SettingsModal } from "./components/settings-modal";
-import { KeyboardShortcutsModal } from "./components/keyboard-shortcuts-modal";
-import { ClaudeConfigModal } from "./components/claude-config-modal";
 import type { ClaudeConfigScope } from "../shared-types";
 import { WorktreeRail } from "./components/worktree-rail";
-import { NewWorktreeModal } from "./components/new-worktree-modal";
-import { AddReposModal } from "./components/add-repos-modal";
-import { CreatePrModal } from "./components/create-pr-modal";
-import { ProjectDefaultsModal } from "./components/project-defaults-modal";
 import { UpdateBanner } from "./components/update-banner";
+
+// Modals are only mounted when opened, so lazy-load them — keeps their code
+// (and deps) out of the initial bundle and off the cold-start critical path.
+const SessionsDashboard = lazy(() =>
+  import("./components/sessions-dashboard").then((m) => ({
+    default: m.SessionsDashboard,
+  })),
+);
+const SettingsModal = lazy(() =>
+  import("./components/settings-modal").then((m) => ({
+    default: m.SettingsModal,
+  })),
+);
+const KeyboardShortcutsModal = lazy(() =>
+  import("./components/keyboard-shortcuts-modal").then((m) => ({
+    default: m.KeyboardShortcutsModal,
+  })),
+);
+const ClaudeConfigModal = lazy(() =>
+  import("./components/claude-config-modal").then((m) => ({
+    default: m.ClaudeConfigModal,
+  })),
+);
+const NewWorktreeModal = lazy(() =>
+  import("./components/new-worktree-modal").then((m) => ({
+    default: m.NewWorktreeModal,
+  })),
+);
+const AddReposModal = lazy(() =>
+  import("./components/add-repos-modal").then((m) => ({
+    default: m.AddReposModal,
+  })),
+);
+const CreatePrModal = lazy(() =>
+  import("./components/create-pr-modal").then((m) => ({
+    default: m.CreatePrModal,
+  })),
+);
+const ProjectDefaultsModal = lazy(() =>
+  import("./components/project-defaults-modal").then((m) => ({
+    default: m.ProjectDefaultsModal,
+  })),
+);
 import { useConfirm } from "./components/confirm-dialog";
 import { useWorktrees } from "./lib/use-worktrees";
 import { usePersistentNumber } from "./lib/use-persistent-number";
@@ -357,7 +395,7 @@ function Shell() {
       // to the tabs store, so it works whether that worktree is already mounted
       // (the store emit re-renders it) or not (it's read on mount).
       openProjectTab(encoded, makeChatTab(sessionId));
-      setSelectedEncoded(encoded);
+      selectProject(encoded);
       setDashboardOpen(false);
     },
     [],
@@ -395,6 +433,16 @@ function Shell() {
   useEffect(() => {
     if (selectedEncoded) recordUse("projects", selectedEncoded);
   }, [selectedEncoded]);
+
+  // Switching projects remounts the whole workspace (keyed by encoded) and
+  // mounts the target's tabs — a big file's viewer, terminals, etc. Mark it a
+  // transition so React renders the new workspace concurrently: the current
+  // project stays interactive instead of the window freezing until the new one
+  // is ready (the "Cmd+` hangs / had to alt-tab" symptom).
+  const selectProject = useCallback((encoded: string | null) => {
+    startTransition(() => setSelectedEncoded(encoded));
+  }, []);
+
   const projectIndex = Math.max(
     0,
     projectsByMru.findIndex((p) => p.encoded === selectedEncoded),
@@ -405,7 +453,7 @@ function Shell() {
     triggerCode: "Backquote",
     items: projectsByMru,
     currentIndex: projectIndex,
-    onCommit: (p) => setSelectedEncoded(p.encoded),
+    onCommit: (p) => selectProject(p.encoded),
   });
 
   return (
@@ -418,7 +466,7 @@ function Shell() {
         projects={projects}
         reposByProject={reposByProject}
         selected={selectedEncoded}
-        onSelect={setSelectedEncoded}
+        onSelect={selectProject}
         onAddProject={handleAddProject}
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
@@ -482,7 +530,7 @@ function Shell() {
             repos={effectiveRepos}
             projectsSidebarOpen={projectsSidebar.open}
             projects={projects}
-            onSelectProject={setSelectedEncoded}
+            onSelectProject={selectProject}
             // Run command is project-level: keyed by the parent project's
             // defaults, so every worktree of this project shares it.
             runCommand={worktrees.defaults.runCommand}
@@ -504,32 +552,74 @@ function Shell() {
           </div>
         )}
       </main>
-      <SessionsDashboard
-        open={dashboardOpen}
-        onClose={() => setDashboardOpen(false)}
-        onNavigate={navigateToSession}
-      />
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onShowShortcuts={() => {
-          // Hand off to the focused reference rather than stacking modals (which
-          // would make Esc ambiguous).
-          setSettingsOpen(false);
-          setShortcutsOpen(true);
-        }}
-      />
-      <KeyboardShortcutsModal
-        open={shortcutsOpen}
-        onClose={() => setShortcutsOpen(false)}
-      />
-      {claudeConfigScope && (
-        <ClaudeConfigModal
-          encoded={selectedEncoded}
-          initialScope={claudeConfigScope}
-          onClose={() => setClaudeConfigScope(null)}
-        />
-      )}
+      <Suspense fallback={null}>
+        {dashboardOpen && (
+          <SessionsDashboard
+            open
+            onClose={() => setDashboardOpen(false)}
+            onNavigate={navigateToSession}
+          />
+        )}
+        {settingsOpen && (
+          <SettingsModal
+            open
+            onClose={() => setSettingsOpen(false)}
+            onShowShortcuts={() => {
+              // Hand off to the focused reference rather than stacking modals
+              // (which would make Esc ambiguous).
+              setSettingsOpen(false);
+              setShortcutsOpen(true);
+            }}
+          />
+        )}
+        {shortcutsOpen && (
+          <KeyboardShortcutsModal
+            open
+            onClose={() => setShortcutsOpen(false)}
+          />
+        )}
+        {claudeConfigScope && (
+          <ClaudeConfigModal
+            encoded={selectedEncoded}
+            initialScope={claudeConfigScope}
+            onClose={() => setClaudeConfigScope(null)}
+          />
+        )}
+        {showNewWorktree && selected && (
+          <NewWorktreeModal
+            defaults={worktrees.defaults}
+            projectEncoded={selected.encoded}
+            onCreate={async (input) => {
+              const rec = await worktrees.create(input);
+              setActiveWorktreeId(rec.id);
+            }}
+            onClose={() => setShowNewWorktree(false)}
+          />
+        )}
+        {prWorktree && (
+          <CreatePrModal
+            worktree={prWorktree}
+            onCreate={(input) => worktrees.createPr(prWorktree.id, input)}
+            onClose={() => setPrWorktreeId(null)}
+          />
+        )}
+        {addReposWorktree && selected && (
+          <AddReposModal
+            worktree={addReposWorktree}
+            projectEncoded={selected.encoded}
+            onAdd={(input) => worktrees.addRepos(addReposWorktree.id, input)}
+            onClose={() => setAddReposWorktreeId(null)}
+          />
+        )}
+        {showDefaults && selected && (
+          <ProjectDefaultsModal
+            encoded={selected.encoded}
+            defaults={worktrees.defaults}
+            onSave={worktrees.saveDefaults}
+            onClose={() => setShowDefaults(false)}
+          />
+        )}
+      </Suspense>
       {projectSwitcher.active && (
         <SwitcherOverlay
           title="Projects"
@@ -550,40 +640,6 @@ function Shell() {
             label: it.label,
             sub: it.id ? "worktree" : "working copy",
           }))}
-        />
-      )}
-      {showNewWorktree && selected && (
-        <NewWorktreeModal
-          defaults={worktrees.defaults}
-          projectEncoded={selected.encoded}
-          onCreate={async (input) => {
-            const rec = await worktrees.create(input);
-            setActiveWorktreeId(rec.id);
-          }}
-          onClose={() => setShowNewWorktree(false)}
-        />
-      )}
-      {prWorktree && (
-        <CreatePrModal
-          worktree={prWorktree}
-          onCreate={(input) => worktrees.createPr(prWorktree.id, input)}
-          onClose={() => setPrWorktreeId(null)}
-        />
-      )}
-      {addReposWorktree && selected && (
-        <AddReposModal
-          worktree={addReposWorktree}
-          projectEncoded={selected.encoded}
-          onAdd={(input) => worktrees.addRepos(addReposWorktree.id, input)}
-          onClose={() => setAddReposWorktreeId(null)}
-        />
-      )}
-      {showDefaults && selected && (
-        <ProjectDefaultsModal
-          encoded={selected.encoded}
-          defaults={worktrees.defaults}
-          onSave={worktrees.saveDefaults}
-          onClose={() => setShowDefaults(false)}
         />
       )}
       {confirmDialog}

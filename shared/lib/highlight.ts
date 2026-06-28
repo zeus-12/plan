@@ -63,7 +63,15 @@ export const LANGUAGES: LanguageOption[] = [
  * fall back to lowlight (with PHP and other rarely-correct guesses excluded)
  * when the heuristics are inconclusive.
  */
-const lowlight = createLowlight(common);
+// Lazily created: `createLowlight(common)` registers ~35 highlight.js grammars,
+// which is real startup work. It's only needed as a last-resort fallback in
+// detectLanguage (most callers pass a known language or hit the heuristics
+// first), so defer it until the first time auto-detection actually falls through.
+let lowlightInstance: ReturnType<typeof createLowlight> | null = null;
+function getLowlight(): ReturnType<typeof createLowlight> {
+  if (!lowlightInstance) lowlightInstance = createLowlight(common);
+  return lowlightInstance;
+}
 
 interface Signal {
   re: RegExp;
@@ -222,6 +230,7 @@ export function detectLanguage(value: string): string {
   // ── Fallback: lowlight, but exclude languages it tends to
   //    false-positive on (php/xml) so we don't repeat the bug. ─
   try {
+    const lowlight = getLowlight();
     const known = new Set(lowlight.listLanguages());
     const subset = [
       "typescript",

@@ -43,7 +43,11 @@ import {
   stopWorktreeWatch,
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
-import { readSessionFile, type ParsedSession } from "./jsonl-parser";
+import {
+  readSessionFile,
+  readSessionMeta,
+  type ParsedSession,
+} from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
 import { getFileImageDiff } from "./file-media";
@@ -338,15 +342,20 @@ async function sessionMeta(filePath: string, mtimeMs: number) {
   if (cached && cached.mtimeMs === mtimeMs) return cached;
   let meta;
   try {
-    const parsed = await readSessionFile(filePath);
+    // Incremental: parses only the bytes appended since the last call, so the
+    // actively-streaming session's growing file isn't fully re-parsed on every
+    // watcher tick — just the few new lines.
+    const lite = await readSessionMeta(filePath);
     meta = {
       mtimeMs,
-      title: parsed.meta.title ?? null,
-      messageCount: parsed.meta.messageCount ?? 0,
-      updatedAt: parsed.meta.updatedAt ?? mtimeMs,
+      title: lite.title ?? null,
+      messageCount: lite.messageCount ?? 0,
+      updatedAt: lite.updatedAt ?? mtimeMs,
     };
   } catch {
-    meta = { mtimeMs, title: null, messageCount: 0, updatedAt: mtimeMs };
+    meta = cached
+      ? { ...cached, mtimeMs }
+      : { mtimeMs, title: null, messageCount: 0, updatedAt: mtimeMs };
   }
   sessionMetaCache.set(filePath, meta);
   return meta;

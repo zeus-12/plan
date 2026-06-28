@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { THEMES, useTheme, type Theme } from "@plan/shared/components/theme-provider";
+import { useTheme } from "@plan/shared/components/theme-provider";
+import { swatchFor } from "@plan/shared/lib/themes";
 import { Button } from "@plan/shared/components/ui/button";
 import { cn } from "@plan/shared/lib/utils";
-
-/** Each theme's --bg, for the little preview swatch. */
-const SWATCH: Record<Theme, string> = {
-  "soft-dark": "#1b1c20",
-  "soft-light": "#f3f1ec",
-  "pierre-dark-soft": "#171717",
-};
 
 function SunIcon() {
   return (
@@ -67,7 +61,7 @@ function CheckIcon() {
 
 /** Theme picker: the header's sun/moon button, now opening a theme list. */
 export function ThemeMenu() {
-  const { theme, isDark, setTheme } = useTheme();
+  const { theme, isDark, setTheme, themes } = useTheme();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -100,7 +94,7 @@ export function ThemeMenu() {
       </Button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-[var(--popover-border)] bg-[var(--popover-bg)] p-1 shadow-lg">
-          {THEMES.map((t) => (
+          {themes.map((t) => (
             <button
               key={t.id}
               onClick={() => {
@@ -117,7 +111,7 @@ export function ThemeMenu() {
               <span className="flex items-center gap-2">
                 <span
                   className="h-3 w-3 shrink-0 rounded-full border border-[var(--border-strong)]"
-                  style={{ background: SWATCH[t.id] }}
+                  style={{ background: swatchFor(t) }}
                 />
                 {t.label}
               </span>

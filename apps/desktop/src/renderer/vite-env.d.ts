@@ -7,3 +7,13 @@ interface ImportMeta {
     options?: { eager?: boolean; query?: string; import?: string }
   ): Record<string, unknown>;
 }
+
+// Vite asset imports with explicit query suffixes resolve to a URL / raw text.
+declare module "*?url" {
+  const url: string;
+  export default url;
+}
+declare module "*?raw" {
+  const source: string;
+  export default source;
+}

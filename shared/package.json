@@ -5,6 +5,9 @@
   "exports": {
     "./components/*": "./components/*.tsx",
     "./lib/*": "./lib/*.ts",
+    "./code-folding": "./code-folding/index.ts",
+    "./code-folding/*": "./code-folding/*.ts",
+    "./themes/*": "./themes/*",
     "./globals.css": "./globals.css",
     "./highlight.css": "./highlight.css"
   },

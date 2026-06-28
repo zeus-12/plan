@@ -62,6 +62,7 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   const [open, setOpen] = useState(false);
   const [activeUuid, setActiveUuid] = useState<string | null>(null);
   const closeTimer = useRef<number | null>(null);
+  const openTimer = useRef<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const lastScrollTopRef = useRef(0);
@@ -159,10 +160,29 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
     }
   }, []);
 
+  const cancelOpen = useCallback(() => {
+    if (openTimer.current !== null) {
+      clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+  }, []);
+
   const scheduleClose = useCallback(() => {
     cancelClose();
     closeTimer.current = window.setTimeout(() => setOpen(false), 120);
   }, [cancelClose]);
+
+  // Require the cursor to dwell on the strip before revealing the popover, so a
+  // quick pass-through (e.g. moving from the chat to the side tab) doesn't
+  // trigger it. An already-open popover reopens instantly.
+  const scheduleOpen = useCallback(() => {
+    cancelOpen();
+    if (open) {
+      setOpen(true);
+      return;
+    }
+    openTimer.current = window.setTimeout(() => setOpen(true), 220);
+  }, [cancelOpen, open]);
 
   // Cap the popover to the space between the strip and the bottom of the
   // viewport so a long list scrolls internally instead of spilling past the

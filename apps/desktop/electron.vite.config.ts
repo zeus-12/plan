@@ -19,5 +19,9 @@ export default defineConfig({
     css: {
       postcss: resolve(__dirname, "postcss.config.mjs"),
     },
+    build: {
+      // Electron ships a modern Chromium, so skip legacy transpilation/polyfills.
+      target: "esnext",
+    },
   },
 });

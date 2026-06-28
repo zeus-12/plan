@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
 import { ThemeProvider } from "@plan/shared/components/theme-provider";
+import { THEMES } from "@/lib/themes";
 import "./globals.css";
 import "@plan/shared/highlight.css";
 
@@ -27,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${sans.variable} ${mono.variable} antialiased`}>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider themes={THEMES}>{children}</ThemeProvider>
       </body>
     </html>
   );

@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -6,16 +7,24 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   highlightPerLine,
   languageFromPath,
+  SYNC_HIGHLIGHT_MAX_CHARS,
   useActiveShikiTheme,
   useShikiReady,
   type SyntaxToken,
 } from "@plan/shared/lib/highlight";
+import {
+  collapsedRangesContaining,
+  foldRangeMap,
+  hiddenLineSet,
+} from "@plan/shared/lib/folding";
+import { useFoldEngine, useFolds } from "@plan/shared/code-folding";
 import type { Annotation } from "@plan/shared/lib/store";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
@@ -28,6 +37,42 @@ import { useWorktreeRevision } from "../lib/worktree-revision";
 
 const LINE_HEIGHT = 20;
 const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
+/** Most nested scope headers to pin in the sticky-scroll overlay. */
+const STICKY_MAX = 8;
+
+/* ── Sticky-scroll setting (shared across all file viewers, persisted) ──── */
+
+const STICKY_KEY = "fileViewer.stickyScroll";
+let stickyScrollOn = (() => {
+  try {
+    return localStorage.getItem(STICKY_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+const stickyListeners = new Set<() => void>();
+
+function setStickyScrollEnabled(on: boolean) {
+  stickyScrollOn = on;
+  try {
+    localStorage.setItem(STICKY_KEY, on ? "1" : "0");
+  } catch {
+    /* ignore storage failures */
+  }
+  stickyListeners.forEach((l) => l());
+}
+
+/** Whether sticky scroll is on, reactive across every mounted file viewer. */
+function useStickyScrollEnabled(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      stickyListeners.add(cb);
+      return () => stickyListeners.delete(cb);
+    },
+    () => stickyScrollOn,
+    () => stickyScrollOn
+  );
+}
 // Stable empty token array — `perLine[i]` resolving to undefined renders plain.
 const EMPTY_PER_LINE: SyntaxToken[][] = [];
 const POPOVER_VIEWPORT_PAD = 380;
@@ -129,6 +174,29 @@ function basename(p: string): string {
   return i === -1 ? p : p.slice(i + 1);
 }
 
+/** Fold toggle: a chevron that points down when open, right when collapsed. */
+function FoldChevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        transform: collapsed ? "rotate(-90deg)" : "none",
+        transition: "transform 120ms",
+      }}
+      aria-hidden
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 /**
  * Render one line, merging syntax tokens with character-precise highlight
  * ranges. Highlights tint only the selected characters (not the whole row), so
@@ -204,7 +272,13 @@ function lineNodes(
   return <>{parts}</>;
 }
 
-export function FileViewer({
+// Memoized: every open file tab stays mounted (hidden via CSS) so its scroll
+// and parsed/highlighted content survive tab switches. Without this, one
+// ProjectWorkspace re-render re-rendered every mounted file viewer — the large-
+// file cost that made clicking anything lag when several tabs were open.
+export const FileViewer = memo(FileViewerImpl);
+
+function FileViewerImpl({
   encoded,
   path,
   annotations,
@@ -225,6 +299,14 @@ export function FileViewer({
   const [revealRange, setRevealRange] = useState<{ s: number; e: number } | null>(
     null,
   );
+  // Start lines of the regions the user has collapsed (VS Code-style folding).
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  // A line to scroll to once the layout reflects any fold changes (reveal/find).
+  const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
+  // Sticky scroll: pin enclosing scope headers at the top as you scroll.
+  const stickyEnabled = useStickyScrollEnabled();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -284,13 +366,91 @@ export function FileViewer({
   const find = useTextFind(text);
   const [findReveal, setFindReveal] = useState(0);
   const lines = useMemo(() => text.split("\n"), [text]);
-  // Tokenizing a whole file is a synchronous main-thread cost that, on the
-  // urgent (switch) render, froze the pane until shiki finished. Defer it: the
-  // file paints instantly as plain text, then a low-priority render fills in
-  // colors. `highlightStale` keeps stale tokens (from the previous file) off
-  // the new lines during the one frame the deferred value lags behind.
+
+  /* ── Code folding ─────────────────────────────────────────────── */
+
+  // Fold ranges come from the active engine (indentation by default; the desktop
+  // app can provide the tree-sitter engine via FoldEngineProvider). useFolds
+  // handles sync (indentation) and async (worker-parsed) engines uniformly.
+  const foldEngine = useFoldEngine();
+  const foldRanges = useFolds(foldEngine, text, language);
+  const foldByStart = useMemo(() => foldRangeMap(foldRanges), [foldRanges]);
+  // Drop any collapsed start that no longer begins a region (file changed under
+  // a fold) so stale entries can't hide lines that are no longer part of it.
+  const liveCollapsed = useMemo(() => {
+    let changed = false;
+    const next = new Set<number>();
+    for (const s of collapsed) {
+      if (foldByStart.has(s)) next.add(s);
+      else changed = true;
+    }
+    return changed ? next : collapsed;
+  }, [collapsed, foldByStart]);
+  const hiddenLines = useMemo(
+    () => hiddenLineSet(liveCollapsed, foldByStart),
+    [liveCollapsed, foldByStart]
+  );
+  // The line indices actually rendered, in order, and the reverse lookup from a
+  // line index to its position in that list (-1 when the line is folded away).
+  const visibleLineIndices = useMemo(() => {
+    if (hiddenLines.size === 0)
+      return Array.from({ length: lines.length }, (_, i) => i);
+    const out: number[] = [];
+    for (let i = 0; i < lines.length; i++) if (!hiddenLines.has(i)) out.push(i);
+    return out;
+  }, [lines.length, hiddenLines]);
+  const posOfLine = useMemo(() => {
+    const arr = new Int32Array(lines.length).fill(-1);
+    for (let p = 0; p < visibleLineIndices.length; p++) {
+      arr[visibleLineIndices[p]] = p;
+    }
+    return arr;
+  }, [visibleLineIndices, lines.length]);
+
+  // Close the view-settings popover on any outside click.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!settingsRef.current?.contains(e.target as Node)) setSettingsOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [settingsOpen]);
+
+  const toggleFold = useCallback((startLine: number) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(startLine)) next.delete(startLine);
+      else next.add(startLine);
+      return next;
+    });
+  }, []);
+
+  // Open any collapsed regions hiding `line`, then queue a scroll to it once the
+  // re-render has restored the line to the visible set.
+  const revealLine = useCallback(
+    (line: number) => {
+      const toOpen = collapsedRangesContaining(line, liveCollapsed, foldByStart);
+      if (toOpen.length) {
+        setCollapsed((prev) => {
+          const next = new Set(prev);
+          for (const s of toOpen) next.delete(s);
+          return next;
+        });
+      }
+      setPendingScrollLine(line);
+    },
+    [liveCollapsed, foldByStart]
+  );
+  // Tokenizing a whole file is a synchronous main-thread cost. For small/medium
+  // files it's sub-frame, so we tokenize on the urgent (switch) render and the
+  // file opens already colored — no flash of plain text. Only large files defer:
+  // they paint instantly as plain text, then a low-priority render fills in
+  // colors so a huge file never freezes the pane. `highlightStale` keeps stale
+  // tokens (from the previous file) off the new lines during the lagging frame.
   const deferredText = useDeferredValue(text);
-  const highlightStale = deferredText !== text;
+  const highlightStale =
+    text.length > SYNC_HIGHLIGHT_MAX_CHARS && deferredText !== text;
   const perLine = useMemo(
     () =>
       data && !data.binary && !highlightStale
@@ -334,13 +494,19 @@ export function FileViewer({
     [lineStarts]
   );
 
+  // The caret overlay is a single full-height textarea holding the whole file,
+  // so its lines must stay pixel-aligned with the rendered layer. Folding hides
+  // lines from the rendered layer (which the textarea can't mirror), so we
+  // suspend the overlay whenever anything is collapsed and fall back to the
+  // read-only DOM-selection path; it returns once everything is expanded.
   const editorMode =
     ENABLE_EDITOR_CARET &&
     status === "ok" &&
     !isImage &&
     !!data &&
     !data.binary &&
-    lines.length <= EDITOR_MAX_LINES;
+    lines.length <= EDITOR_MAX_LINES &&
+    liveCollapsed.size === 0;
 
   // The comment anchored at each line's first row (for the gutter marker).
   const firstOf = useMemo(() => {
@@ -364,7 +530,9 @@ export function FileViewer({
   }, [shikiReady, status]);
 
   const gutterCh = Math.max(2, String(lines.length).length) + 1;
-  const gutterChCount = gutterCh + 2; // matches the gutter span's `ch` width
+  // +3 reserves room on the right of the number for the fold chevron, so the
+  // toggle sits clear of the line number rather than crowding it.
+  const gutterChCount = gutterCh + 3; // matches the gutter span's `ch` width
   const gutterWidthPx = gutterChCount * charWidth;
 
   /* ── Editor (textarea) selection state ────────────────────────── */
@@ -379,9 +547,10 @@ export function FileViewer({
   >(null);
 
   useEffect(() => {
-    // Reset selection when the open file changes.
+    // Reset selection and any folds when the open file changes.
     setEditorSel(null);
     setEditorPopover(null);
+    setCollapsed(new Set());
   }, [encoded, path]);
 
   const caretPopoverPos = useCallback(
@@ -612,11 +781,43 @@ export function FileViewer({
   );
 
   const virtualizer = useVirtualizer({
-    count: lines.length,
+    count: visibleLineIndices.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => LINE_HEIGHT,
     overscan: 30,
   });
+
+  // Sticky scope headers: the fold regions enclosing the topmost visible line
+  // whose own start has already scrolled above the viewport. Outermost-first,
+  // capped at STICKY_MAX. Driven by the virtualizer's own scroll offset (it
+  // re-renders on scroll), so the pin tracks the rows with no separate listener
+  // or lag. Reuses the very fold ranges the gutter chevrons use.
+  const scrollOffset = virtualizer.scrollOffset ?? 0;
+  const stickyHeaders = useMemo(() => {
+    if (!stickyEnabled || foldRanges.length === 0) return [];
+    const topPos = Math.floor(scrollOffset / LINE_HEIGHT);
+    // Build the stack slot by slot. Slot d sits at viewport y = d·LINE_HEIGHT,
+    // i.e. over the line `topPos + d`. A scope fills slot d when it encloses that
+    // line — so a deeper scope joins the moment its header reaches the BOTTOM of
+    // the stack accumulated so far, not when it reaches the top of the viewport.
+    const headers: number[] = [];
+    for (let d = 0; d < STICKY_MAX; d++) {
+      const refLine = visibleLineIndices[topPos + d];
+      if (refLine == null) break;
+      const chain = foldRanges
+        .filter(
+          (r) =>
+            r.start <= refLine && r.end >= refLine && !hiddenLines.has(r.start)
+        )
+        .sort((a, b) => a.start - b.start);
+      const next = chain[d];
+      if (!next) break;
+      // Strictly increasing nesting — stop if the chain shallowed out.
+      if (headers.length && next.start <= headers[headers.length - 1]) break;
+      headers.push(next.start);
+    }
+    return headers;
+  }, [stickyEnabled, foldRanges, scrollOffset, visibleLineIndices, hiddenLines]);
 
   // Jump to + highlight a Search-tab hit. Re-runs on `nonce` so re-clicking the
   // same line scrolls again. Waits for the file to load before scrolling.
@@ -641,9 +842,22 @@ export function FileViewer({
         setEditorSel({ start: caret, end: caret });
       }
     }
-    virtualizer.scrollToIndex(idx, { align: "center" });
+    // Unfold any region hiding the target, then scroll once it's back in view.
+    revealLine(idx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealNonce, status]);
+
+  // Run a queued reveal scroll once `visibleLineIndices` reflects the unfold, so
+  // the target row exists in the virtualizer before we scroll to it.
+  useEffect(() => {
+    if (pendingScrollLine == null) return;
+    const pos = posOfLine[pendingScrollLine];
+    if (pos >= 0) {
+      virtualizer.scrollToIndex(pos, { align: "center" });
+      setPendingScrollLine(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingScrollLine, visibleLineIndices]);
 
   // ⌘F opens the find widget for the visible file, seeded with any selection.
   const searchable = status === "ok" && !isImage && !!data && !data.binary;
@@ -673,7 +887,7 @@ export function FileViewer({
     if (!find.open || find.current < 0) return;
     const m = find.matches[find.current];
     if (!m) return;
-    virtualizer.scrollToIndex(lineOfOffset(m.start), { align: "center" });
+    revealLine(lineOfOffset(m.start));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [find.open, find.current, find.matches]);
 
@@ -716,11 +930,14 @@ export function FileViewer({
 
   /* ── Gutter cell (line number + comment marker) ──────────────── */
 
-  function gutterCell(lineNo: number) {
+  function gutterCell(lineIdx: number) {
+    const lineNo = lineIdx + 1;
     const anchored = firstOf.get(lineNo);
+    const foldable = foldByStart.has(lineIdx);
+    const isCollapsed = liveCollapsed.has(lineIdx);
     return (
       <span
-        className="sticky left-0 z-10 flex shrink-0 select-none items-center justify-end gap-1 bg-[var(--bg)] pr-3 pl-3 text-right text-[var(--text-tertiary)]"
+        className="sticky left-0 z-10 flex shrink-0 select-none items-center justify-end gap-1 bg-[var(--bg)] pr-5 pl-3 text-right text-[var(--text-tertiary)]"
         // Pixel width (not `ch`) so it matches the textarea overlay's measured
         // metrics exactly — otherwise the caret/selection drift from the glyphs.
         style={{ width: gutterWidthPx }}
@@ -734,6 +951,26 @@ export function FileViewer({
           />
         )}
         <span>{lineNo}</span>
+        {/* Fold toggle: in the gutter's right padding, between number and code
+            (never in the code, so it can't disturb the caret math). Always
+            shown when collapsed; otherwise revealed on row hover. */}
+        {foldable && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFold(lineIdx);
+            }}
+            aria-label={isCollapsed ? "Expand region" : "Collapse region"}
+            title={isCollapsed ? "Expand" : "Collapse"}
+            className={cn(
+              "absolute right-0 top-1/2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-[var(--text-tertiary)] transition-all duration-100 hover:scale-110 hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] hover:opacity-100 active:scale-90",
+              // Always visible but subtle; brightens on hover / when collapsed.
+              isCollapsed ? "opacity-100" : "opacity-60"
+            )}
+          >
+            <FoldChevron collapsed={isCollapsed} />
+          </button>
+        )}
       </span>
     );
   }
@@ -780,11 +1017,39 @@ export function FileViewer({
         <FileIcon name={basename(path)} />
         <span className="truncate text-[var(--text)]">{basename(path)}</span>
         <span className="truncate text-[var(--text-tertiary)]">{path}</span>
-        {data?.truncated && (
-          <span className="ml-auto shrink-0 text-[var(--text-tertiary)]">
-            truncated
-          </span>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {data?.truncated && (
+            <span className="text-[var(--text-tertiary)]">truncated</span>
+          )}
+          <div className="relative" ref={settingsRef}>
+            <button
+              onClick={() => setSettingsOpen((o) => !o)}
+              title="View settings"
+              aria-label="View settings"
+              aria-expanded={settingsOpen}
+              className={cn(
+                "flex h-5 w-5 items-center justify-center rounded text-[13px] transition-colors",
+                settingsOpen
+                  ? "bg-[var(--bg-surface-hover)] text-[var(--text)]"
+                  : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              )}
+            >
+              ⚙
+            </button>
+            {settingsOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 w-max rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-lg">
+                <label className="flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={stickyEnabled}
+                    onChange={(e) => setStickyScrollEnabled(e.target.checked)}
+                  />
+                  Sticky scroll
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {status === "loading" ? (
@@ -828,18 +1093,20 @@ export function FileViewer({
             }}
           >
             {virtualizer.getVirtualItems().map((vi) => {
-              const line = lines[vi.index];
+              const lineIdx = visibleLineIndices[vi.index];
+              const line = lines[lineIdx];
+              const isCollapsed = liveCollapsed.has(lineIdx);
               return (
                 <div
                   key={vi.key}
-                  data-line-index={vi.index}
-                  className="absolute left-0 top-0 flex w-full"
+                  data-line-index={lineIdx}
+                  className="group absolute left-0 top-0 flex w-full"
                   style={{
                     height: LINE_HEIGHT,
                     transform: `translateY(${vi.start}px)`,
                   }}
                 >
-                  {gutterCell(vi.index + 1)}
+                  {gutterCell(lineIdx)}
                   <span
                     data-line-content
                     className={cn(
@@ -849,7 +1116,18 @@ export function FileViewer({
                       !editorMode && "select-text [cursor:text]"
                     )}
                   >
-                    {lineNodes(line, perLine[vi.index], hlsForLine(vi.index))}
+                    {lineNodes(line, perLine[lineIdx], hlsForLine(lineIdx))}
+                    {/* A collapsed region shows a "⋯" affordance on its header
+                        line; clicking it (or the gutter chevron) re-expands. */}
+                    {isCollapsed && (
+                      <span
+                        onClick={() => toggleFold(lineIdx)}
+                        className="ml-1 cursor-pointer select-none rounded-sm bg-[var(--bg-surface-hover)] px-1 text-[var(--text-tertiary)]"
+                        title="Expand"
+                      >
+                        ⋯
+                      </span>
+                    )}
                   </span>
                 </div>
               );
@@ -909,6 +1187,37 @@ export function FileViewer({
             )}
           </div>
         </div>
+          {/* Sticky scroll: enclosing scope headers pinned at the top, each a
+              click-to-jump target. Overlays the scroll viewport (z above it). */}
+          {stickyHeaders.length > 0 && (
+            // Must mirror the scroll layer's typography exactly (it's a sibling,
+            // so it inherits nothing): same mono font, 13px, 20px line height.
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--bg)] font-[family-name:var(--font-mono)] text-[13px] leading-[20px] shadow-[0_1px_0_var(--border),0_4px_8px_-4px_rgba(0,0,0,0.25)]">
+              {stickyHeaders.map((startIdx) => (
+                <div
+                  key={startIdx}
+                  onClick={() => {
+                    const pos = posOfLine[startIdx];
+                    if (pos >= 0)
+                      virtualizer.scrollToIndex(pos, { align: "start" });
+                  }}
+                  title="Jump to this line"
+                  className="pointer-events-auto flex w-full cursor-pointer items-center hover:bg-[var(--bg-surface-hover)]"
+                  style={{ height: LINE_HEIGHT }}
+                >
+                  <span
+                    className="flex shrink-0 select-none items-center justify-end pr-5 pl-3 text-right text-[var(--text-tertiary)]"
+                    style={{ width: gutterWidthPx }}
+                  >
+                    {startIdx + 1}
+                  </span>
+                  <span className="whitespace-pre pl-3 pr-6 text-[var(--text)]">
+                    {lineNodes(lines[startIdx], perLine[startIdx], [])}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <FindWidget find={find} revealTrigger={findReveal} />
         </div>
       )}

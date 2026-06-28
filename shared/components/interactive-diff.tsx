@@ -39,7 +39,7 @@ import {
   useActiveShikiTheme,
   useShikiReady,
 } from "../lib/shiki";
-import { computeFoldRanges, foldRangeMap, hiddenLineSet } from "../lib/folding";
+import { computeFoldRanges } from "../lib/folding";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
@@ -171,6 +171,34 @@ function FoldChevron({ collapsed }: { collapsed: boolean }) {
 
 function visualType(line: DiffLine): DiffLine["type"] {
   return line.whitespaceOnly ? "context" : line.type;
+}
+
+/**
+ * Indentation fold ranges over a sequence of displayed rows. Each row carries
+ * its text and a stable `key` (a DiffLine.idx; −1 for non-foldable rows such as
+ * separators). For the given collapse set it returns which row indices begin a
+ * fold and which rows are hidden. Folding whole rows (not diff lines) keeps the
+ * split panes aligned — a hidden row drops from both columns together.
+ */
+function computeRowFolds(
+  rows: { content: string; key: number }[],
+  collapsed: Set<number>
+): {
+  startByRow: Map<number, { end: number; key: number }>;
+  hidden: Set<number>;
+} {
+  const ranges = computeFoldRanges(rows.map((r) => r.content));
+  const startByRow = new Map<number, { end: number; key: number }>();
+  const hidden = new Set<number>();
+  for (const r of ranges) {
+    const key = rows[r.start]?.key ?? -1;
+    if (key < 0) continue; // separators never begin a fold
+    startByRow.set(r.start, { end: r.end, key });
+    if (collapsed.has(key)) {
+      for (let i = r.start + 1; i <= r.end; i++) hidden.add(i);
+    }
+  }
+  return { startByRow, hidden };
 }
 
 function barColor(type: DiffLine["type"]) {
@@ -551,6 +579,9 @@ export function InteractiveDiff({
   // would otherwise bleed into the other version's aligned lines).
   const leftColRef = useRef<HTMLDivElement>(null);
   const rightColRef = useRef<HTMLDivElement>(null);
+  // Unified view's single editable region (its split-view counterparts are the
+  // two column refs above). Holds the caret so ⌘A scopes to the diff text.
+  const unifiedRef = useRef<HTMLDivElement>(null);
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
@@ -587,34 +618,22 @@ export function InteractiveDiff({
     [oldText, newText, settings.ignoreWhitespace]
   );
 
-  /* ── Code folding (VS Code-style indentation regions) ────── */
+  /* ── Code folding (indentation regions, folded by visual row) ────── */
+  //
+  // Folds are computed over each view's *displayed rows* and hide whole rows. In
+  // split view a row is a left/right pair, so hiding it collapses both panes
+  // together and they stay aligned — folding at the diff-line level (then
+  // re-pairing the split rows) desynced the panes. Uses the indentation model
+  // directly, not the tree-sitter engine: a diff interleaves old/new content
+  // that no parser can read; indentation folding is line-based and handles it.
+  // Collapsed state is keyed by the representative DiffLine.idx of a fold's start
+  // row, so a fold survives switching between unified and split.
 
-  // Fold ranges over the diff's line sequence. DiffLine.idx === its position in
-  // dLines, so a fold start is just a DiffLine.idx. Same indentation model the
-  // file viewer uses, so a function/object folds the same way in both surfaces.
-  const foldByStart = useMemo(
-    () => foldRangeMap(computeFoldRanges(dLines.map((l) => l.content))),
-    [dLines]
-  );
-  // Drop any collapsed start that no longer begins a region (texts changed).
-  const liveFolds = useMemo(() => {
-    let changed = false;
-    const next = new Set<number>();
-    for (const s of collapsedFolds) {
-      if (foldByStart.has(s)) next.add(s);
-      else changed = true;
-    }
-    return changed ? next : collapsedFolds;
-  }, [collapsedFolds, foldByStart]);
-  const hiddenDlineIdx = useMemo(
-    () => hiddenLineSet(liveFolds, foldByStart),
-    [liveFolds, foldByStart]
-  );
-  const toggleFold = useCallback((idx: number) => {
+  const toggleFold = useCallback((key: number) => {
     setCollapsedFolds((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }, []);
@@ -652,20 +671,37 @@ export function InteractiveDiff({
     return result;
   }, [filtered, expandedSeparators, dLines]);
 
-  // expandedFiltered with collapsed fold regions removed. Separators are always
-  // kept (their numbering must stay in step with expandedFiltered), so only
-  // folded code lines drop out — and they drop out of rendering, split-row
-  // pairing, and ⌘F search alike, since all three read this list.
-  const displayedItems: FilteredItem[] = useMemo(() => {
-    if (hiddenDlineIdx.size === 0) return expandedFiltered;
-    return expandedFiltered.filter(
-      (it) => it.type === "separator" || !hiddenDlineIdx.has(it.idx)
-    );
-  }, [expandedFiltered, hiddenDlineIdx]);
-
   const splitRows: SplitRow[] = useMemo(
-    () => buildSplitRows(displayedItems),
-    [displayedItems]
+    () => buildSplitRows(expandedFiltered),
+    [expandedFiltered]
+  );
+
+  // Per-view fold ranges over the displayed rows: which rows begin a fold and
+  // which rows are hidden by the current collapse set. `key` is the row's
+  // representative DiffLine.idx (−1 for separators, which never begin a fold).
+  const unifiedFold = useMemo(
+    () =>
+      computeRowFolds(
+        expandedFiltered.map((it) =>
+          it.type === "separator"
+            ? { content: "", key: -1 }
+            : { content: it.content, key: it.idx }
+        ),
+        collapsedFolds
+      ),
+    [expandedFiltered, collapsedFolds]
+  );
+  const splitFold = useMemo(
+    () =>
+      computeRowFolds(
+        splitRows.map((row) => {
+          if (row.type === "separator") return { content: "", key: -1 };
+          const rep = row.right ?? row.left;
+          return { content: rep?.content ?? "", key: rep?.idx ?? -1 };
+        }),
+        collapsedFolds
+      ),
+    [splitRows, collapsedFolds]
   );
 
   /* ── In-view find (⌘F) ─────────────────────────────────────── */
@@ -679,11 +715,11 @@ export function InteractiveDiff({
   // match list and the widget's count recompute the moment the view changes.
   const buildFindText = useCallback(() => {
     const parts: string[] = [];
-    for (const it of displayedItems) {
+    for (const it of expandedFiltered) {
       if (it.type !== "separator") parts.push(it.content);
     }
     return parts.join("\n");
-  }, [displayedItems]);
+  }, [expandedFiltered]);
 
   const find = useTextFind(buildFindText);
   const [findReveal, setFindReveal] = useState(0);
@@ -696,11 +732,11 @@ export function InteractiveDiff({
   const visibleLines = useMemo(
     () =>
       find.open
-        ? displayedItems.filter(
+        ? expandedFiltered.filter(
             (it): it is DiffLine => it.type !== "separator"
           )
         : EMPTY_VISIBLE_LINES,
-    [find.open, displayedItems]
+    [find.open, expandedFiltered]
   );
   const findLineStarts = useMemo(() => {
     const arr = new Array<number>(visibleLines.length);
@@ -1326,6 +1362,64 @@ export function InteractiveDiff({
     return () => window.removeEventListener("mouseup", release);
   }, []);
 
+  /* ── Caret / read-only editing host ─────────────────────────
+   * Each side is a `contentEditable` region so it gets a real blinking caret on
+   * click and native caret navigation (arrows / shift+arrows to extend a
+   * selection), and so ⌘A is scoped by the browser to just that side's text —
+   * the centre gutter (stage/revert/unstage controls) and the other column live
+   * outside the focused host, so they're never swept into the selection.
+   *
+   * It must stay strictly read-only: cancel every mutation at the source via the
+   * native `beforeinput` event (covers typing, Enter, Backspace/Delete, format
+   * shortcuts, IME commits and paste-insertion alike), plus paste/cut/drop. We
+   * listen natively (not via React's onBeforeInput) because only the native
+   * InputEvent is cancelable across the cases above. */
+  useEffect(() => {
+    const block = (e: Event) => e.preventDefault();
+    const hosts = [
+      leftColRef.current,
+      rightColRef.current,
+      unifiedRef.current,
+    ].filter((el): el is HTMLDivElement => el !== null);
+    for (const el of hosts) {
+      el.addEventListener("beforeinput", block);
+      el.addEventListener("paste", block);
+      el.addEventListener("cut", block);
+      el.addEventListener("drop", block);
+    }
+    return () => {
+      for (const el of hosts) {
+        el.removeEventListener("beforeinput", block);
+        el.removeEventListener("paste", block);
+        el.removeEventListener("cut", block);
+        el.removeEventListener("drop", block);
+      }
+    };
+    // Re-attach when the columns remount (view-mode switch swaps which refs exist).
+  }, [effectiveViewMode]);
+
+  // Attributes that turn a region into a read-only caret host (see the effect
+  // above for how edits are blocked). `caret-color` makes the caret visible
+  // against the diff background; the outline is suppressed in favour of the
+  // subtle focus ring on the surrounding column wrapper.
+  // `beforeinput` can't cancel `insertCompositionText`, so an IME attempt on a
+  // read-only host could mutate the DOM out from under React. That never makes
+  // sense here (the diff isn't typeable), so abort composition the instant it
+  // starts by dropping focus — nothing is ever committed.
+  const abortComposition = useCallback((e: React.CompositionEvent) => {
+    (e.target as HTMLElement).blur();
+  }, []);
+  const editableHostProps = {
+    contentEditable: true,
+    suppressContentEditableWarning: true,
+    spellCheck: false,
+    role: "textbox" as const,
+    "aria-readonly": true,
+    "aria-multiline": true,
+    onCompositionStart: abortComposition,
+    className: "outline-none [caret-color:var(--text)]",
+  };
+
   /* ── Selection ──────────────────────────────────────────── */
 
   // Timing (settle multi-clicks, catch releases outside the pane) lives in
@@ -1541,19 +1635,20 @@ export function InteractiveDiff({
   /* ── Fold toggle (lives in the content cell's left padding, never in the
         code text, and only on a region's start line) ───────────── */
 
-  function renderFoldToggle(idx: number) {
-    if (!foldByStart.has(idx)) return null;
-    const isCollapsed = liveFolds.has(idx);
+  function renderFoldToggle(key: number) {
+    const isCollapsed = collapsedFolds.has(key);
     return (
       <button
+        contentEditable={false}
         onClick={(e) => {
           e.stopPropagation();
-          toggleFold(idx);
+          toggleFold(key);
         }}
         aria-label={isCollapsed ? "Expand region" : "Collapse region"}
         title={isCollapsed ? "Expand" : "Collapse"}
-        data-fold-collapsed={isCollapsed}
-        className="absolute left-0 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-[var(--text-tertiary)] opacity-0 transition-all duration-100 hover:scale-110 hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] active:scale-90 group-hover:opacity-100 data-[fold-collapsed=true]:opacity-100"
+        // Always visible but subtle; brightens on hover.
+        className="absolute left-0 top-0 z-10 flex w-5 cursor-pointer items-center justify-center rounded text-[var(--text-tertiary)] opacity-60 transition-all duration-100 hover:scale-110 hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] hover:opacity-100 active:scale-90"
+        style={{ height: LINE_HEIGHT_PX }}
       >
         <FoldChevron collapsed={isCollapsed} />
       </button>
@@ -1561,13 +1656,14 @@ export function InteractiveDiff({
   }
 
   /** "⋯" affordance appended to a collapsed region's start line. */
-  function renderFoldEllipsis(idx: number) {
-    if (!liveFolds.has(idx)) return null;
+  function renderFoldEllipsis(key: number) {
+    if (!collapsedFolds.has(key)) return null;
     return (
       <span
+        contentEditable={false}
         onClick={(e) => {
           e.stopPropagation();
-          toggleFold(idx);
+          toggleFold(key);
         }}
         className="ml-1 cursor-pointer select-none rounded-sm bg-[var(--bg-surface-hover)] px-1 text-[var(--text-tertiary)]"
         title="Expand"
@@ -1589,6 +1685,7 @@ export function InteractiveDiff({
 
     return (
       <div
+        contentEditable={false}
         className="flex cursor-pointer items-start gap-2 py-1.5 pl-4 pr-3"
         style={{
           background: hovered ? "var(--bg-surface-hover)" : "var(--bg)",
@@ -1808,6 +1905,7 @@ export function InteractiveDiff({
     return (
       <td
         colSpan={colSpan}
+        contentEditable={false}
         onClick={() => toggleSeparator(sepIdx)}
         className="cursor-pointer select-none border-y border-[var(--border)] bg-[var(--bg)] text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
         style={{ height: SEPARATOR_HEIGHT_PX }}
@@ -1824,19 +1922,30 @@ export function InteractiveDiff({
   function renderUnified() {
     const sepIndices: number[] = [];
     let si = 0;
-    for (const item of displayedItems) {
+    for (const item of expandedFiltered) {
       sepIndices.push(item.type === "separator" ? si++ : -1);
     }
 
     const colCount = isFirstVersion ? 3 : 4;
 
     return (
-      <div className="overflow-x-auto [container-type:inline-size]">
+      <div
+        ref={unifiedRef}
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck={false}
+        role="textbox"
+        aria-readonly
+        aria-multiline
+        onCompositionStart={abortComposition}
+        className="overflow-x-auto outline-none [caret-color:var(--text)] [container-type:inline-size]"
+      >
         <table
           className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]"
         >
           <tbody>
-            {displayedItems.map((item, i) => {
+            {expandedFiltered.map((item, i) => {
+              if (unifiedFold.hidden.has(i)) return null;
               if (item.type === "separator") {
                 return (
                   <tr key={`us${i}`}>
@@ -1847,17 +1956,22 @@ export function InteractiveDiff({
 
               const lineAnns = annotationsByEndLine.get(item.idx);
               const vt = visualType(item);
+              const fold = unifiedFold.startByRow.get(i);
 
               return (
                 <Fragment key={`u${i}`}>
                   <tr data-dline={item.idx} className="group">
-                    <td style={barCellStyle(vt)} />
+                    <td contentEditable={false} style={barCellStyle(vt)} />
                     {!isFirstVersion && (
-                      <td style={numCellStyle(vt, item.type === "add")}>
+                      <td
+                        contentEditable={false}
+                        style={numCellStyle(vt, item.type === "add")}
+                      >
                         {item.oldNum ?? ""}
                       </td>
                     )}
                     <td
+                      contentEditable={false}
                       style={{
                         ...numCellStyle(vt, item.type === "remove"),
                         borderRight: "1px solid var(--border)",
@@ -1869,7 +1983,7 @@ export function InteractiveDiff({
                       data-dline={item.idx}
                       style={contentCellStyle(vt)}
                     >
-                      {renderFoldToggle(item.idx)}
+                      {fold && renderFoldToggle(fold.key)}
                       <LineContent
                         text={item.content}
                         lineType={item.type}
@@ -1884,7 +1998,7 @@ export function InteractiveDiff({
                         onClickAnn={handleClickAnn}
                         onHoverAnn={handleHoverAnn}
                       />
-                      {renderFoldEllipsis(item.idx)}
+                      {fold && renderFoldEllipsis(fold.key)}
                     </td>
                   </tr>
                   {lineAnns?.map(({ annotation: ann, index }) => (
@@ -1911,12 +2025,14 @@ export function InteractiveDiff({
   function renderSplitRow(
     line: DiffLine | undefined,
     side: "left" | "right",
-    key: string
+    key: string,
+    foldKey: number | null
   ) {
     if (!line) {
       return (
         <tr key={key}>
           <td
+            contentEditable={false}
             style={{
               ...numCellStyle("context", true),
               background: "var(--bg)",
@@ -1924,9 +2040,11 @@ export function InteractiveDiff({
             }}
           />
           <td
+            contentEditable={false}
             style={{ ...barCellStyle("context"), background: "var(--bg)" }}
           />
           <td
+            contentEditable={false}
             className="bg-[var(--bg)]"
             style={{ height: LINE_HEIGHT_PX }}
           />
@@ -1939,10 +2057,6 @@ export function InteractiveDiff({
       (side === "left" && line.type === "add") ||
       (side === "right" && line.type === "remove");
     const vt = visualType(line);
-    // Render the chevron once per fold start: on the right column for
-    // context/added starts, on the left for removed ones (the only side they
-    // appear on), so a context line never shows two toggles.
-    const foldHere = side === "right" || line.type === "remove";
 
     return (
       <tr key={key} data-dline={line.idx} className="group">
@@ -1959,7 +2073,7 @@ export function InteractiveDiff({
           data-dline={line.idx}
           style={contentCellStyle(vt)}
         >
-          {foldHere && renderFoldToggle(line.idx)}
+          {foldKey != null && renderFoldToggle(foldKey)}
           <LineContent
             text={line.content}
             lineType={line.type}
@@ -1972,7 +2086,7 @@ export function InteractiveDiff({
             onClickAnn={handleClickAnn}
             onHoverAnn={handleHoverAnn}
           />
-          {foldHere && renderFoldEllipsis(line.idx)}
+          {foldKey != null && renderFoldEllipsis(foldKey)}
         </td>
       </tr>
     );
@@ -2023,7 +2137,8 @@ export function InteractiveDiff({
     return (
       <div
         ref={gutterRef}
-        className="relative w-8 shrink-0 self-stretch border-r border-[var(--border)] bg-[var(--bg)]"
+        contentEditable={false}
+        className="relative w-8 shrink-0 select-none self-stretch border-r border-[var(--border)] bg-[var(--bg)]"
       >
         {hunkBlocks.map((block) => (
           <Fragment key={block.hunkIdx}>
@@ -2087,10 +2202,14 @@ export function InteractiveDiff({
         <div
           data-split-side={side}
           ref={side === "left" ? leftColRef : rightColRef}
+          {...editableHostProps}
         >
           <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
             <tbody>
               {splitRows.map((row, i) => {
+                // Hidden by a fold — drop from BOTH columns (same index) so the
+                // two panes stay aligned.
+                if (splitFold.hidden.has(i)) return null;
                 if (row.type === "separator") {
                   return (
                     <tr key={`s${side}${i}`}>
@@ -2101,10 +2220,15 @@ export function InteractiveDiff({
 
                 const line = side === "left" ? row.left : row.right;
                 const comments = splitRowComments[i];
+                // The chevron shows once per fold-start row, on the column that
+                // holds the representative line (right unless it's a remove).
+                const fold = splitFold.startByRow.get(i);
+                const repSide = row.right ? "right" : "left";
+                const foldKey = fold && side === repSide ? fold.key : null;
 
                 return (
                   <Fragment key={`${side}${i}`}>
-                    {renderSplitRow(line, side, `r${side}${i}`)}
+                    {renderSplitRow(line, side, `r${side}${i}`, foldKey)}
                     {comments.map(({ annotation: ann, index: idx }) => (
                       <tr key={`cmt-${side}-${ann.id}`}>
                         <td
@@ -2133,11 +2257,11 @@ export function InteractiveDiff({
 
     return (
       <div className="flex">
-        <div className="min-w-0 flex-1 overflow-x-auto border-r border-[var(--border)] [container-type:inline-size]">
+        <div className="min-w-0 flex-1 overflow-x-auto border-r border-[var(--border)] [container-type:inline-size] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
           {renderColumn("left")}
         </div>
         {showGutter && renderGutter()}
-        <div className="min-w-0 flex-1 overflow-x-auto [container-type:inline-size]">
+        <div className="min-w-0 flex-1 overflow-x-auto [container-type:inline-size] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
           {renderColumn("right")}
         </div>
       </div>
@@ -2245,7 +2369,8 @@ export function InteractiveDiff({
           changes[hoverChangeIdx] && (
             <div
               data-hunk-control
-              className="absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1"
+              contentEditable={false}
+              className="absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 select-none items-center gap-1"
               style={{ top: Math.max(10, hunkCtrlTop) }}
             >
               {hunkActions.isStaged ? (
