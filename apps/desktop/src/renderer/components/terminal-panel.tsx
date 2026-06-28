@@ -164,7 +164,10 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       }
       // ⌘W closes this terminal when it's the focused one (scratch shells only;
       // the agent terminal passes no onRequestClose). Swallow it so it neither
-      // reaches the shell nor triggers a window close.
+      // reaches the shell nor triggers a window close. stopPropagation is
+      // essential: the content pane has a window-level ⌘W listener that closes
+      // the active middle-pane tab — without it, one keypress would close both
+      // the terminal and the tab.
       if (
         (e.metaKey || e.ctrlKey) &&
         e.key.toLowerCase() === "w" &&
@@ -172,6 +175,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       ) {
         if (e.type === "keydown") {
           e.preventDefault();
+          e.stopPropagation();
           onRequestCloseRef.current();
         }
         return false;
