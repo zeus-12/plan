@@ -28,6 +28,18 @@ body {
 }
 
 /*
+ * Diff line numbers are CSS generated content, never real text nodes. The diff
+ * sides are contentEditable caret hosts (so they get a blinking caret + native
+ * keyboard selection), and inside an editable host `user-select: none` on a real
+ * text node is ignored — the numbers would get swept into ⌘A and copied. Browser
+ * generated content is excluded from every selection and the clipboard in all
+ * engines, so rendering the number via `::before` keeps it strictly visual.
+ */
+.diff-linenum::before {
+  content: attr(data-linenum);
+}
+
+/*
  * Chat annotation / find highlights use the CSS Custom Highlight API, whose
  * `::highlight()` pseudo-element only the desktop renderer registers. Its rules
  * are injected at runtime there (see message-list.tsx) rather than living here,

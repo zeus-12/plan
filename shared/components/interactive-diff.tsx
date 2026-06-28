@@ -1965,20 +1965,20 @@ export function InteractiveDiff({
                     {!isFirstVersion && (
                       <td
                         contentEditable={false}
+                        className="diff-linenum"
+                        data-linenum={item.oldNum ?? ""}
                         style={numCellStyle(vt, item.type === "add")}
-                      >
-                        {item.oldNum ?? ""}
-                      </td>
+                      />
                     )}
                     <td
                       contentEditable={false}
+                      className="diff-linenum"
+                      data-linenum={item.newNum ?? ""}
                       style={{
                         ...numCellStyle(vt, item.type === "remove"),
                         borderRight: "1px solid var(--border)",
                       }}
-                    >
-                      {item.newNum ?? ""}
-                    </td>
+                    />
                     <td
                       data-dline={item.idx}
                       style={contentCellStyle(vt)}
@@ -2061,14 +2061,15 @@ export function InteractiveDiff({
     return (
       <tr key={key} data-dline={line.idx} className="group">
         <td
+          contentEditable={false}
+          className="diff-linenum"
+          data-linenum={hideNum ? "" : (num ?? "")}
           style={{
             ...numCellStyle(vt, hideNum),
             borderRight: "1px solid var(--border)",
           }}
-        >
-          {hideNum ? "" : (num ?? "")}
-        </td>
-        <td style={barCellStyle(vt)} />
+        />
+        <td contentEditable={false} style={barCellStyle(vt)} />
         <td
           data-dline={line.idx}
           style={contentCellStyle(vt)}
