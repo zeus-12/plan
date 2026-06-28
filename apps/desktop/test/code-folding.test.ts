@@ -1,8 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { Language, Parser, Query, type QueryCapture } from "web-tree-sitter";
-import { foldRangesFromCaptures } from "../src/renderer/code-folding/extract";
+import {
+  foldRangesFromCaptures,
+  symbolsFromMatches,
+} from "../src/renderer/code-folding/extract";
 import { FOLD_REGISTRY } from "../src/renderer/code-folding/registry";
+import { readFileSync as read } from "node:fs";
 
 // Vendored assets live next to the engine source.
 const dir = new URL("../src/renderer/code-folding/", import.meta.url).pathname;
@@ -58,5 +62,47 @@ describe("tree-sitter fold extraction", () => {
 
   it("does not fold single-line constructs", async () => {
     expect(await folds("json", '{ "a": 1 }')).toEqual([]);
+  });
+});
+
+async function symbols(languageId: string, code: string) {
+  const entry = FOLD_REGISTRY[languageId];
+  const language = await Language.load(`${dir}grammars/${entry.grammar}.wasm`);
+  const parser = new Parser();
+  parser.setLanguage(language);
+  const query = new Query(language, read(`${dir}tags/${entry.query}.scm`, "utf8"));
+  const tree = parser.parse(code);
+  if (!tree) throw new Error("parse failed");
+  return symbolsFromMatches(query.matches(tree.rootNode));
+}
+
+describe("tree-sitter symbol extraction (go to symbol)", () => {
+  it("typescript: functions, classes, methods, interfaces", async () => {
+    const code = [
+      "export function foo(a: number) { return a; }",
+      "class Bar { run() {} }",
+      "interface Shape { area: number }",
+    ].join("\n");
+    const got = await symbols("typescript", code);
+    const names = got.map((s) => s.name);
+    expect(names).toContain("foo");
+    expect(names).toContain("Bar");
+    expect(names).toContain("run");
+    expect(names).toContain("Shape");
+    expect(got.find((s) => s.name === "foo")).toMatchObject({
+      kind: "function",
+      line: 0,
+    });
+  });
+
+  it("python: functions and classes, sorted by line", async () => {
+    const code = ["def a(): pass", "class B:", "    def c(self): pass"].join(
+      "\n"
+    );
+    const got = await symbols("python", code);
+    expect(got.map((s) => s.line)).toEqual([...got.map((s) => s.line)].sort((x, y) => x - y));
+    expect(got.map((s) => s.name)).toEqual(
+      expect.arrayContaining(["a", "B", "c"])
+    );
   });
 });

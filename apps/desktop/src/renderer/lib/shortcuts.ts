@@ -221,6 +221,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         chords: [{ mods: ["meta"], key: "F" }],
       },
       {
+        id: "goToSymbol",
+        label: "Go to symbol",
+        chords: [{ mods: ["meta", "shift"], key: "O" }],
+        when: "file view",
+      },
+      {
         id: "cycleDiff",
         label: "Cycle file ⇄ unstaged ⇄ staged",
         chords: [{ mods: ["meta", "shift"], key: "D" }],

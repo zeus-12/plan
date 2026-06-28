@@ -309,6 +309,82 @@ export function stripComments(code: string, languageId: string): string | null {
   return out.join("\n");
 }
 
+/** A real (code, not string/comment/regex) bracket character and its position. */
+export interface BracketPos {
+  /** 0-based line index. */
+  line: number;
+  /** 0-based column within the line. */
+  col: number;
+  /** One of ( ) [ ] { } */
+  char: string;
+}
+
+const BRACKET_CHARS = "()[]{}";
+
+/**
+ * True when a token span's innermost TextMate scope is plain code — not a
+ * string body, comment, or regex. A bracket in such a span is real syntax. This
+ * is how VS Code classifies brackets for colorization; the innermost scope is
+ * the precise signal (e.g. a `[` inside `${ … }` has innermost `meta.brace…`
+ * even though `string.template` sits higher in its stack).
+ */
+function isCodeScope(innermost: string): boolean {
+  return !(
+    innermost.startsWith("string") ||
+    innermost.startsWith("comment") ||
+    innermost.includes("regex")
+  );
+}
+
+/**
+ * Positions of every *real code* bracket, using Shiki's TextMate scopes to
+ * exclude brackets inside strings, comments, and regex literals — and to
+ * correctly include the braces of template interpolations (`${ … }`), whose
+ * contents are code. This is the principled basis for bracket-pair colorization:
+ * it never string-matches the source. Returns [] when shiki isn't ready or the
+ * language is unsupported.
+ */
+export function codeBracketPositions(
+  code: string,
+  languageId: string
+): BracketPos[] {
+  if (!highlighter) return [];
+  const lang = resolveLang(languageId);
+  if (!lang) return [];
+
+  let lines;
+  try {
+    ({ tokens: lines } = highlighter.codeToTokens(code, {
+      theme: activeShikiTheme,
+      includeExplanation: "scopeName",
+      lang: lang as unknown as never,
+    }));
+  } catch {
+    return [];
+  }
+
+  const out: BracketPos[] = [];
+  for (let line = 0; line < lines.length; line++) {
+    // Track the column by summing content lengths (tokens cover the line in
+    // order, no gaps) rather than trusting any per-token offset field.
+    let col = 0;
+    for (const tok of lines[line]) {
+      const spans = tok.explanation ?? [{ content: tok.content, scopes: [] }];
+      for (const sp of spans) {
+        const inner = sp.scopes.length
+          ? sp.scopes[sp.scopes.length - 1].scopeName
+          : "";
+        const code = isCodeScope(inner);
+        for (const ch of sp.content) {
+          if (code && BRACKET_CHARS.includes(ch)) out.push({ line, col, char: ch });
+          col++;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

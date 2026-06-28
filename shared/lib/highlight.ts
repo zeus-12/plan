@@ -7,12 +7,14 @@ export {
   highlightPerLine,
   highlightToHtml,
   stripComments,
+  codeBracketPositions,
   ensureHighlighter,
   useShikiReady,
   setActiveShikiTheme,
   useActiveShikiTheme,
   SYNC_HIGHLIGHT_MAX_CHARS,
   type SyntaxToken,
+  type BracketPos,
 } from "./shiki";
 
 /**

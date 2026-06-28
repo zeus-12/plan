@@ -1,5 +1,5 @@
-import type { QueryCapture } from "web-tree-sitter";
-import type { FoldRange } from "@plan/shared/code-folding";
+import type { QueryCapture, QueryMatch } from "web-tree-sitter";
+import type { CodeSymbol, FoldRange } from "@plan/shared/code-folding";
 
 /**
  * Turn a fold query's `@fold` captures into fold ranges.
@@ -26,4 +26,31 @@ export function foldRangesFromCaptures(captures: QueryCapture[]): FoldRange[] {
   return [...byStart.entries()]
     .map(([start, end]) => ({ start, end }))
     .sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
+/**
+ * Turn a tags query's matches into code symbols. Each match pairs a `@name`
+ * capture (the identifier) with a `@definition.<kind>` capture (the whole def
+ * node); we take the name's text, the kind, and the definition's line. Sorted by
+ * line. Pure and DOM-free so it can be unit-tested in Node.
+ */
+export function symbolsFromMatches(matches: QueryMatch[]): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  for (const match of matches) {
+    let name: string | null = null;
+    let kind: string | null = null;
+    let line = -1;
+    for (const c of match.captures) {
+      if (c.name === "name") {
+        name = c.node.text;
+        if (line < 0) line = c.node.startPosition.row;
+      } else if (c.name.startsWith("definition.")) {
+        kind = c.name.slice("definition.".length);
+        line = c.node.startPosition.row;
+      }
+    }
+    if (name && kind) symbols.push({ name, kind, line });
+  }
+  symbols.sort((a, b) => a.line - b.line);
+  return symbols;
 }

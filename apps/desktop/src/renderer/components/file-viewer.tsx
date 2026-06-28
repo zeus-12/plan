@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  codeBracketPositions,
   highlightPerLine,
   languageFromPath,
   SYNC_HIGHLIGHT_MAX_CHARS,
@@ -24,7 +25,14 @@ import {
   foldRangeMap,
   hiddenLineSet,
 } from "@plan/shared/lib/folding";
-import { useFoldEngine, useFolds } from "@plan/shared/code-folding";
+import { bracketColorsByLine, type BracketMark } from "@plan/shared/lib/brackets";
+import {
+  useFoldEngine,
+  useFolds,
+  type CodeSymbol,
+} from "@plan/shared/code-folding";
+import Fuse from "fuse.js";
+import { CommandPalette, type PaletteItem } from "./command-palette";
 import type { Annotation } from "@plan/shared/lib/store";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
@@ -40,39 +48,42 @@ const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
 /** Most nested scope headers to pin in the sticky-scroll overlay. */
 const STICKY_MAX = 8;
 
-/* ── Sticky-scroll setting (shared across all file viewers, persisted) ──── */
+/* ── View settings (shared across all file viewers, persisted) ──── */
 
-const STICKY_KEY = "fileViewer.stickyScroll";
-let stickyScrollOn = (() => {
-  try {
-    return localStorage.getItem(STICKY_KEY) === "1";
-  } catch {
-    return false;
-  }
-})();
-const stickyListeners = new Set<() => void>();
-
-function setStickyScrollEnabled(on: boolean) {
-  stickyScrollOn = on;
-  try {
-    localStorage.setItem(STICKY_KEY, on ? "1" : "0");
-  } catch {
-    /* ignore storage failures */
-  }
-  stickyListeners.forEach((l) => l());
+/** A boolean setting persisted in localStorage and reactive everywhere. */
+function makeBoolSetting(key: string, defaultOn: boolean) {
+  let value = (() => {
+    try {
+      const v = localStorage.getItem(key);
+      return v == null ? defaultOn : v === "1";
+    } catch {
+      return defaultOn;
+    }
+  })();
+  const listeners = new Set<() => void>();
+  const set = (on: boolean) => {
+    value = on;
+    try {
+      localStorage.setItem(key, on ? "1" : "0");
+    } catch {
+      /* ignore storage failures */
+    }
+    listeners.forEach((l) => l());
+  };
+  const use = () =>
+    useSyncExternalStore(
+      (cb) => {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+      () => value,
+      () => value
+    );
+  return { use, set };
 }
 
-/** Whether sticky scroll is on, reactive across every mounted file viewer. */
-function useStickyScrollEnabled(): boolean {
-  return useSyncExternalStore(
-    (cb) => {
-      stickyListeners.add(cb);
-      return () => stickyListeners.delete(cb);
-    },
-    () => stickyScrollOn,
-    () => stickyScrollOn
-  );
-}
+const stickyScrollSetting = makeBoolSetting("fileViewer.stickyScroll", false);
+const bracketColorSetting = makeBoolSetting("fileViewer.bracketColors", true);
 // Stable empty token array — `perLine[i]` resolving to undefined renders plain.
 const EMPTY_PER_LINE: SyntaxToken[][] = [];
 const POPOVER_VIEWPORT_PAD = 380;
@@ -205,10 +216,16 @@ function FoldChevron({ collapsed }: { collapsed: boolean }) {
 function lineNodes(
   line: string,
   tokens: SyntaxToken[] | undefined,
-  hls: Hl[]
+  hls: Hl[],
+  brackets?: BracketMark[]
 ): ReactNode {
   const hasTokens = !!tokens && tokens.length > 0;
   if (!hasTokens && hls.length === 0) return line.length ? line : " ";
+
+  const bracketAt =
+    brackets && brackets.length
+      ? new Map(brackets.map((b) => [b.col, b.color]))
+      : null;
 
   const bounds = new Set<number>([0, line.length]);
   if (hasTokens) {
@@ -220,6 +237,12 @@ function lineNodes(
   for (const h of hls) {
     bounds.add(h.s);
     bounds.add(h.e);
+  }
+  if (bracketAt) {
+    for (const b of brackets!) {
+      bounds.add(b.col);
+      bounds.add(b.col + 1);
+    }
   }
   const sorted = [...bounds]
     .filter((b) => b >= 0 && b <= line.length)
@@ -238,14 +261,21 @@ function lineNodes(
     const tok = findTok(s);
     const hl = findHl(s);
 
+    const bcolor = bracketAt?.get(s);
     const style: Record<string, string | number> = {};
     const cls: string[] = [];
-    if (tok?.color) {
+    // Bracket-pair colour overrides the syntax token colour for that char.
+    if (bcolor) {
+      cls.push("shiki-tok");
+      style["--shiki-color"] = bcolor;
+    } else if (tok?.color) {
       cls.push("shiki-tok");
       style["--shiki-color"] = tok.color;
     }
-    if (tok?.italic) style.fontStyle = "italic";
-    if (tok?.bold) style.fontWeight = 600;
+    if (!bcolor) {
+      if (tok?.italic) style.fontStyle = "italic";
+      if (tok?.bold) style.fontWeight = 600;
+    }
     if (hl) {
       if (hl.kind === "ann") style.background = "var(--highlight-bg)";
       else if (hl.kind === "search")
@@ -304,9 +334,17 @@ function FileViewerImpl({
   // A line to scroll to once the layout reflects any fold changes (reveal/find).
   const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
   // Sticky scroll: pin enclosing scope headers at the top as you scroll.
-  const stickyEnabled = useStickyScrollEnabled();
+  const stickyEnabled = stickyScrollSetting.use();
+  const bracketEnabled = bracketColorSetting.use();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  // A line to drop the editor caret on after the next reveal scroll settles
+  // (set by go-to-symbol so the cursor lands on the jumped-to line).
+  const caretRequestRef = useRef<number | null>(null);
+  // Go-to-symbol palette (⌘⇧O).
+  const [symbolOpen, setSymbolOpen] = useState(false);
+  const [symbolQuery, setSymbolQuery] = useState("");
+  const [symbols, setSymbols] = useState<CodeSymbol[]>([]);
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -462,6 +500,33 @@ function FileViewerImpl({
     [data, text, highlightStale, language, shikiReady, shikiTheme]
   );
 
+  // Bracket-pair colours per line. Real brackets are identified by the
+  // tokenizer's TextMate scopes (codeBracketPositions) — so brackets inside
+  // strings/comments/regex are excluded and template `${…}` braces included —
+  // then coloured by nesting depth. Skipped for very large files (a second
+  // scope-aware tokenization), matching the syntax-highlight size gate.
+  const EMPTY_BRACKETS = useMemo(() => new Map<number, BracketMark[]>(), []);
+  const bracketByLine = useMemo(
+    () =>
+      bracketEnabled && shikiReady && !!data && !data.binary && !highlightStale
+        ? bracketColorsByLine(codeBracketPositions(text, language))
+        : EMPTY_BRACKETS,
+    // Mirrors the highlight gate: computed whenever syntax tokens are (no size
+    // cap; for big files it defers a frame alongside highlighting via
+    // highlightStale). shikiTheme dep re-tokenizes on theme change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      bracketEnabled,
+      text,
+      language,
+      shikiReady,
+      shikiTheme,
+      data,
+      highlightStale,
+      EMPTY_BRACKETS,
+    ]
+  );
+
   // Character offset where each line begins — lets a line/selection map back to
   // the absolute offsets the Annotation shape stores.
   const lineStarts = useMemo(() => {
@@ -547,10 +612,13 @@ function FileViewerImpl({
   >(null);
 
   useEffect(() => {
-    // Reset selection and any folds when the open file changes.
+    // Reset selection, folds, and the symbol palette when the open file changes.
     setEditorSel(null);
     setEditorPopover(null);
     setCollapsed(new Set());
+    setSymbolOpen(false);
+    setSymbols([]);
+    setSymbolQuery("");
   }, [encoded, path]);
 
   const caretPopoverPos = useCallback(
@@ -854,6 +922,18 @@ function FileViewerImpl({
     const pos = posOfLine[pendingScrollLine];
     if (pos >= 0) {
       virtualizer.scrollToIndex(pos, { align: "center" });
+      // Go-to-symbol asked for the caret on this line — place it now that the
+      // line is unfolded and scrolled into view (editor mode only).
+      if (caretRequestRef.current === pendingScrollLine) {
+        caretRequestRef.current = null;
+        const ta = textareaRef.current;
+        if (ta) {
+          const caret = lineStarts[pendingScrollLine] ?? 0;
+          ta.focus({ preventScroll: true });
+          ta.setSelectionRange(caret, caret);
+          setEditorSel({ start: caret, end: caret });
+        }
+      }
       setPendingScrollLine(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -881,6 +961,54 @@ function FileViewerImpl({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [active, searchable, find]);
+
+  // ⌘⇧O — go to symbol. Only when the active engine can supply symbols (the
+  // tree-sitter engine on desktop; the indentation fallback can't parse names).
+  useEffect(() => {
+    if (!active || !searchable || !foldEngine.computeSymbols) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "o"
+      ) {
+        e.preventDefault();
+        setSymbolQuery("");
+        setSymbolOpen(true);
+        void Promise.resolve(
+          foldEngine.computeSymbols!(text, language)
+        ).then((syms) => setSymbols(syms));
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, searchable, foldEngine, text, language]);
+
+  const symbolFuse = useMemo(
+    () =>
+      new Fuse(symbols, {
+        keys: ["name"],
+        threshold: 0.4,
+        ignoreLocation: true,
+      }),
+    [symbols]
+  );
+  const symbolItems = useMemo<PaletteItem[]>(() => {
+    const list = symbolQuery
+      ? symbolFuse.search(symbolQuery).map((r) => r.item)
+      : symbols;
+    return list.slice(0, 500).map((s, i) => ({
+      id: `${s.line}:${s.kind}:${s.name}:${i}`,
+      label: s.name,
+      badge: s.kind,
+      onSelect: () => {
+        caretRequestRef.current = s.line;
+        setSymbolOpen(false);
+        revealLine(s.line);
+      },
+    }));
+  }, [symbols, symbolQuery, symbolFuse, revealLine]);
 
   // Keep the active match scrolled into view as the user steps through.
   useEffect(() => {
@@ -1037,14 +1165,22 @@ function FileViewerImpl({
               ⚙
             </button>
             {settingsOpen && (
-              <div className="absolute right-0 top-full z-50 mt-1 w-max rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-lg">
+              <div className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-lg">
                 <label className="flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]">
                   <input
                     type="checkbox"
                     checked={stickyEnabled}
-                    onChange={(e) => setStickyScrollEnabled(e.target.checked)}
+                    onChange={(e) => stickyScrollSetting.set(e.target.checked)}
                   />
                   Sticky scroll
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={bracketEnabled}
+                    onChange={(e) => bracketColorSetting.set(e.target.checked)}
+                  />
+                  Bracket colors
                 </label>
               </div>
             )}
@@ -1116,7 +1252,12 @@ function FileViewerImpl({
                       !editorMode && "select-text [cursor:text]"
                     )}
                   >
-                    {lineNodes(line, perLine[lineIdx], hlsForLine(lineIdx))}
+                    {lineNodes(
+                      line,
+                      perLine[lineIdx],
+                      hlsForLine(lineIdx),
+                      bracketByLine.get(lineIdx)
+                    )}
                     {/* A collapsed region shows a "⋯" affordance on its header
                         line; clicking it (or the gutter chevron) re-expands. */}
                     {isCollapsed && (
@@ -1212,7 +1353,12 @@ function FileViewerImpl({
                     {startIdx + 1}
                   </span>
                   <span className="whitespace-pre pl-3 pr-6 text-[var(--text)]">
-                    {lineNodes(lines[startIdx], perLine[startIdx], [])}
+                    {lineNodes(
+                      lines[startIdx],
+                      perLine[startIdx],
+                      [],
+                      bracketByLine.get(startIdx)
+                    )}
                   </span>
                 </div>
               ))}
@@ -1250,6 +1396,15 @@ function FileViewerImpl({
       {lightbox && imageUrl && (
         <ImageLightbox src={imageUrl} onClose={() => setLightbox(false)} />
       )}
+      <CommandPalette
+        open={symbolOpen}
+        placeholder="Go to symbol…"
+        query={symbolQuery}
+        onQueryChange={setSymbolQuery}
+        items={symbolItems}
+        onClose={() => setSymbolOpen(false)}
+        emptyLabel="No symbols"
+      />
     </div>
   );
 }
