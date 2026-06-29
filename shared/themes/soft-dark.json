@@ -25,10 +25,10 @@
     "diff-add-bg": "rgba(95, 168, 115, 0.12)",
     "diff-add-gutter": "rgba(95, 168, 115, 0.22)",
     "diff-add-bar": "#5fa873",
-    "diff-add-word": "rgba(95, 168, 115, 0.38)",
+    "diff-add-word": "rgba(95, 168, 115, 0.26)",
     "diff-remove-bg": "rgba(207, 118, 112, 0.12)",
     "diff-remove-gutter": "rgba(207, 118, 112, 0.2)",
     "diff-remove-bar": "#cf7670",
-    "diff-remove-word": "rgba(207, 118, 112, 0.36)"
+    "diff-remove-word": "rgba(207, 118, 112, 0.26)"
   }
 }
