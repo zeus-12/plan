@@ -5,6 +5,7 @@ import { relative, sep, isAbsolute, join } from "path";
 import chokidar, { type FSWatcher } from "chokidar";
 import ignore, { type Ignore } from "ignore";
 import { resolveProjectCwd } from "./claude-projects";
+import { IGNORED_DIRS } from "./ignored-dirs";
 
 const execFileP = promisify(execFile);
 
@@ -47,20 +48,15 @@ interface ActiveWatch {
 const watchers = new Map<string, ActiveWatch>();
 
 // Directories we never want to watch — they generate enormous event storms and
-// are virtually always git-ignored anyway. This is purely a performance guard;
-// missing a real change here would be a correctness bug, so the list is kept to
-// dirs whose contents never drive the diff/status/file UI.
-const ALWAYS_IGNORE_DIRS = new Set([
-  "node_modules",
-  ".git", // handled explicitly via the resolved git dirs below
-  "dist",
-  "out",
-  ".next",
-  ".turbo",
-  ".cache",
-  ".venv",
-  "__pycache__",
-]);
+// are virtually always git-ignored anyway. Critically, when the opened folder
+// is a *container* of several nested git repos, the parent's `.gitignore` (if
+// any) doesn't cover the nested repos' build/dependency trees, so this fixed
+// set is the only thing stopping chokidar from recursively walking and watching
+// every `target`/`vendor`/`venv`/`Pods`/… across all of them. We share the file
+// finder's comprehensive list ({@link ./ignored-dirs.ts}) so the two can't drift.
+// `.git` is in the set; the real git dir is still reached because the git-dir
+// branch in `ignored` below is checked first and returns before this prune.
+const ALWAYS_IGNORE_DIRS = IGNORED_DIRS;
 
 // Within a git dir, only these signal something the UI cares about (staging,
 // commits, branch switches, fetched/pushed refs). Everything else — objects,

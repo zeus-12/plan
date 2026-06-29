@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from "fs/promises";
 import { StringDecoder } from "string_decoder";
 import { join, relative } from "path";
 import { resolveProjectCwd } from "./claude-projects";
+import { IGNORED_DIRS } from "./ignored-dirs";
 import type {
   SearchOptions,
   SearchResult,
@@ -13,52 +14,9 @@ import type {
 const MAX_FILES = 20000;
 const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB
 
-/**
- * Directory names we never descend into — VCS internals plus the heavy,
- * generated, or dependency dirs that bloat the finder without ever being
- * something you'd open. Matched by exact name at any depth. This is a fixed
- * list on purpose: predictable, fast, and identical with or without git (no
- * `.gitignore` parsing, no `git` subprocess).
- */
-const IGNORE_DIRS = new Set([
-  ".git",
-  ".hg",
-  ".svn",
-  "node_modules",
-  "bower_components",
-  ".pnpm",
-  ".yarn",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  ".nuxt",
-  ".turbo",
-  ".svelte-kit",
-  ".parcel-cache",
-  ".vite",
-  "coverage",
-  ".nyc_output",
-  "target",
-  ".venv",
-  "venv",
-  "env",
-  "__pycache__",
-  ".mypy_cache",
-  ".pytest_cache",
-  ".ruff_cache",
-  ".tox",
-  ".gradle",
-  ".idea",
-  ".vscode-test",
-  "vendor",
-  "Pods",
-  "Carthage",
-  "DerivedData",
-  ".terraform",
-  ".cache",
-  "tmp",
-]);
+// Directory names we never descend into during the recursive walk. See
+// {@link ./ignored-dirs.ts}; shared with the worktree watcher.
+const IGNORE_DIRS = IGNORED_DIRS;
 
 /**
  * Flat list of project files (POSIX-relative paths), for the Files tab and the
