@@ -84,6 +84,7 @@ function makeBoolSetting(key: string, defaultOn: boolean) {
 
 const stickyScrollSetting = makeBoolSetting("fileViewer.stickyScroll", false);
 const bracketColorSetting = makeBoolSetting("fileViewer.bracketColors", true);
+const lineWrapSetting = makeBoolSetting("fileViewer.lineWrap", false);
 // Stable empty token array — `perLine[i]` resolving to undefined renders plain.
 const EMPTY_PER_LINE: SyntaxToken[][] = [];
 const POPOVER_VIEWPORT_PAD = 380;
@@ -336,6 +337,7 @@ function FileViewerImpl({
   // Sticky scroll: pin enclosing scope headers at the top as you scroll.
   const stickyEnabled = stickyScrollSetting.use();
   const bracketEnabled = bracketColorSetting.use();
+  const lineWrapEnabled = lineWrapSetting.use();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   // A line to drop the editor caret on after the next reveal scroll settles
@@ -564,6 +566,9 @@ function FileViewerImpl({
   // lines from the rendered layer (which the textarea can't mirror), so we
   // suspend the overlay whenever anything is collapsed and fall back to the
   // read-only DOM-selection path; it returns once everything is expanded.
+  // Line wrap turns rows into variable-height blocks the single `pre`/`wrap=off`
+  // textarea can't mirror, so we suspend the overlay there too and let native
+  // DOM selection take over.
   const editorMode =
     ENABLE_EDITOR_CARET &&
     status === "ok" &&
@@ -571,7 +576,8 @@ function FileViewerImpl({
     !!data &&
     !data.binary &&
     lines.length <= EDITOR_MAX_LINES &&
-    liveCollapsed.size === 0;
+    liveCollapsed.size === 0 &&
+    !lineWrapEnabled;
 
   // The comment anchored at each line's first row (for the gutter marker).
   const firstOf = useMemo(() => {
@@ -855,6 +861,12 @@ function FileViewerImpl({
     overscan: 30,
   });
 
+  // Toggling wrap flips every row between a fixed 20px height and a measured,
+  // variable height — drop the cached sizes so the next layout re-measures.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [lineWrapEnabled, virtualizer]);
+
   // Sticky scope headers: the fold regions enclosing the topmost visible line
   // whose own start has already scrolled above the viewport. Outermost-first,
   // capped at STICKY_MAX. Driven by the virtualizer's own scroll offset (it
@@ -863,7 +875,9 @@ function FileViewerImpl({
   const scrollOffset = virtualizer.scrollOffset ?? 0;
   const stickyHeaders = useMemo(() => {
     if (!stickyEnabled || foldRanges.length === 0) return [];
-    const topPos = Math.floor(scrollOffset / LINE_HEIGHT);
+    // Derive the top visible row from the virtualizer (not scrollOffset /
+    // LINE_HEIGHT) so it stays correct when line wrap makes rows variable-height.
+    const topPos = virtualizer.getVirtualItemForOffset(scrollOffset)?.index ?? 0;
     // Build the stack slot by slot. Slot d sits at viewport y = d·LINE_HEIGHT,
     // i.e. over the line `topPos + d`. A scope fills slot d when it encloses that
     // line — so a deeper scope joins the moment its header reaches the BOTTOM of
@@ -885,7 +899,14 @@ function FileViewerImpl({
       headers.push(next.start);
     }
     return headers;
-  }, [stickyEnabled, foldRanges, scrollOffset, visibleLineIndices, hiddenLines]);
+  }, [
+    stickyEnabled,
+    foldRanges,
+    scrollOffset,
+    visibleLineIndices,
+    hiddenLines,
+    virtualizer,
+  ]);
 
   // Jump to + highlight a Search-tab hit. Re-runs on `nonce` so re-clicking the
   // same line scrolls again. Waits for the file to load before scrolling.
@@ -1065,7 +1086,12 @@ function FileViewerImpl({
     const isCollapsed = liveCollapsed.has(lineIdx);
     return (
       <span
-        className="sticky left-0 z-10 flex shrink-0 select-none items-center justify-end gap-1 bg-[var(--bg)] pr-5 pl-3 text-right text-[var(--text-tertiary)]"
+        className={cn(
+          "sticky left-0 z-10 flex shrink-0 select-none justify-end gap-1 bg-[var(--bg)] pr-5 pl-3 text-right text-[var(--text-tertiary)]",
+          // When wrapping, a row can span several visual lines — pin the number
+          // to the first one instead of centering it across the whole block.
+          lineWrapEnabled ? "items-start" : "items-center"
+        )}
         // Pixel width (not `ch`) so it matches the textarea overlay's measured
         // metrics exactly — otherwise the caret/selection drift from the glyphs.
         style={{ width: gutterWidthPx }}
@@ -1156,32 +1182,56 @@ function FileViewerImpl({
               aria-label="View settings"
               aria-expanded={settingsOpen}
               className={cn(
-                "flex h-5 w-5 items-center justify-center rounded text-[13px] transition-colors",
+                "flex h-7 w-7 items-center justify-center rounded-md border text-[14px] transition-colors",
                 settingsOpen
-                  ? "bg-[var(--bg-surface-hover)] text-[var(--text)]"
-                  : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+                  ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+                  : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
               )}
             >
               ⚙
             </button>
             {settingsOpen && (
-              <div className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-lg">
-                <label className="flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-                  <input
-                    type="checkbox"
-                    checked={stickyEnabled}
-                    onChange={(e) => stickyScrollSetting.set(e.target.checked)}
-                  />
-                  Sticky scroll
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-                  <input
-                    type="checkbox"
-                    checked={bracketEnabled}
-                    onChange={(e) => bracketColorSetting.set(e.target.checked)}
-                  />
-                  Bracket colors
-                </label>
+              <div className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5 shadow-lg">
+                {(
+                  [
+                    {
+                      label: "Line wrap",
+                      on: lineWrapEnabled,
+                      set: lineWrapSetting.set,
+                    },
+                    {
+                      label: "Sticky scroll",
+                      on: stickyEnabled,
+                      set: stickyScrollSetting.set,
+                    },
+                    {
+                      label: "Bracket colors",
+                      on: bracketEnabled,
+                      set: bracketColorSetting.set,
+                    },
+                  ] as const
+                ).map(({ label, on, set }) => (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between gap-4"
+                  >
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      {label}
+                    </span>
+                    <button
+                      onClick={() => set(!on)}
+                      aria-pressed={on}
+                      className={cn(
+                        "rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
+                        on
+                          ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+                          : "border-[var(--border)] text-[var(--text-tertiary)]"
+                      )}
+                    >
+                      {on ? "On" : "Off"}
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1223,7 +1273,9 @@ function FileViewerImpl({
           <div
             style={{
               height: virtualizer.getTotalSize(),
-              width: "max-content",
+              // Wrapping keeps text inside the viewport width; otherwise the
+              // content grows as wide as its longest line for horizontal scroll.
+              width: lineWrapEnabled ? "100%" : "max-content",
               minWidth: "100%",
               position: "relative",
             }}
@@ -1236,9 +1288,17 @@ function FileViewerImpl({
                 <div
                   key={vi.key}
                   data-line-index={lineIdx}
-                  className="group absolute left-0 top-0 flex w-full"
+                  data-index={vi.index}
+                  // In wrap mode the row's height is whatever the wrapped text
+                  // measures to, so hand it to the virtualizer to size; otherwise
+                  // every row is a fixed 20px and needs no measurement.
+                  ref={lineWrapEnabled ? virtualizer.measureElement : undefined}
+                  className={cn(
+                    "group absolute left-0 top-0 flex w-full",
+                    lineWrapEnabled && "items-start"
+                  )}
                   style={{
-                    height: LINE_HEIGHT,
+                    height: lineWrapEnabled ? undefined : LINE_HEIGHT,
                     transform: `translateY(${vi.start}px)`,
                   }}
                 >
@@ -1246,7 +1306,13 @@ function FileViewerImpl({
                   <span
                     data-line-content
                     className={cn(
-                      "whitespace-pre pl-3 pr-6 text-[var(--text)]",
+                      "pl-3 pr-6 text-[var(--text)]",
+                      // Wrapping needs the span to shrink within the flex row
+                      // (min-w-0) and break long lines; otherwise it stays on one
+                      // pre-formatted line and the row scrolls horizontally.
+                      lineWrapEnabled
+                        ? "min-w-0 flex-1 whitespace-pre-wrap break-words"
+                        : "whitespace-pre",
                       // In editor mode the textarea owns selection; elsewhere the
                       // content opts into native text selection.
                       !editorMode && "select-text [cursor:text]"
