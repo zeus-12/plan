@@ -113,8 +113,6 @@ interface Props {
   runCommand?: string;
   /** Optional build command run before the Run command. */
   buildCommand?: string;
-  /** When true, Claude sessions start with `--permission-mode auto`. */
-  autoMode?: boolean;
   /** Persist the Run/build command to the project (parent-keyed defaults). */
   onSaveRunConfig: (runCommand: string, buildCommand: string) => Promise<void> | void;
 }
@@ -382,11 +380,10 @@ export function ProjectWorkspace({
   onSelectProject,
   runCommand,
   buildCommand,
-  autoMode,
   onSaveRunConfig,
 }: Props) {
-  // Global auto-mode default (Settings dialog). A project's own `autoMode`
-  // override, when set, wins; otherwise this app-wide preference applies.
+  // Auto-mode is an app-wide preference (Settings dialog); it applies to every
+  // project's Claude sessions.
   const [globalAutoMode] = useAutoModeEnabled();
   // Headline branch: when a project has multiple repos we just show the first.
   const branch = repos[0]?.branch ?? null;
@@ -1518,7 +1515,7 @@ export function ProjectWorkspace({
     const sid = tid.slice(chatPrefix.length);
     // Brand-new chats start claude with a pre-chosen session id (nothing to
     // resume yet); existing ones resume their transcript.
-    const flags = (autoMode ?? globalAutoMode) ? " --permission-mode auto" : "";
+    const flags = globalAutoMode ? " --permission-mode auto" : "";
     return NEW_SESSION_IDS.has(sid)
       ? `claude --session-id ${sid}${flags}`
       : `claude --resume ${sid}${flags}`;

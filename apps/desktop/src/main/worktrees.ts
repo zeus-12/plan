@@ -2,19 +2,20 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { rm } from "fs/promises";
 import { join, basename } from "path";
-import { homedir } from "os";
 import { createHash } from "crypto";
 import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
 import { encodeCwd } from "./manual-projects";
+import { PLAN_DIR } from "./plan-config";
 import { discoverRepos, type DiscoveredRepo } from "./git";
 
 /**
- * Worktree checkouts live here. Kept dot/space-free for tidy, predictable
- * folder names: Claude names a session's transcript folder by replacing every
- * non-alphanumeric char in the cwd with "-", which `encodeCwd` mirrors, so
- * chats started in a worktree show up in its list regardless.
+ * Worktree checkouts live under Plan's own state dir (`~/.plan/worktrees`) so
+ * they stay out of the user's project and home folders. Claude names a
+ * session's transcript folder by replacing every non-alphanumeric char in the
+ * cwd with "-", which `encodeCwd` mirrors, so chats started in a worktree show
+ * up in its list regardless of the dot in `.plan`.
  */
-const WORKTREES_ROOT = join(homedir(), "plan-worktrees");
+const WORKTREES_ROOT = join(PLAN_DIR, "worktrees");
 
 /** Reduce a path segment to chars where our encoding == Claude's (no "." etc). */
 function safeSegment(s: string): string {
@@ -83,7 +84,7 @@ async function listRemotes(repoPath: string): Promise<string[]> {
 }
 
 /**
- * Root dir for a project's worktrees: ~/plan-worktrees/<basename>-<hash>/.
+ * Root dir for a project's worktrees: ~/.plan/worktrees/<basename>-<hash>/.
  * The hash of the full cwd keeps two same-named projects from colliding.
  */
 async function projectWorktreesDir(encoded: string): Promise<string> {

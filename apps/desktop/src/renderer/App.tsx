@@ -542,7 +542,6 @@ function Shell() {
             // defaults, so every worktree of this project shares it.
             runCommand={worktrees.defaults.runCommand}
             buildCommand={worktrees.defaults.buildCommand}
-            autoMode={worktrees.defaults.autoMode}
             onSaveRunConfig={(runCommand, buildCommand) =>
               worktrees.saveDefaults({
                 ...worktrees.defaults,

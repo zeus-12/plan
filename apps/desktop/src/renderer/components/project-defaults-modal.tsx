@@ -28,7 +28,6 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
   const [base, setBase] = useState(defaults.base ?? "");
   const [branchPrefix, setBranchPrefix] = useState(defaults.branchPrefix ?? "");
   const [setup, setSetup] = useState<Record<string, string>>(defaults.setup ?? {});
-  const [autoMode, setAutoMode] = useState(defaults.autoMode ?? false);
   const [busy, setBusy] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -49,7 +48,6 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
       base: base.trim() || undefined,
       branchPrefix: branchPrefix.trim() || undefined,
       setup: prune(setup),
-      autoMode,
     });
     onClose();
   };
@@ -127,41 +125,6 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
                 </div>
               )}
             </div>
-          </div>
-
-          <div className="mt-1 border-t border-[var(--border)] pt-3">
-            <div className={labelCls}>Claude session</div>
-            <button
-              type="button"
-              onClick={() => setAutoMode((v) => !v)}
-              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border)] p-2 text-left transition-colors hover:border-[var(--border-strong)]"
-            >
-              <div>
-                <div className="text-[13px] text-[var(--text)]">Auto mode</div>
-                <div className="text-[11px] text-[var(--text-tertiary)]">
-                  Start sessions with{" "}
-                  <span className="font-[family-name:var(--font-mono)]">
-                    --permission-mode auto
-                  </span>{" "}
-                  so Claude runs without stopping for approvals.
-                </div>
-              </div>
-              <span
-                aria-checked={autoMode}
-                role="switch"
-                className={
-                  "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors " +
-                  (autoMode ? "bg-[var(--accent)]" : "bg-[var(--border-strong)]")
-                }
-              >
-                <span
-                  className={
-                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform " +
-                    (autoMode ? "translate-x-4" : "translate-x-0.5")
-                  }
-                />
-              </span>
-            </button>
           </div>
         </div>
 

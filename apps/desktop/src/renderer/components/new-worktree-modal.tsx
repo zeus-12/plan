@@ -16,15 +16,6 @@ interface Props {
   onClose: () => void;
 }
 
-/** Branch-name-safe slug of a worktree name. */
-function slugBranch(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._/-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 const inputCls =
   "w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]";
 const labelCls =
@@ -36,11 +27,9 @@ export function NewWorktreeModal({
   onCreate,
   onClose,
 }: Props) {
-  const [name, setName] = useState("");
+  // One field is both the branch to create and the worktree's name.
   const [branch, setBranch] = useState(defaults.branchPrefix ?? "");
   const [base, setBase] = useState(defaults.base ?? "");
-  // Branch auto-follows the name until the user edits it directly.
-  const [branchEdited, setBranchEdited] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Repos the worktree spans, and per-repo base overrides keyed by subPath. An
@@ -50,10 +39,10 @@ export function NewWorktreeModal({
   const [repos, setRepos] = useState<DiscoveredRepo[] | null>(null);
   const [repoBases, setRepoBases] = useState<Record<string, string>>({});
   const [excluded, setExcluded] = useState<Record<string, boolean>>({});
-  const nameRef = useRef<HTMLInputElement>(null);
+  const branchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    nameRef.current?.focus();
+    branchRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -66,22 +55,18 @@ export function NewWorktreeModal({
     };
   }, [projectEncoded]);
 
-  const onNameChange = (v: string) => {
-    setName(v);
-    if (!branchEdited) {
-      const prefix = defaults.branchPrefix ?? "";
-      setBranch(v ? prefix + slugBranch(v) : prefix);
-    }
-  };
-
   const multiRepo = (repos?.length ?? 0) > 1;
   const selected = (repos ?? []).filter((r) => !excluded[r.subPath]);
+  // A repo's base is its override, falling back to the global default.
+  const baseFor = (subPath: string) => repoBases[subPath]?.trim() || base.trim();
 
   const canSubmit =
-    name.trim() !== "" &&
     branch.trim() !== "" &&
-    base.trim() !== "" &&
-    (!multiRepo || selected.length > 0) &&
+    // Single-repo uses the one global base; multi-repo needs every spanned repo
+    // to resolve a base (its own input, since the global field is hidden).
+    (multiRepo
+      ? selected.length > 0 && selected.every((r) => baseFor(r.subPath) !== "")
+      : base.trim() !== "") &&
     !busy;
 
   const submit = async () => {
@@ -92,12 +77,17 @@ export function NewWorktreeModal({
       // Send an effective base for each included repo (override or global default).
       const bases: Record<string, string> = {};
       for (const r of selected) {
-        bases[r.subPath] = repoBases[r.subPath]?.trim() || base.trim();
+        bases[r.subPath] = baseFor(r.subPath);
       }
+      // The backend still wants a top-level base as the fallback default; with the
+      // global field hidden for multi-repo, borrow the first spanned repo's base.
+      const fallbackBase = multiRepo
+        ? base.trim() || baseFor(selected[0].subPath)
+        : base.trim();
       await onCreate({
-        name: name.trim(),
+        name: branch.trim(),
         branch: branch.trim(),
-        base: base.trim(),
+        base: fallbackBase,
         repos: multiRepo ? selected.map((r) => r.subPath) : undefined,
         bases: multiRepo ? bases : undefined,
       });
@@ -141,38 +131,26 @@ export function NewWorktreeModal({
 
         <div className="flex flex-col gap-3">
           <div>
-            <label className={labelCls}>Name</label>
-            <input
-              ref={nameRef}
-              value={name}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder="e.g. login form"
-              className={inputCls}
-            />
-          </div>
-          <div>
             <label className={labelCls}>Branch</label>
             <input
+              ref={branchRef}
               value={branch}
-              onChange={(e) => {
-                setBranchEdited(true);
-                setBranch(e.target.value);
-              }}
+              onChange={(e) => setBranch(e.target.value)}
               placeholder="branch to create"
               className={inputCls}
             />
           </div>
-          <div>
-            <label className={labelCls}>
-              {multiRepo ? "Base branch (default)" : "Base branch"}
-            </label>
-            <input
-              value={base}
-              onChange={(e) => setBase(e.target.value)}
-              placeholder="e.g. main"
-              className={inputCls}
-            />
-          </div>
+          {!multiRepo && (
+            <div>
+              <label className={labelCls}>Base branch</label>
+              <input
+                value={base}
+                onChange={(e) => setBase(e.target.value)}
+                placeholder="e.g. main"
+                className={inputCls}
+              />
+            </div>
+          )}
 
           {multiRepo && (
             <div>
