@@ -60,6 +60,19 @@ function isTaskNotificationMessage(m: ConversationMessage): boolean {
   );
 }
 
+/**
+ * A harness-injected turn (skill body, loop tick, context caveat) flagged by
+ * metadata. Rendered full-width as a muted, collapsible system card, not in the
+ * user bubble. Image-only meta turns are left alone — they render as images.
+ */
+function isSystemMetaMessage(m: ConversationMessage): boolean {
+  if (m.role !== "user") return false;
+  if (m.isMeta !== true && m.promptSource !== "system") return false;
+  return !m.parts.every(
+    (p) => p.kind === "text" && imageOnlyPaths(p.text) !== null
+  );
+}
+
 export interface ChatAnnotation {
   id: string;
   messageUuid: string;
@@ -803,6 +816,90 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
   );
 }
 
+/**
+ * A slash-command invocation. Claude Code echoes the command as a user turn
+ * whose text is a structured block:
+ *   <command-message>grill-me</command-message>
+ *   <command-name>/grill-me</command-name>
+ *   <command-args>…</command-args>
+ * The CLI renders this as a compact `› /grill-me <args>` line, not the raw tag
+ * soup — mirror that. (The expanded skill body arrives as a separate isMeta
+ * turn, rendered by SystemMetaBlock.)
+ */
+function parseCommandInvocation(
+  text: string
+): { name: string; args: string } | null {
+  const nameMatch = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
+  if (!nameMatch) return null;
+  const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
+  const name = nameMatch[1].trim();
+  return {
+    name: name.startsWith("/") ? name : `/${name}`,
+    args: argsMatch ? argsMatch[1].trim() : "",
+  };
+}
+
+/**
+ * Harness-injected turns (isMeta / promptSource:"system") are machinery, not
+ * user input: expanded skill bodies, autonomous-loop ticks, context caveats.
+ * They render exactly like a tool call (see ToolCallBlock) — a muted verb, a
+ * target, a chevron. The *gate* (treat-as-system) is driven by the reliable
+ * metadata; only this verb/target is derived from the body, and it falls back
+ * to a generic "System" so a mislabel can't hide content.
+ */
+function systemMetaHeader(text: string): { verb: string; target: string } {
+  const t = text.trimStart();
+  if (/^#\s*Autonomous loop/i.test(t) || t.includes("Autonomous loop tick")) {
+    return { verb: "Autonomous loop", target: "wakeup tick" };
+  }
+  const skill = t.match(/^Base directory for this skill:\s*(.+)$/m);
+  if (skill) {
+    const slug = skill[1].trim().split("/").filter(Boolean).pop() ?? "skill";
+    return { verb: "Ran skill", target: slug };
+  }
+  return { verb: "System", target: "" };
+}
+
+/**
+ * A harness-injected turn rendered like a tool call: a borderless one-line
+ * summary (muted verb + target + chevron); expanding reveals the raw injected
+ * text in a bordered panel. Mirrors ToolCallBlock so it reads as machinery.
+ */
+function SystemMetaBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const { verb, target } = systemMetaHeader(text);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
+      >
+        <span className="shrink-0 text-[var(--text-tertiary)]">{verb}</span>
+        {target && (
+          <span
+            className="min-w-0 truncate text-[var(--text-secondary)]"
+            data-find-skip=""
+          >
+            {target}
+          </span>
+        )}
+        <ChevronRight open={open} />
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+        data-find-skip=""
+      >
+        <div className="overflow-hidden">
+          <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2">
+            <CodeBody text={text} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BashBlock({
   input,
   stdout,
@@ -888,6 +985,24 @@ const MessagePartView = memo(function MessagePartView({
           </div>
         );
       }
+      // A slash-command the user typed: strip the `<command-*>` tag soup and
+      // render the clean `/cmd args` as normal bubble text (it IS user input).
+      const command = parseCommandInvocation(part.text);
+      if (command) {
+        const clean = command.args
+          ? `${command.name} ${command.args}`
+          : command.name;
+        return (
+          <MarkdownText
+            text={clean}
+            messageUuid={message.uuid}
+            partIndex={partIndex}
+            partAnnotations={EMPTY_ANNOTATIONS}
+            pendingRange={null}
+            onClickAnnotation={onClickAnnotation}
+          />
+        );
+      }
       const bash = parseBashBlock(part.text);
       if (bash) {
         return (
@@ -917,6 +1032,9 @@ const MessagePartView = memo(function MessagePartView({
             )}
           </div>
         );
+      }
+      if (message.isMeta || message.promptSource === "system") {
+        return <SystemMetaBlock text={part.text} />;
       }
       return (
         <MarkdownText
@@ -1488,6 +1606,7 @@ export const MessageList = memo(function MessageList({
           const isUser =
             !isBashMessage(m) &&
             !isTaskNotificationMessage(m) &&
+            !isSystemMetaMessage(m) &&
             classify(m) === "user-real";
           return (
             <div

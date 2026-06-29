@@ -22,6 +22,13 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   timestamp: string;
   parts: MessagePart[];
+  /** True for harness-injected turns (skill bodies, context caveats, loop
+   *  instructions) — these are machinery, not something the user typed, so the
+   *  UI renders them as a muted system card rather than a user bubble. */
+  isMeta?: boolean;
+  /** "typed" = real user input; "system" = harness-injected (loop tick,
+   *  task-notification re-injection). Absent on assistant turns. */
+  promptSource?: "typed" | "system";
 }
 
 export interface SessionMeta {

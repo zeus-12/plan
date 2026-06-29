@@ -129,6 +129,10 @@ export function parseSessionJsonl(raw: string, filePath: string): ParsedSession 
           : parseUserParts(content);
       if (parts.length === 0) continue;
 
+      const promptSource =
+        obj.promptSource === "system" || obj.promptSource === "typed"
+          ? obj.promptSource
+          : undefined;
       messages.push({
         uuid: typeof obj.uuid === "string" ? obj.uuid : "",
         parentUuid:
@@ -136,6 +140,8 @@ export function parseSessionJsonl(raw: string, filePath: string): ParsedSession 
         role: obj.type,
         timestamp: typeof obj.timestamp === "string" ? obj.timestamp : "",
         parts,
+        ...(obj.isMeta === true ? { isMeta: true } : {}),
+        ...(promptSource ? { promptSource } : {}),
       });
     }
   }
