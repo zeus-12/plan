@@ -1,7 +1,12 @@
 import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { highlightToHtml, stripComments, useActiveShikiTheme, useShikiReady } from "../lib/highlight";
+import {
+  highlightToHtml,
+  stripComments,
+  useActiveShikiTheme,
+  useShikiReady,
+} from "../lib/highlight";
 import { cn } from "../lib/utils";
 import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
 
@@ -33,7 +38,10 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
 
   // react-markdown nests the fenced text in a <code class="language-xxx">.
   const codeEl = isValidElement(children) ? children : null;
-  const codeProps = (codeEl?.props ?? {}) as { className?: string; children?: ReactNode };
+  const codeProps = (codeEl?.props ?? {}) as {
+    className?: string;
+    children?: ReactNode;
+  };
   const lang =
     /language-(\S+)/.exec(codeProps.className ?? "")?.[1]?.toLowerCase() ?? "";
   const code = codeText(codeProps.children);
@@ -42,7 +50,7 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     () => highlightToHtml(code, lang),
     // Re-render once shiki finishes loading, and re-tokenize on theme change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [code, lang, shikiReady, shikiTheme]
+    [code, lang, shikiReady, shikiTheme],
   );
 
   const copy = () => {
@@ -85,7 +93,9 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
             type="button"
             onClick={copyOneLine}
             aria-label={
-              copiedLine ? "Copied as one line" : "Copy as one line for terminal"
+              copiedLine
+                ? "Copied as one line"
+                : "Copy as one line for terminal"
             }
             title={
               copiedLine
@@ -119,7 +129,16 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
 
 function CopyIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
@@ -128,7 +147,16 @@ function CopyIcon() {
 function CopyOneLineIcon() {
   // Two chevrons collapsing toward a single middle line — i.e. many lines → one.
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M7 4l5 5 5-5" />
       <line x1="4" y1="12" x2="20" y2="12" />
       <path d="M7 20l5-5 5 5" />
@@ -137,7 +165,16 @@ function CopyOneLineIcon() {
 }
 function CheckIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
@@ -161,8 +198,8 @@ export const Markdown = memo(function Markdown({
   return (
     <div
       className={cn(
-        "text-[13px] leading-relaxed text-[var(--text)] [word-break:break-word]",
-        className
+        "text-[13.5px] leading-relaxed text-[var(--text)] [word-break:break-word]",
+        className,
       )}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
@@ -182,7 +219,7 @@ const COMPONENTS = {
     <h1
       className={cn(
         "mb-2 mt-4 text-[1.3em] font-semibold first:mt-0",
-        className
+        className,
       )}
       {...p}
     />
@@ -191,19 +228,25 @@ const COMPONENTS = {
     <h2
       className={cn(
         "mb-2 mt-4 text-[1.15em] font-semibold first:mt-0",
-        className
+        className,
       )}
       {...p}
     />
   ),
   h3: ({ className, ...p }: Props<"h3">) => (
     <h3
-      className={cn("mb-1 mt-3 text-[1.05em] font-semibold first:mt-0", className)}
+      className={cn(
+        "mb-1 mt-3 text-[1.05em] font-semibold first:mt-0",
+        className,
+      )}
       {...p}
     />
   ),
   h4: ({ className, ...p }: Props<"h4">) => (
-    <h4 className={cn("mb-1 mt-3 font-semibold first:mt-0", className)} {...p} />
+    <h4
+      className={cn("mb-1 mt-3 font-semibold first:mt-0", className)}
+      {...p}
+    />
   ),
   ul: ({ className, ...p }: Props<"ul">) => (
     <ul className={cn("my-2 list-disc space-y-1 pl-5", className)} {...p} />
@@ -216,14 +259,20 @@ const COMPONENTS = {
   ),
   a: ({ className, ...p }: Props<"a">) => (
     <a
-      className={cn("text-[var(--accent)] underline underline-offset-2", className)}
+      className={cn(
+        "text-[var(--accent)] underline underline-offset-2",
+        className,
+      )}
       target="_blank"
       rel="noreferrer noopener"
       {...p}
     />
   ),
   strong: ({ className, ...p }: Props<"strong">) => (
-    <strong className={cn("font-semibold text-[var(--text)]", className)} {...p} />
+    <strong
+      className={cn("font-semibold text-[var(--text)]", className)}
+      {...p}
+    />
   ),
   em: ({ className, ...p }: Props<"em">) => (
     <em className={cn("italic", className)} {...p} />
@@ -232,7 +281,7 @@ const COMPONENTS = {
     <blockquote
       className={cn(
         "my-2 border-l-2 border-[var(--border-strong)] pl-3 text-[var(--text-secondary)]",
-        className
+        className,
       )}
       {...p}
     />
@@ -250,7 +299,7 @@ const COMPONENTS = {
       <code
         className={cn(
           "rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5 font-[family-name:var(--font-mono)] text-[0.88em]",
-          className
+          className,
         )}
         {...p}
       />
@@ -261,7 +310,7 @@ const COMPONENTS = {
       <table
         className={cn(
           "w-full border-collapse text-[12px] [&_td]:border [&_td]:border-[var(--border)] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[var(--border)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold",
-          className
+          className,
         )}
         {...p}
       />
