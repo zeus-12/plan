@@ -209,6 +209,13 @@ function Shell() {
     setActiveWorktreeId(null);
   }, [selectedEncoded]);
 
+  // Switching worktrees remounts the workspace (keyed by encoded), so mark it a
+  // transition: React renders the new worktree concurrently while the current
+  // one stays interactive, instead of the window freezing mid-switch.
+  const selectWorktree = useCallback((id: string | null) => {
+    startTransition(() => setActiveWorktreeId(id));
+  }, []);
+
   const activeWorktree =
     worktrees.worktrees.find((w) => w.id === activeWorktreeId) ?? null;
   const prWorktree =
@@ -360,7 +367,7 @@ function Shell() {
     triggerCode: "Digit1",
     items: worktreeItems,
     currentIndex: worktreeIndex,
-    onCommit: (it) => setActiveWorktreeId(it.id),
+    onCommit: (it) => selectWorktree(it.id),
   });
 
   // Sessions dashboard: a control-center for every live Claude pty.
@@ -498,8 +505,8 @@ function Shell() {
               }
               worktrees={worktrees.worktrees}
               activeWorktreeId={activeWorktreeId}
-              onSelectLive={() => setActiveWorktreeId(null)}
-              onSelectWorktree={setActiveWorktreeId}
+              onSelectLive={() => selectWorktree(null)}
+              onSelectWorktree={selectWorktree}
               onNew={() => setShowNewWorktree(true)}
               onRemove={handleRemoveWorktree}
               onAddRepos={setAddReposWorktreeId}
@@ -591,7 +598,7 @@ function Shell() {
             projectEncoded={selected.encoded}
             onCreate={async (input) => {
               const rec = await worktrees.create(input);
-              setActiveWorktreeId(rec.id);
+              selectWorktree(rec.id);
             }}
             onClose={() => setShowNewWorktree(false)}
           />

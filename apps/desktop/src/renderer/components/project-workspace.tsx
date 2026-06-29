@@ -74,6 +74,12 @@ import {
 } from "../lib/mru-store";
 import { mergeSession } from "../lib/merge-session";
 import { bumpWorktreeRevision } from "../lib/worktree-revision";
+import {
+  getCachedSessions,
+  setCachedSessions,
+  getCachedTranscripts,
+  setCachedTranscripts,
+} from "../lib/session-cache";
 import { osNotify, pushToast } from "../lib/toast-store";
 
 /**
@@ -757,19 +763,32 @@ export function ProjectWorkspace({
   }, [refreshDiff]);
 
   // ── Sessions state ───────────────────────────────────────────
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
+  // Seed from the per-encoded cache so revisiting a worktree paints the session
+  // list + open transcripts instantly (then refreshes in the background) instead
+  // of flashing "Loading…" through a full re-list/re-parse on every remount.
+  const [sessions, setSessions] = useState<SessionListItem[]>(
+    () => getCachedSessions(project.encoded) ?? [],
+  );
+  // Only show the loading placeholder if this worktree was never loaded.
+  const [sessionsLoading, setSessionsLoading] = useState(
+    () => getCachedSessions(project.encoded) === null,
+  );
   // Parsed transcripts for every OPEN chat tab, keyed by session id, so each
   // chat tab keeps a live, mounted MessageList (its scroll survives switching
   // tabs). The watcher refreshes whichever open transcripts change. The active
   // chat tab's transcript is exposed as `session` for the status/notify logic.
   const [transcripts, setTranscripts] = useState<Map<string, ParsedSession>>(
-    new Map(),
+    () => getCachedTranscripts(project.encoded) ?? new Map(),
   );
   const session = useMemo(
     () => (selectedSessionId ? (transcripts.get(selectedSessionId) ?? null) : null),
     [transcripts, selectedSessionId],
   );
+  // Persist parsed transcripts so a worktree remount re-hydrates open chats
+  // instantly instead of re-reading/re-parsing them over IPC.
+  useEffect(() => {
+    setCachedTranscripts(project.encoded, transcripts);
+  }, [project.encoded, transcripts]);
   // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
   // itself lives inside ChatInput so keystrokes don't re-render the workspace.
   const chatInputRef = useRef<ChatInputHandle>(null);
@@ -817,6 +836,8 @@ export function ProjectWorkspace({
           archived: s.archived,
         }));
       setSessions(enriched);
+      // Cache the loaded list so a remount (worktree switch) hydrates instantly.
+      setCachedSessions(project.encoded, enriched);
       // No auto-select: the content pane only shows what you've opened as a
       // tab. A fresh worktree opens to an empty pane (click a chat to open it).
     } finally {
