@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Check, ChevronDown, Copy } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { useTextFind } from "@plan/shared/lib/use-text-find";
@@ -238,6 +239,115 @@ function CollapsibleBlock({
         <div className="overflow-hidden">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** Plain text a user turn copies to the clipboard — its text parts joined. */
+function userMessageText(m: ConversationMessage): string {
+  return m.parts
+    .filter((p): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text")
+    .map((p) => p.text)
+    .join("\n\n")
+    .trim();
+}
+
+/**
+ * 12-hour clock time with AM/PM in the viewer's local timezone, e.g. "2:45 PM".
+ * The stored timestamp is UTC ISO; toLocaleTimeString converts it to local.
+ * Empty on an unparseable ts.
+ */
+function formatClockTime(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+/** How tall (px) a user bubble grows before it clips behind a "Show more". */
+const USER_MESSAGE_MAX_H = 260;
+
+/**
+ * User-bubble body that clips past a max height and reveals a bottom-left
+ * "Show more" toggle. Overflow is measured off the content's scrollHeight (the
+ * full, un-clamped height), so the toggle stays correct in both states.
+ */
+function CollapsibleUserMessage({ children }: { children: React.ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOverflowing(el.scrollHeight > USER_MESSAGE_MAX_H + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <>
+      <div
+        ref={ref}
+        className="flex flex-col gap-1.5 overflow-hidden"
+        style={{ maxHeight: expanded ? undefined : USER_MESSAGE_MAX_H }}
+      >
+        {children}
+      </div>
+      {overflowing && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-px flex items-center gap-0.5 self-start text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
+        >
+          {expanded ? "Show less" : "Show more"}
+          <ChevronDown
+            size={12}
+            className={cn("transition-transform", expanded && "rotate-180")}
+          />
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
+ * Copies text to the clipboard, flipping to a check only once the write
+ * actually resolves — never on click alone.
+ */
+function CopyButton({ getText }: { getText: () => string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    []
+  );
+
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(getText());
+      setCopied(true);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard blocked — leave the button unchanged rather than claim success.
+    }
+  }, [getText]);
+
+  return (
+    <button
+      onClick={onCopy}
+      aria-label={copied ? "Copied" : "Copy message"}
+      className="text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </button>
   );
 }
 
@@ -1617,58 +1727,81 @@ export const MessageList = memo(function MessageList({
                 // off-screen rows — width changes (sidebar toggles) would
                 // otherwise reflow the entire transcript.
                 // scroll-mt keeps a jumped-to message off the very top edge.
-                "flex px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                "group flex px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
                 showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
                 isUser ? "justify-end" : "justify-start"
               )}
             >
-              <div
-                className={cn(
-                  "flex flex-col gap-1.5",
-                  isUser
-                    ? "max-w-[80%] rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2"
-                    : "w-full"
-                )}
-              >
-                {m.parts.map((p, i) => {
+              {(() => {
+                const partNodes = m.parts.map((p, i) => {
                   const partKey = `${m.uuid}:${i}`;
                   // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
                   if (hiddenParts.has(partKey)) return null;
                   const planVersionIndex = planVersionByPart.get(partKey) ?? -1;
                   return (
-                  <MessagePartView
-                    key={i}
-                    part={p}
-                    partIndex={i}
-                    message={m}
-                    annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
-                    pendingRange={
-                      pending &&
-                      pending.data.messageUuid === m.uuid &&
-                      pending.data.partIndex === i
-                        ? {
-                            start: pending.data.startOffset,
-                            end: pending.data.endOffset,
-                          }
-                        : null
-                    }
-                    onClickAnnotation={handleClickAnnotation}
-                    result={
-                      p.kind === "tool_use"
-                        ? resultByToolUseId.get(p.id)
-                        : undefined
-                    }
-                    terminalReady={terminalReady}
-                    onSendKeys={onSendKeys}
-                    planVersions={
-                      planVersionIndex >= 0 ? planVersions : EMPTY_PLAN_VERSIONS
-                    }
-                    planVersionIndex={planVersionIndex}
-                    encoded={encoded}
-                  />
+                    <MessagePartView
+                      key={i}
+                      part={p}
+                      partIndex={i}
+                      message={m}
+                      annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
+                      pendingRange={
+                        pending &&
+                        pending.data.messageUuid === m.uuid &&
+                        pending.data.partIndex === i
+                          ? {
+                              start: pending.data.startOffset,
+                              end: pending.data.endOffset,
+                            }
+                          : null
+                      }
+                      onClickAnnotation={handleClickAnnotation}
+                      result={
+                        p.kind === "tool_use"
+                          ? resultByToolUseId.get(p.id)
+                          : undefined
+                      }
+                      terminalReady={terminalReady}
+                      onSendKeys={onSendKeys}
+                      planVersions={
+                        planVersionIndex >= 0
+                          ? planVersions
+                          : EMPTY_PLAN_VERSIONS
+                      }
+                      planVersionIndex={planVersionIndex}
+                      encoded={encoded}
+                    />
                   );
-                })}
-              </div>
+                });
+                if (!isUser) {
+                  return (
+                    <div className="flex w-full flex-col gap-1.5">
+                      {partNodes}
+                    </div>
+                  );
+                }
+                const time = formatClockTime(m.timestamp);
+                return (
+                  <div className="flex max-w-[80%] flex-col items-end gap-1">
+                    <div className="flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2">
+                      <CollapsibleUserMessage>
+                        {partNodes}
+                      </CollapsibleUserMessage>
+                    </div>
+                    {/* Meta row sits outside the bubble, bottom-right: the send
+                        time, then a small gap, then a copy button. Hidden until
+                        the message row is hovered or focused. */}
+                    <div className="flex items-center gap-[7px] pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                      {time && (
+                        <span className="text-[11px] text-[var(--text-tertiary)]">
+                          {time}
+                        </span>
+                      )}
+                      <CopyButton getText={() => userMessageText(m)} />
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
