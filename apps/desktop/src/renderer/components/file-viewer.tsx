@@ -339,6 +339,10 @@ function FileViewerImpl({
   const bracketEnabled = bracketColorSetting.use();
   const lineWrapEnabled = lineWrapSetting.use();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Scroll viewport height, tracked so we can reserve empty space below the last
+  // line (VS Code "scroll beyond last line"): the final line can scroll up to the
+  // top of the viewport instead of being pinned to the bottom edge.
+  const [viewportH, setViewportH] = useState(0);
   const settingsRef = useRef<HTMLDivElement>(null);
   // A line to drop the editor caret on after the next reveal scroll settles
   // (set by go-to-symbol so the cursor lands on the jumped-to line).
@@ -606,6 +610,27 @@ function FileViewerImpl({
   const gutterChCount = gutterCh + 3; // matches the gutter span's `ch` width
   const gutterWidthPx = gutterChCount * charWidth;
 
+  // Widest line in display columns. The caret textarea is sized from this so it
+  // spans the full content width instead of clipping at the viewport edge — a
+  // viewport-wide textarea desyncs from the (horizontally scrolling) highlighted
+  // layer on long lines, which is what broke selecting overflowed text. Tabs are
+  // over-counted to a tab stop so the textarea is never *narrower* than the text
+  // (which would re-clip); only the editor overlay needs this, so skip the scan
+  // for files too large for that mode.
+  const maxLineCols = useMemo(() => {
+    if (lines.length > EDITOR_MAX_LINES) return 0;
+    let widest = 0;
+    for (const ln of lines) {
+      let cols = 0;
+      for (let i = 0; i < ln.length; i++)
+        cols += ln.charCodeAt(i) === 9 ? 8 : 1;
+      if (cols > widest) widest = cols;
+    }
+    return widest;
+  }, [lines]);
+  // Full width of the code column (matches the line `<span>`'s pl-3 + text + pr-6).
+  const editorContentWidth = CONTENT_PAD_LEFT + maxLineCols * charWidth + 24;
+
   /* ── Editor (textarea) selection state ────────────────────────── */
 
   // Live selection inside the editor textarea, in absolute char offsets. Drives
@@ -662,8 +687,16 @@ function FileViewerImpl({
       if (top < parent.scrollTop) parent.scrollTop = top;
       else if (bottom > parent.scrollTop + parent.clientHeight)
         parent.scrollTop = bottom - parent.clientHeight;
+      // Keep the caret horizontally in view too. The gutter is sticky over the
+      // left edge, so the usable left boundary is gutterWidthPx, not 0.
+      const col = offset - lineStarts[ln];
+      const caretX = gutterWidthPx + CONTENT_PAD_LEFT + col * charWidth;
+      if (caretX < parent.scrollLeft + gutterWidthPx)
+        parent.scrollLeft = caretX - gutterWidthPx;
+      else if (caretX > parent.scrollLeft + parent.clientWidth)
+        parent.scrollLeft = caretX - parent.clientWidth;
     },
-    [lineOfOffset]
+    [lineOfOffset, lineStarts, gutterWidthPx, charWidth]
   );
 
   // Read the textarea's current selection into our state (drives the visible
@@ -854,11 +887,30 @@ function FileViewerImpl({
     [annotations, activeRange, revealRange, findByLine, lineStarts, lines]
   );
 
+  // Track the scroll viewport's height so `paddingEnd` below can equal it. The
+  // deps re-run this once the scroll container actually mounts (it doesn't exist
+  // while the file is still loading, or for image/binary views), otherwise the
+  // one-shot mount effect would bail on a null ref and leave the height at 0.
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    setViewportH(el.clientHeight);
+    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [status, isImage, data]);
+
+  // Empty, line-number-free space under the last line so you can scroll it up to
+  // the top of the viewport. It renders nothing (just extends the scroll extent),
+  // so the file section's own background shows through — no separate surface.
+  const scrollBeyondEnd = Math.max(0, viewportH - LINE_HEIGHT);
+
   const virtualizer = useVirtualizer({
     count: visibleLineIndices.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => LINE_HEIGHT,
     overscan: 30,
+    paddingEnd: scrollBeyondEnd,
   });
 
   // Toggling wrap flips every row between a fixed 20px height and a measured,
@@ -1345,7 +1397,11 @@ function FileViewerImpl({
                 className="file-editor-input absolute bottom-0 top-0 resize-none border-0 bg-transparent p-0 text-[13px] leading-[20px] outline-none"
                 style={{
                   left: gutterWidthPx,
-                  right: 0,
+                  // Span the full content width (not the viewport) so the
+                  // transparent textarea scrolls in lockstep with the highlighted
+                  // layer — pinning to `right: 0` clipped it at the viewport and
+                  // desynced selection on lines wider than the screen.
+                  width: editorContentWidth,
                   paddingLeft: CONTENT_PAD_LEFT,
                   fontFamily: "var(--font-mono)",
                   color: "transparent",
