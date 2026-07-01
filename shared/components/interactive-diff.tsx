@@ -1417,7 +1417,12 @@ export function InteractiveDiff({
     "aria-readonly": true,
     "aria-multiline": true,
     onCompositionStart: abortComposition,
-    className: "outline-none [caret-color:var(--text)]",
+    // The contentEditable host is itself the horizontal scroller (like the
+    // unified view's) so native selection auto-scrolls it when you drag past the
+    // right edge — with the scroller on the wrapper instead, selection couldn't
+    // reach text wider than the screen.
+    className:
+      "overflow-x-auto outline-none [caret-color:var(--text)] [container-type:inline-size]",
   };
 
   /* ── Selection ──────────────────────────────────────────── */
@@ -2258,11 +2263,11 @@ export function InteractiveDiff({
 
     return (
       <div className="flex">
-        <div className="min-w-0 flex-1 overflow-x-auto border-r border-[var(--border)] [container-type:inline-size] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
+        <div className="min-w-0 flex-1 border-r border-[var(--border)] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
           {renderColumn("left")}
         </div>
         {showGutter && renderGutter()}
-        <div className="min-w-0 flex-1 overflow-x-auto [container-type:inline-size] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
+        <div className="min-w-0 flex-1 focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
           {renderColumn("right")}
         </div>
       </div>
