@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
+import { Kbd } from "@plan/shared/components/ui/kbd";
 import { cn } from "@plan/shared/lib/utils";
 
 interface Props {
@@ -57,11 +58,7 @@ export function CommitPanel({
         value={message}
         onChange={(e) => onMessageChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={
-          repoLabel
-            ? `Message (${repoLabel}) — ⌘Enter to commit`
-            : "Message — ⌘Enter to commit"
-        }
+        placeholder={repoLabel ? `Message (${repoLabel})` : "Message"}
         rows={2}
         className={cn(
           "w-full resize-y rounded-md border p-2 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed",
@@ -84,8 +81,16 @@ export function CommitPanel({
           size="sm"
           onClick={handleSubmit}
           disabled={pending || !message.trim()}
+          className="gap-1.5"
         >
-          {pending ? "Committing…" : "Commit"}
+          {pending ? (
+            "Committing…"
+          ) : (
+            <>
+              Commit
+              <Kbd keys={["⌘", "↵"]} />
+            </>
+          )}
         </Button>
       </div>
     </div>
