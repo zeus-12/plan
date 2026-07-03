@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Editor from "react-simple-code-editor";
-import { highlightToHtml } from "../lib/highlight";
+import { highlightToHtml, SYNC_HIGHLIGHT_MAX_CHARS } from "../lib/highlight";
 import { useActiveShikiTheme, useShikiReady } from "../lib/shiki";
 
 interface CodeEditorProps {
@@ -30,7 +30,16 @@ export function CodeEditor({
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
   const highlight = useMemo(
-    () => (v: string) => highlightToHtml(v, language),
+    // react-simple-code-editor re-runs this on EVERY keystroke/paste, over the
+    // whole value. Shiki-tokenizing a large document each time is what made
+    // pasting/typing crawl, so above the sync threshold we render plain (escaped)
+    // text — passing "plaintext" short-circuits tokenization. Colors return once
+    // the text drops back under the cap.
+    () => (v: string) =>
+      highlightToHtml(
+        v,
+        v.length > SYNC_HIGHLIGHT_MAX_CHARS ? "plaintext" : language,
+      ),
     // Re-render once shiki finishes loading, and re-tokenize on theme change.
     [language, shikiReady, shikiTheme],
   );

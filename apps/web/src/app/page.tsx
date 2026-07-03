@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Annotation } from "@plan/shared/lib/store";
 import { formatUnifiedDiff } from "@plan/shared/lib/diff";
 import { useDiffSettings } from "@plan/shared/lib/settings";
@@ -12,7 +19,8 @@ import { CodeEditor } from "@plan/shared/components/code-editor";
 import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
 import { detectLanguage } from "@plan/shared/lib/highlight";
-import { canFormat, formatCode } from "@plan/shared/lib/format";
+import { canFormat } from "@plan/shared/lib/format";
+import { formatCodeAsync } from "@/lib/format-async";
 import {
   decodeState,
   encodeState,
@@ -79,6 +87,14 @@ export default function Home() {
     reset,
   } = useUndoable();
 
+  // The editors bind to the live text (instant echo), but the expensive
+  // consumers — buildDiffLines + word-diff inside InteractiveDiff, and language
+  // detection — run off a DEFERRED copy. Pasting a large document updates the
+  // input immediately; the diff recomputes in a low-priority, interruptible
+  // render instead of blocking every keystroke.
+  const deferredLeft = useDeferredValue(leftText);
+  const deferredRight = useDeferredValue(rightText);
+
   const [language, setLanguage] = useState("auto");
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [commentingEnabled, setCommentingEnabled] = useState(false);
@@ -117,11 +133,12 @@ export default function Home() {
   );
 
   const detected = useMemo(() => {
-    const sample = rightText.length >= leftText.length ? rightText : leftText;
+    const sample =
+      deferredRight.length >= deferredLeft.length ? deferredRight : deferredLeft;
     if (!sample.trim()) return null;
     const lang = detectLanguage(sample);
     return lang === "plaintext" ? null : lang;
-  }, [leftText, rightText]);
+  }, [deferredLeft, deferredRight]);
 
   const effectiveLanguage =
     language === "auto" ? (detected ?? "plaintext") : language;
@@ -163,10 +180,10 @@ export default function Home() {
     if (!canFormat(effectiveLanguage)) return;
     const [l, r] = await Promise.all([
       leftText
-        ? formatCode(leftText, effectiveLanguage)
+        ? formatCodeAsync(leftText, effectiveLanguage)
         : Promise.resolve(null),
       rightText
-        ? formatCode(rightText, effectiveLanguage)
+        ? formatCodeAsync(rightText, effectiveLanguage)
         : Promise.resolve(null),
     ]);
     const nextLeft = l?.ok ? l.value : leftText;
@@ -338,8 +355,8 @@ export default function Home() {
       {hasContent && (
         <div className="mb-5 space-y-5">
           <InteractiveDiff
-            oldText={leftText}
-            newText={rightText}
+            oldText={deferredLeft}
+            newText={deferredRight}
             settings={settings}
             onSettingsChange={updateSettings}
             settingsVariant="popover"
