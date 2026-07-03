@@ -56,10 +56,7 @@ import {
   type Tab,
 } from "../lib/tabs-store";
 import { TabBar } from "./tab-bar";
-import {
-  isWorking,
-  useTerminalWorking,
-} from "../lib/terminal-activity-store";
+import { isWorking, useTerminalWorking } from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { RunConfigModal } from "./run-config-modal";
@@ -114,7 +111,10 @@ interface Props {
   /** Optional build command run before the Run command. */
   buildCommand?: string;
   /** Persist the Run/build command to the project (parent-keyed defaults). */
-  onSaveRunConfig: (runCommand: string, buildCommand: string) => Promise<void> | void;
+  onSaveRunConfig: (
+    runCommand: string,
+    buildCommand: string,
+  ) => Promise<void> | void;
 }
 
 function WorkspaceHeader({
@@ -291,7 +291,7 @@ const FileTabPane = memo(function FileTabPane({
     endOffset: number,
     startLine: number,
     endLine: number,
-    comment: string
+    comment: string,
   ) => void;
   onUpdateAnnotation: (path: string, id: string, comment: string) => void;
   onRemoveAnnotation: (path: string, id: string) => void;
@@ -342,7 +342,7 @@ const ChatTabPane = memo(function ChatTabPane({
     selectedText: string,
     startOffset: number,
     endOffset: number,
-    comment: string
+    comment: string,
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
@@ -393,14 +393,8 @@ export function ProjectWorkspace({
   // (`openKind` + the per-kind selection) is DERIVED from the active tab below,
   // so the tab list is the single source of truth.
   const [tab, setTab] = useState<WorkTab>("chat");
-  const {
-    tabs,
-    activeId,
-    openTab,
-    closeTab,
-    closeActive,
-    setActive,
-  } = useProjectTabs(project.encoded);
+  const { tabs, activeId, openTab, closeTab, closeActive, setActive } =
+    useProjectTabs(project.encoded);
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeId) ?? null,
     [tabs, activeId],
@@ -778,7 +772,8 @@ export function ProjectWorkspace({
     () => getCachedTranscripts(project.encoded) ?? new Map(),
   );
   const session = useMemo(
-    () => (selectedSessionId ? (transcripts.get(selectedSessionId) ?? null) : null),
+    () =>
+      selectedSessionId ? (transcripts.get(selectedSessionId) ?? null) : null,
     [transcripts, selectedSessionId],
   );
   // Persist parsed transcripts so a worktree remount re-hydrates open chats
@@ -789,7 +784,7 @@ export function ProjectWorkspace({
   // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
   // itself lives inside ChatInput so keystrokes don't re-render the workspace.
   const chatInputRef = useRef<ChatInputHandle>(null);
-  // Whether the chat composer holds focus — the compose buffer only claims ⌘⏎
+  // Whether the chat composer holds focus — the compose buffer only claims ⌘↵
   // (and shows the hint) while it's blurred, so the chord never fights the box.
   const [chatInputFocused, setChatInputFocused] = useState(false);
 
@@ -1255,7 +1250,13 @@ export function ProjectWorkspace({
         closePalette();
       },
     }));
-  }, [paletteMode, deferredPaletteQuery, switchFuse, switchEntries, closePalette]);
+  }, [
+    paletteMode,
+    deferredPaletteQuery,
+    switchFuse,
+    switchEntries,
+    closePalette,
+  ]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1816,7 +1817,7 @@ export function ProjectWorkspace({
           pushToast(
             {
               title: `[detect] ${res.state} — ${
-                res.lines.slice(-3).join(" ⏎ ") || "(empty)"
+                res.lines.slice(-3).join(" ↵ ") || "(empty)"
               }`,
             },
             6_000,
@@ -1850,7 +1851,8 @@ export function ProjectWorkspace({
       revealChatTerminal(selectedSessionId!);
       pushToast({
         title: "Waiting on a selection",
-        description: "Claude has a menu open and needs you to choose an option.",
+        description:
+          "Claude has a menu open and needs you to choose an option.",
         actionLabel: "Open terminal",
         onAction: () => revealChatTerminal(selectedSessionId!),
       });
@@ -1893,7 +1895,10 @@ export function ProjectWorkspace({
       const after = await snapshot("FRAME B (after 2s / while scrolling)");
       const combined = `${before}\n\n${after}`;
       await navigator.clipboard.writeText(combined);
-      pushToast({ title: `Copied both frames (${combined.length} chars)` }, 3_000);
+      pushToast(
+        { title: `Copied both frames (${combined.length} chars)` },
+        3_000,
+      );
     } catch {
       pushToast({ title: "Couldn't copy the terminal" }, 3_000);
     }
@@ -2248,10 +2253,7 @@ export function ProjectWorkspace({
           }
         }
         if (!found || !status || (!status.staged && !status.unstaged)) {
-          pushToast(
-            { title: "No diff found for that file." },
-            3_000,
-          );
+          pushToast({ title: "No diff found for that file." }, 3_000);
           return;
         }
         subPath = found.subPath;
@@ -2540,7 +2542,9 @@ export function ProjectWorkspace({
                       tab={t}
                       active={t.id === activeId}
                       encoded={project.encoded}
-                      annotations={annotationsByProjectFile[t.path] ?? EMPTY_ANN}
+                      annotations={
+                        annotationsByProjectFile[t.path] ?? EMPTY_ANN
+                      }
                       revealTarget={
                         fileReveal && fileReveal.path === t.path
                           ? fileReveal

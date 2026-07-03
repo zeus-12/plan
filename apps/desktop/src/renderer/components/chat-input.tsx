@@ -58,7 +58,7 @@ interface Props {
   /** Invoked when the user tries to send while blocked (reveals the terminal). */
   onBlocked?: () => void;
   /** Reports the composer's focus state so siblings can adjust their own
-   *  shortcuts (e.g. the compose buffer only claims ⌘⏎ when this is blurred). */
+   *  shortcuts (e.g. the compose buffer only claims ⌘↵ when this is blurred). */
   onFocusChange?: (focused: boolean) => void;
   /** ⌘Z right after "Add to chat" (while the inserted text is untouched) undoes
    *  the move: the composer strips the text it appended and calls this so the
@@ -143,451 +143,446 @@ const revokeIfBlob = (url: string) => {
  * temp-file save runs in the background and Send stays disabled until every
  * attachment has a real path — the paths are what actually get sent.
  */
-export const ChatInput = forwardRef<ChatInputHandle, Props>(
-  function ChatInput(
-    {
-      sessionId,
-      projectEncoded,
-      onSend,
-      inactive,
-      onStart,
-      notReady,
-      autoFocus,
-      blocked,
-      onBlocked,
-      onFocusChange,
-      onAddToChatUndo,
-    },
-    ref,
-  ) {
-    const [attachments, setAttachments] = useState<Attachment[]>([]);
-    const [preview, setPreview] = useState<Attachment | null>(null);
-    const [focused, setFocused] = useState(false);
-    const [isEmpty, setIsEmpty] = useState(
-      () => readDraft(sessionId) === undefined,
-    );
-    // True while the draft's first non-space char is "!", mirroring Claude's TUI
-    // bash mode. The text is sent verbatim — the "!" is the trigger — this only
-    // drives the visual cue so the user knows the line goes to the shell.
-    const [bashMode, setBashMode] = useState(false);
+export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
+  {
+    sessionId,
+    projectEncoded,
+    onSend,
+    inactive,
+    onStart,
+    notReady,
+    autoFocus,
+    blocked,
+    onBlocked,
+    onFocusChange,
+    onAddToChatUndo,
+  },
+  ref,
+) {
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [preview, setPreview] = useState<Attachment | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [isEmpty, setIsEmpty] = useState(
+    () => readDraft(sessionId) === undefined,
+  );
+  // True while the draft's first non-space char is "!", mirroring Claude's TUI
+  // bash mode. The text is sent verbatim — the "!" is the trigger — this only
+  // drives the visual cue so the user knows the line goes to the shell.
+  const [bashMode, setBashMode] = useState(false);
 
-    const editorRef = useRef<LexicalEditor | null>(null);
-    // A focus requested while the composer is still inactive (no live session)
-    // can't land a caret — the editor is read-only. We park it here and fire it
-    // the moment the session starts and the editor turns editable.
-    const pendingFocusRef = useRef<(() => void) | null>(null);
-    // Last message sent from THIS session's composer (serialized editor state) —
-    // ⌘Z restores it, chips and all, into an empty box so an accidental send
-    // (or lost text) can be recovered verbatim.
-    const lastSentRef = useRef<string | null>(null);
-    // Serialized draft from just before an "Add to chat" insertion — what ⌘Z
-    // restores. Kept only while the inserted text is untouched: the update
-    // listener in {@link CommandsPlugin} clears it the moment the user edits the
-    // composer, so a later ⌘Z falls back to Lexical's own history instead.
-    const addToChatUndoRef = useRef<{ before: string } | null>(null);
-    // Latest parent restore callback, read (not closed over) by the command
-    // handler so it never needs re-registering.
-    const onAddToChatUndoRef = useRef(onAddToChatUndo);
-    onAddToChatUndoRef.current = onAddToChatUndo;
+  const editorRef = useRef<LexicalEditor | null>(null);
+  // A focus requested while the composer is still inactive (no live session)
+  // can't land a caret — the editor is read-only. We park it here and fire it
+  // the moment the session starts and the editor turns editable.
+  const pendingFocusRef = useRef<(() => void) | null>(null);
+  // Last message sent from THIS session's composer (serialized editor state) —
+  // ⌘Z restores it, chips and all, into an empty box so an accidental send
+  // (or lost text) can be recovered verbatim.
+  const lastSentRef = useRef<string | null>(null);
+  // Serialized draft from just before an "Add to chat" insertion — what ⌘Z
+  // restores. Kept only while the inserted text is untouched: the update
+  // listener in {@link CommandsPlugin} clears it the moment the user edits the
+  // composer, so a later ⌘Z falls back to Lexical's own history instead.
+  const addToChatUndoRef = useRef<{ before: string } | null>(null);
+  // Latest parent restore callback, read (not closed over) by the command
+  // handler so it never needs re-registering.
+  const onAddToChatUndoRef = useRef(onAddToChatUndo);
+  onAddToChatUndoRef.current = onAddToChatUndo;
 
-    const clearAttachments = useCallback(() => {
-      setAttachments((prev) => {
-        prev.forEach((a) => revokeIfBlob(a.previewUrl));
-        return [];
-      });
-      setPreview(null);
-    }, []);
+  const clearAttachments = useCallback(() => {
+    setAttachments((prev) => {
+      prev.forEach((a) => revokeIfBlob(a.previewUrl));
+      return [];
+    });
+    setPreview(null);
+  }, []);
 
-    // Browsers don't reliably fire `blur` when the editor unmounts (tab switch,
-    // session change), so tell the parent the composer is gone — otherwise it
-    // would keep treating a non-existent box as focused.
-    useEffect(() => () => onFocusChange?.(false), [onFocusChange]);
+  // Browsers don't reliably fire `blur` when the editor unmounts (tab switch,
+  // session change), so tell the parent the composer is gone — otherwise it
+  // would keep treating a non-existent box as focused.
+  useEffect(() => () => onFocusChange?.(false), [onFocusChange]);
 
-    const removeAttachment = useCallback((id: string) => {
-      setAttachments((prev) => {
-        const target = prev.find((a) => a.id === id);
-        if (target) revokeIfBlob(target.previewUrl);
-        return prev.filter((a) => a.id !== id);
-      });
-      setPreview((p) => (p?.id === id ? null : p));
-    }, []);
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target) revokeIfBlob(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+    setPreview((p) => (p?.id === id ? null : p));
+  }, []);
 
-    const pendingSaves = attachments.some((a) => a.path === null);
-    const canSend =
-      !inactive &&
-      !notReady &&
-      !blocked &&
-      !pendingSaves &&
-      (!isEmpty || attachments.length > 0);
+  const pendingSaves = attachments.some((a) => a.path === null);
+  const canSend =
+    !inactive &&
+    !notReady &&
+    !blocked &&
+    !pendingSaves &&
+    (!isEmpty || attachments.length > 0);
 
-    // Refs the editor's command handlers read so they always see latest state
-    // without re-registering on every render.
-    const attachmentsRef = useRef(attachments);
-    attachmentsRef.current = attachments;
-    const pendingSavesRef = useRef(pendingSaves);
-    pendingSavesRef.current = pendingSaves;
+  // Refs the editor's command handlers read so they always see latest state
+  // without re-registering on every render.
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const pendingSavesRef = useRef(pendingSaves);
+  pendingSavesRef.current = pendingSaves;
 
-    const sessionRef = useRef(sessionId);
-    sessionRef.current = sessionId;
-    // True once the current session's stored attachments have been restored.
-    // The persist effect below waits on this so the transient empty state
-    // during a switch never overwrites the session we're switching *into*.
-    const loadedRef = useRef(false);
+  const sessionRef = useRef(sessionId);
+  sessionRef.current = sessionId;
+  // True once the current session's stored attachments have been restored.
+  // The persist effect below waits on this so the transient empty state
+  // during a switch never overwrites the session we're switching *into*.
+  const loadedRef = useRef(false);
 
-    // Restore (or clear, on session switch) the pasted images for this session,
-    // verifying each temp file still exists — the OS can purge it, and we never
-    // show or send a path we can't confirm. The undo buffer resets too so ⌘Z
-    // can't pull another chat's text back.
-    useEffect(() => {
-      loadedRef.current = false;
-      lastSentRef.current = null;
-      let cancelled = false;
-      setAttachments((prev) => {
-        prev.forEach((a) => revokeIfBlob(a.previewUrl));
-        return [];
-      });
-      setPreview(null);
-      void (async () => {
-        const paths = readAttachmentPaths(sessionId);
-        const present = await Promise.all(
-          paths.map((p) => window.electronAPI.fileExists(p)),
-        );
-        if (cancelled) return;
-        const live = paths.filter((_, i) => present[i]);
-        if (live.length !== paths.length) writeAttachmentPaths(sessionId, live);
-        setAttachments(attachmentsFromPaths(live));
-        loadedRef.current = true;
-      })();
-      return () => {
-        cancelled = true;
-        attachmentsRef.current.forEach((a) => revokeIfBlob(a.previewUrl));
-      };
-    }, [sessionId]);
-
-    // Persist saved attachment paths whenever they change, so a switch can
-    // restore them. Gated on loadedRef so the clear above can't wipe the set.
-    useEffect(() => {
-      if (!loadedRef.current) return;
-      writeAttachmentPaths(
-        sessionRef.current,
-        attachments.map((a) => a.path).filter((p): p is string => p !== null),
+  // Restore (or clear, on session switch) the pasted images for this session,
+  // verifying each temp file still exists — the OS can purge it, and we never
+  // show or send a path we can't confirm. The undo buffer resets too so ⌘Z
+  // can't pull another chat's text back.
+  useEffect(() => {
+    loadedRef.current = false;
+    lastSentRef.current = null;
+    let cancelled = false;
+    setAttachments((prev) => {
+      prev.forEach((a) => revokeIfBlob(a.previewUrl));
+      return [];
+    });
+    setPreview(null);
+    void (async () => {
+      const paths = readAttachmentPaths(sessionId);
+      const present = await Promise.all(
+        paths.map((p) => window.electronAPI.fileExists(p)),
       );
-    }, [attachments]);
+      if (cancelled) return;
+      const live = paths.filter((_, i) => present[i]);
+      if (live.length !== paths.length) writeAttachmentPaths(sessionId, live);
+      setAttachments(attachmentsFromPaths(live));
+      loadedRef.current = true;
+    })();
+    return () => {
+      cancelled = true;
+      attachmentsRef.current.forEach((a) => revokeIfBlob(a.previewUrl));
+    };
+  }, [sessionId]);
 
-    const send = useCallback(() => {
-      if (blocked) {
-        onBlocked?.();
-        return;
-      }
-      if (inactive || notReady || pendingSavesRef.current) return;
-      const editor = editorRef.current;
-      if (!editor) return;
-      const text = editor
-        .getEditorState()
-        .read(() => $getRoot().getTextContent())
-        .trim();
-      const imagePaths = attachmentsRef.current
-        .map((a) => a.path)
-        .filter((p): p is string => p !== null);
-      if (!text && imagePaths.length === 0) return;
-      // Image paths are sent separately (not folded into the text) so the
-      // terminal can type them as a real path the way a direct paste does.
-      onSend(text, imagePaths);
-      // Snapshot the full editor state so ⌘Z can bring it back verbatim.
-      lastSentRef.current = JSON.stringify(editor.getEditorState().toJSON());
-      editor.update(() => {
-        const root = $getRoot();
-        root.clear();
-        const p = $createParagraphNode();
-        root.append(p);
-        p.selectEnd();
-      });
-      clearAttachments();
-      window.localStorage.removeItem(draftKey(sessionId));
-      window.localStorage.removeItem(imagesKey(sessionId));
-    }, [
-      blocked,
-      inactive,
-      notReady,
-      onBlocked,
-      onSend,
-      sessionId,
-      clearAttachments,
-    ]);
+  // Persist saved attachment paths whenever they change, so a switch can
+  // restore them. Gated on loadedRef so the clear above can't wipe the set.
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    writeAttachmentPaths(
+      sessionRef.current,
+      attachments.map((a) => a.path).filter((p): p is string => p !== null),
+    );
+  }, [attachments]);
 
-    const sendRef = useRef(send);
-    sendRef.current = send;
+  const send = useCallback(() => {
+    if (blocked) {
+      onBlocked?.();
+      return;
+    }
+    if (inactive || notReady || pendingSavesRef.current) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    const text = editor
+      .getEditorState()
+      .read(() => $getRoot().getTextContent())
+      .trim();
+    const imagePaths = attachmentsRef.current
+      .map((a) => a.path)
+      .filter((p): p is string => p !== null);
+    if (!text && imagePaths.length === 0) return;
+    // Image paths are sent separately (not folded into the text) so the
+    // terminal can type them as a real path the way a direct paste does.
+    onSend(text, imagePaths);
+    // Snapshot the full editor state so ⌘Z can bring it back verbatim.
+    lastSentRef.current = JSON.stringify(editor.getEditorState().toJSON());
+    editor.update(() => {
+      const root = $getRoot();
+      root.clear();
+      const p = $createParagraphNode();
+      root.append(p);
+      p.selectEnd();
+    });
+    clearAttachments();
+    window.localStorage.removeItem(draftKey(sessionId));
+    window.localStorage.removeItem(imagesKey(sessionId));
+  }, [
+    blocked,
+    inactive,
+    notReady,
+    onBlocked,
+    onSend,
+    sessionId,
+    clearAttachments,
+  ]);
 
-    // Pasted images: chip appears IMMEDIATELY (object URL of the blob); the
-    // temp-file write happens in the background.
-    const addImage = useCallback(
-      (file: File, ext: string) => {
-        const id = crypto.randomUUID();
-        const previewUrl = URL.createObjectURL(file);
-        setAttachments((prev) => [...prev, { id, previewUrl, path: null }]);
-        void (async () => {
-          try {
-            const buf = new Uint8Array(await file.arrayBuffer());
-            const path = await window.electronAPI.saveTempImage(buf, ext);
-            if (path) {
-              setAttachments((prev) =>
-                prev.map((a) => (a.id === id ? { ...a, path } : a)),
-              );
-            } else {
-              removeAttachment(id);
-            }
-          } catch {
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  // Pasted images: chip appears IMMEDIATELY (object URL of the blob); the
+  // temp-file write happens in the background.
+  const addImage = useCallback(
+    (file: File, ext: string) => {
+      const id = crypto.randomUUID();
+      const previewUrl = URL.createObjectURL(file);
+      setAttachments((prev) => [...prev, { id, previewUrl, path: null }]);
+      void (async () => {
+        try {
+          const buf = new Uint8Array(await file.arrayBuffer());
+          const path = await window.electronAPI.saveTempImage(buf, ext);
+          if (path) {
+            setAttachments((prev) =>
+              prev.map((a) => (a.id === id ? { ...a, path } : a)),
+            );
+          } else {
             removeAttachment(id);
           }
-        })();
-      },
-      [removeAttachment],
-    );
-    const addImageRef = useRef(addImage);
-    addImageRef.current = addImage;
+        } catch {
+          removeAttachment(id);
+        }
+      })();
+    },
+    [removeAttachment],
+  );
+  const addImageRef = useRef(addImage);
+  addImageRef.current = addImage;
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus: () => {
-          const editor = editorRef.current;
-          if (!editor) return;
-          if (editor.isEditable()) {
-            editor.focus();
-            return;
-          }
-          // Inactive composer (old chat with no live terminal): caller is
-          // expected to kick off the session in parallel. Hold the focus until
-          // the editor becomes editable, then place the caret so the user can
-          // type. Replaces any earlier pending focus.
-          pendingFocusRef.current?.();
-          const unregister = editor.registerEditableListener((editable) => {
-            if (!editable) return;
-            unregister();
-            pendingFocusRef.current = null;
-            editor.focus();
-          });
-          pendingFocusRef.current = unregister;
-        },
-        append: (text: string) => {
-          const editor = editorRef.current;
-          if (!editor) return;
-          // Snapshot the draft as it stands now (read before the update — the
-          // post-update state isn't reliably committed yet) so ⌘Z can restore
-          // it. The insert is tagged so the dirty-watcher below knows this
-          // change is ours and not a user edit that should void the undo.
-          addToChatUndoRef.current = {
-            before: JSON.stringify(editor.getEditorState().toJSON()),
-          };
-          editor.update(
-            () => {
-              const root = $getRoot();
-              const had = root.getTextContent().length > 0;
-              root.selectEnd();
-              const sel = $getSelection();
-              if ($isRangeSelection(sel)) {
-                sel.insertText((had ? "\n\n" : "") + text);
-              }
-            },
-            { tag: ADD_TO_CHAT_TAG },
-          );
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        if (editor.isEditable()) {
           editor.focus();
-        },
-      }),
-      [],
-    );
+          return;
+        }
+        // Inactive composer (old chat with no live terminal): caller is
+        // expected to kick off the session in parallel. Hold the focus until
+        // the editor becomes editable, then place the caret so the user can
+        // type. Replaces any earlier pending focus.
+        pendingFocusRef.current?.();
+        const unregister = editor.registerEditableListener((editable) => {
+          if (!editable) return;
+          unregister();
+          pendingFocusRef.current = null;
+          editor.focus();
+        });
+        pendingFocusRef.current = unregister;
+      },
+      append: (text: string) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        // Snapshot the draft as it stands now (read before the update — the
+        // post-update state isn't reliably committed yet) so ⌘Z can restore
+        // it. The insert is tagged so the dirty-watcher below knows this
+        // change is ours and not a user edit that should void the undo.
+        addToChatUndoRef.current = {
+          before: JSON.stringify(editor.getEditorState().toJSON()),
+        };
+        editor.update(
+          () => {
+            const root = $getRoot();
+            const had = root.getTextContent().length > 0;
+            root.selectEnd();
+            const sel = $getSelection();
+            if ($isRangeSelection(sel)) {
+              sel.insertText((had ? "\n\n" : "") + text);
+            }
+          },
+          { tag: ADD_TO_CHAT_TAG },
+        );
+        editor.focus();
+      },
+    }),
+    [],
+  );
 
-    const placeholder = inactive
-      ? "Click here to connect this chat to Claude…"
-      : "What would you like to make?  @ files · / skills";
+  const placeholder = inactive
+    ? "Click here to connect this chat to Claude…"
+    : "What would you like to make?  @ files · / skills";
 
-    return (
-      <div className="shrink-0 px-3 pb-3 pt-0">
-        {blocked && (
-          <button
-            onClick={onBlocked}
-            className="mx-auto mb-2 flex w-full max-w-[820px] items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
-          >
-            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
-            <span>
-              Claude may be on a menu (no text box) — respond in the terminal,
-              not here.
-            </span>
-            <span className="ml-auto shrink-0">
-              <Kbd keys={["⌘", "J"]} />
-            </span>
-          </button>
-        )}
-        {/* Centered to match the message column's max width (see message-list). */}
-        <div
-          className={`mx-auto flex w-full max-w-[820px] flex-col rounded-lg border bg-[var(--bg)] transition-colors ${
-            bashMode
-              ? "border-[var(--accent)]"
-              : "border-[var(--border)] focus-within:border-[var(--border-strong)]"
-          }`}
+  return (
+    <div className="shrink-0 px-3 pb-3 pt-0">
+      {blocked && (
+        <button
+          onClick={onBlocked}
+          className="mx-auto mb-2 flex w-full max-w-[820px] items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
         >
-          <div
-            className="relative"
-            onMouseDown={inactive ? onStart : undefined}
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
+          <span>
+            Claude may be on a menu (no text box) — respond in the terminal, not
+            here.
+          </span>
+          <span className="ml-auto shrink-0">
+            <Kbd keys={["⌘", "J"]} />
+          </span>
+        </button>
+      )}
+      {/* Centered to match the message column's max width (see message-list). */}
+      <div
+        className={`mx-auto flex w-full max-w-[820px] flex-col rounded-lg border bg-[var(--bg)] transition-colors ${
+          bashMode
+            ? "border-[var(--accent)]"
+            : "border-[var(--border)] focus-within:border-[var(--border-strong)]"
+        }`}
+      >
+        <div className="relative" onMouseDown={inactive ? onStart : undefined}>
+          <LexicalComposer
+            initialConfig={{
+              namespace: "chat-input",
+              nodes: [ReferenceNode],
+              editorState: readDraft(sessionId),
+              editable: !inactive,
+              onError: (e) => console.error("[chat-input] lexical:", e),
+              theme: {},
+            }}
           >
-            <LexicalComposer
-              initialConfig={{
-                namespace: "chat-input",
-                nodes: [ReferenceNode],
-                editorState: readDraft(sessionId),
-                editable: !inactive,
-                onError: (e) => console.error("[chat-input] lexical:", e),
-                theme: {},
+            <PlainTextPlugin
+              contentEditable={
+                <ContentEditable
+                  aria-placeholder={placeholder}
+                  placeholder={
+                    <div className="pointer-events-none absolute left-3 top-2.5 select-none text-[13px] leading-relaxed text-[var(--text-tertiary)]">
+                      {placeholder}
+                    </div>
+                  }
+                  spellCheck={false}
+                  style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
+                  className={`w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-relaxed text-[var(--text)] outline-none ${
+                    inactive ? "cursor-pointer" : ""
+                  }`}
+                />
+              }
+              placeholder={null}
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+            <HistoryPlugin />
+            <EditorRefPlugin editorRef={editorRef} />
+            <EditablePlugin inactive={!!inactive} />
+            <DraftPlugin
+              sessionId={sessionId}
+              onEmptyChange={setIsEmpty}
+              onBashModeChange={setBashMode}
+            />
+            <CommandsPlugin
+              sendRef={sendRef}
+              lastSentRef={lastSentRef}
+              addToChatUndoRef={addToChatUndoRef}
+              onAddToChatUndoRef={onAddToChatUndoRef}
+            />
+            <ImagePastePlugin addImageRef={addImageRef} inactive={!!inactive} />
+            <FocusPlugin
+              autoFocus={!!autoFocus}
+              sessionId={sessionId}
+              onFocus={() => {
+                setFocused(true);
+                onFocusChange?.(true);
               }}
-            >
-              <PlainTextPlugin
-                contentEditable={
-                  <ContentEditable
-                    aria-placeholder={placeholder}
-                    placeholder={
-                      <div className="pointer-events-none absolute left-3 top-2.5 select-none text-[13px] leading-relaxed text-[var(--text-tertiary)]">
-                        {placeholder}
-                      </div>
-                    }
-                    spellCheck={false}
-                    style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
-                    className={`w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-relaxed text-[var(--text)] outline-none ${
-                      inactive ? "cursor-pointer" : ""
-                    }`}
-                  />
-                }
-                placeholder={null}
-                ErrorBoundary={LexicalErrorBoundary}
-              />
-              <HistoryPlugin />
-              <EditorRefPlugin editorRef={editorRef} />
-              <EditablePlugin inactive={!!inactive} />
-              <DraftPlugin
-                sessionId={sessionId}
-                onEmptyChange={setIsEmpty}
-                onBashModeChange={setBashMode}
-              />
-              <CommandsPlugin
-                sendRef={sendRef}
-                lastSentRef={lastSentRef}
-                addToChatUndoRef={addToChatUndoRef}
-                onAddToChatUndoRef={onAddToChatUndoRef}
-              />
-              <ImagePastePlugin addImageRef={addImageRef} inactive={!!inactive} />
-              <FocusPlugin
-                autoFocus={!!autoFocus}
-                sessionId={sessionId}
-                onFocus={() => {
-                  setFocused(true);
-                  onFocusChange?.(true);
-                }}
-                onBlur={() => {
-                  setFocused(false);
-                  onFocusChange?.(false);
-                }}
-              />
-              <FileMentionPlugin projectEncoded={projectEncoded} />
-              <SkillMentionPlugin projectEncoded={projectEncoded} />
-            </LexicalComposer>
-          </div>
-
-          {/* Bottom row: attachment chips (left) · ⌘L hint + send (right). */}
-          <div className="flex items-end justify-between gap-2 px-2 pb-1.5">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              {bashMode && (
-                <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                  bash
-                </span>
-              )}
-              {attachments.map((a) => (
-                <div key={a.id} className="group relative">
-                  <button
-                    onClick={() => setPreview(a)}
-                    title={a.path ?? "Saving…"}
-                    aria-label="Preview image"
-                    className="block"
-                  >
-                    <img
-                      src={a.previewUrl}
-                      alt="attached image"
-                      className={`h-11 w-11 rounded-md border border-[var(--border)] object-cover ${
-                        a.path === null ? "animate-pulse opacity-50" : ""
-                      }`}
-                    />
-                  </button>
-                  <button
-                    onClick={() => removeAttachment(a.id)}
-                    aria-label="Remove image"
-                    className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-[10px] leading-none text-[var(--text-secondary)] hover:text-[var(--text)] group-hover:flex"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {/* Hidden (not removed) while focused — no layout shift. */}
-              <span
-                className={`flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] ${
-                  focused ? "invisible" : ""
-                }`}
-              >
-                <span>Focus</span>
-                <Kbd keys={["⌘", "L"]} />
-              </span>
-              <button
-                onClick={send}
-                disabled={!canSend}
-                aria-label="Send"
-                title={
-                  notReady
-                    ? "Waiting for Claude to finish loading…"
-                    : pendingSaves
-                      ? "Saving image…"
-                      : "Send (Enter)"
-                }
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--bg)] transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                <SendIcon />
-              </button>
-            </div>
-          </div>
+              onBlur={() => {
+                setFocused(false);
+                onFocusChange?.(false);
+              }}
+            />
+            <FileMentionPlugin projectEncoded={projectEncoded} />
+            <SkillMentionPlugin projectEncoded={projectEncoded} />
+          </LexicalComposer>
         </div>
 
-        {/* Lightweight image preview: overlay + image, click outside to close. */}
-        {preview && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
-            onClick={() => setPreview(null)}
-          >
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <img
-                src={preview.previewUrl}
-                alt="attached image preview"
-                className="max-h-[80vh] max-w-[85vw] rounded-lg border border-[var(--border)]"
-              />
-              <div className="absolute right-2 top-2 flex items-center gap-2">
+        {/* Bottom row: attachment chips (left) · ⌘L hint + send (right). */}
+        <div className="flex items-end justify-between gap-2 px-2 pb-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {bashMode && (
+              <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                bash
+              </span>
+            )}
+            {attachments.map((a) => (
+              <div key={a.id} className="group relative">
                 <button
-                  onClick={() => removeAttachment(preview.id)}
-                  className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--removed-text,#f87171)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                  onClick={() => setPreview(a)}
+                  title={a.path ?? "Saving…"}
+                  aria-label="Preview image"
+                  className="block"
                 >
-                  Delete
+                  <img
+                    src={a.previewUrl}
+                    alt="attached image"
+                    className={`h-11 w-11 rounded-md border border-[var(--border)] object-cover ${
+                      a.path === null ? "animate-pulse opacity-50" : ""
+                    }`}
+                  />
                 </button>
                 <button
-                  onClick={() => setPreview(null)}
-                  aria-label="Close preview"
-                  className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg)] text-[14px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                  onClick={() => removeAttachment(a.id)}
+                  aria-label="Remove image"
+                  className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-[10px] leading-none text-[var(--text-secondary)] hover:text-[var(--text)] group-hover:flex"
                 >
                   ×
                 </button>
               </div>
+            ))}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Hidden (not removed) while focused — no layout shift. */}
+            <span
+              className={`flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] ${
+                focused ? "invisible" : ""
+              }`}
+            >
+              <span>Focus</span>
+              <Kbd keys={["⌘", "L"]} />
+            </span>
+            <button
+              onClick={send}
+              disabled={!canSend}
+              aria-label="Send"
+              title={
+                notReady
+                  ? "Waiting for Claude to finish loading…"
+                  : pendingSaves
+                    ? "Saving image…"
+                    : "Send (Enter)"
+              }
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--bg)] transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              <SendIcon />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Lightweight image preview: overlay + image, click outside to close. */}
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setPreview(null)}
+        >
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={preview.previewUrl}
+              alt="attached image preview"
+              className="max-h-[80vh] max-w-[85vw] rounded-lg border border-[var(--border)]"
+            />
+            <div className="absolute right-2 top-2 flex items-center gap-2">
+              <button
+                onClick={() => removeAttachment(preview.id)}
+                className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--removed-text,#f87171)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+              >
+                Delete
+              </button>
+              <button
+                onClick={() => setPreview(null)}
+                aria-label="Close preview"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg)] text-[14px] leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+              >
+                ×
+              </button>
             </div>
           </div>
-        )}
-      </div>
-    );
-  },
-);
+        </div>
+      )}
+    </div>
+  );
+});
 
 /* ── Lexical plugins (each small + single-purpose) ─────────────────── */
 

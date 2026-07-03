@@ -21,9 +21,9 @@ interface MessageOutputProps {
   onSend?: (message: string) => void;
   sendLabel?: string;
   /**
-   * When true, the send button claims ⌘⏎ as a global shortcut and shows the
+   * When true, the send button claims ⌘↵ as a global shortcut and shows the
    * hint on the button. Callers set this only while their own input box is
-   * blurred, so the chord doesn't compete with the box's own ⌘⏎.
+   * blurred, so the chord doesn't compete with the box's own ⌘↵.
    */
   shortcutEnabled?: boolean;
   /**
@@ -104,7 +104,7 @@ export function MessageOutput({
     }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      // Stop this stroke from also reaching the panel's window-level ⌘⏎ send
+      // Stop this stroke from also reaching the panel's window-level ⌘↵ send
       // listener. Closing the modal re-arms that listener, so without cutting
       // propagation here the same keypress would save the edit AND immediately
       // flush the buffer to chat — the edit should settle in the panel first.
@@ -127,8 +127,8 @@ export function MessageOutput({
     setTimeout(() => setSent(false), 2000);
   }, [onSend, message]);
 
-  // Claim ⌘⏎ for the send button while the caller's input box is blurred. We
-  // skip it while the modal is open so its own ⌘⏎ (save) keeps priority.
+  // Claim ⌘↵ for the send button while the caller's input box is blurred. We
+  // skip it while the modal is open so its own ⌘↵ (save) keeps priority.
   useEffect(() => {
     if (!onSend || !shortcutEnabled || modal) return;
     function onKeyDown(e: KeyboardEvent) {
