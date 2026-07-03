@@ -1237,10 +1237,10 @@ function FileViewerImpl({
                   "noopener"
                 )
               }
-              title="Open this file in the web doc tool to collect comments"
+              title="Open this file as a shareable doc others can comment on"
               className="flex h-7 items-center rounded-md border border-[var(--border)] px-2 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
             >
-              Open as doc
+              Share for comments
             </button>
           )}
           <div className="relative" ref={settingsRef}>
