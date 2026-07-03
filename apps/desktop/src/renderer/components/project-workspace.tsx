@@ -2036,13 +2036,12 @@ export function ProjectWorkspace({
   const [runConfigOpen, setRunConfigOpen] = useState(false);
   const [buildConfigOpen, setBuildConfigOpen] = useState(false);
 
-  // Run is always first and non-closable; Build follows it but only inside a
-  // worktree (that's where a per-branch build makes sense). Both pty ids are
-  // scoped to this worktree's encoded so the processes are per-worktree; the
-  // command lists themselves are project-level (threaded in via props).
+  // Build comes first, but only inside a worktree (that's where a per-branch
+  // build makes sense); Run follows and is always present and non-closable.
+  // Both pty ids are scoped to this worktree's encoded so the processes are
+  // per-worktree; the command lists themselves are project-level (via props).
   const sidebarTerminals = useMemo(
     () => [
-      { id: `run:${project.encoded}`, label: "Run", kind: "run" as const },
       ...(isWorktree
         ? [
             {
@@ -2052,6 +2051,7 @@ export function ProjectWorkspace({
             },
           ]
         : []),
+      { id: `run:${project.encoded}`, label: "Run", kind: "run" as const },
       ...shells.map((id) => ({
         id,
         label: `Terminal ${shellNumber(id)}`,
