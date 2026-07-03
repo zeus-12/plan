@@ -760,7 +760,7 @@ function rangeForCover(root: HTMLElement, cover: PartCover): Range | null {
 
 /**
  * A markdown-rendered message text part. Selection highlights, click-to-edit and
- * part addressing all live on the shared {@link PartWrapper} now, so this is just
+ * part addressing all live on the shared {@link PartView} now, so this is just
  * the renderer.
  */
 function MarkdownText({ text }: { text: string }) {
@@ -773,105 +773,10 @@ function MarkdownText({ text }: { text: string }) {
 
 const EMPTY_PART_ANNS: PartAnn[] = [];
 
-/**
- * Wraps every message part with the machinery that makes it commentable: a
- * selectable host tagged with its (message, part) coordinates, the custom
- * highlights for annotations covering this part plus the in-flight pending
- * selection, and click-to-edit hit-testing. Applying this uniformly to text AND
- * tool blocks is what lets a selection — and its comment — span the tool rows
- * ("Ran …/filename") that sit between two paragraphs.
- */
-function PartWrapper({
-  messageUuid,
-  partIndex,
-  partAnns,
-  pendingCover,
-  onClickAnnotation,
-  children,
-}: {
-  messageUuid: string;
-  partIndex: number;
-  partAnns: PartAnn[];
-  pendingCover: PartCover | null;
-  onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Repaint when the covered ranges change AND whenever the part resizes: an
-  // open-ended cover ("to end of part") must re-anchor when a tool block expands
-  // or markdown reflows.
-  useLayoutEffect(() => {
-    const root = ref.current;
-    const hl = getHighlights();
-    if (!root || !hl) return;
-    let added: Array<{ set: Highlight; range: Range }> = [];
-    const paint = () => {
-      for (const pa of partAnns) {
-        const r = rangeForCover(root, pa.cover);
-        if (r) {
-          hl.ann.add(r);
-          added.push({ set: hl.ann, range: r });
-        }
-      }
-      if (pendingCover) {
-        const r = rangeForCover(root, pendingCover);
-        if (r) {
-          hl.pending.add(r);
-          added.push({ set: hl.pending, range: r });
-        }
-      }
-    };
-    const clear = () => {
-      for (const a of added) a.set.delete(a.range);
-      added = [];
-    };
-    paint();
-    const ro = new ResizeObserver(() => {
-      clear();
-      paint();
-    });
-    ro.observe(root);
-    return () => {
-      ro.disconnect();
-      clear();
-    };
-  }, [partAnns, pendingCover]);
-
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (partAnns.length === 0) return;
-      const root = ref.current;
-      if (!root) return;
-      const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
-      if (!caret) return;
-      const off = offsetWithin(root, caret.startContainer, caret.startOffset);
-      if (off === -1) return;
-      const hit = partAnns.find((pa) => {
-        const end = pa.cover.end ?? annoText(root).length;
-        return pa.cover.start <= off && off < end;
-      });
-      if (!hit) return;
-      e.stopPropagation();
-      const r = rangeForCover(root, hit.cover);
-      const rect = r?.getBoundingClientRect() ?? root.getBoundingClientRect();
-      onClickAnnotation(hit.ann, rect);
-    },
-    [partAnns, onClickAnnotation],
-  );
-
-  return (
-    <div
-      ref={ref}
-      data-part-root=""
-      data-message-uuid={messageUuid}
-      data-part-index={partIndex}
-      onClick={handleClick}
-      className="select-text"
-    >
-      {children}
-    </div>
-  );
+function samePartCover(a: PartCover | null, b: PartCover | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.start === b.start && a.end === b.end;
 }
 
 interface ToolResult {
@@ -1212,143 +1117,263 @@ interface MessagePartViewProps {
   encoded: string;
 }
 
-/** Memoized: a keystroke elsewhere must not re-render every markdown block. */
-const MessagePartView = memo(
-  function MessagePartView({
-    part,
-    message,
-    result,
-    terminalReady,
-    onSendKeys,
-    planVersions,
-    planVersionIndex,
-    encoded,
-  }: MessagePartViewProps) {
-    switch (part.kind) {
-      case "text": {
-        const imgPaths = imageOnlyPaths(part.text);
-        if (imgPaths) {
-          return (
-            <div className="flex flex-col gap-2">
-              {imgPaths.map((p, i) => (
-                <TranscriptImage key={`${i}:${p}`} path={p} />
-              ))}
-            </div>
-          );
-        }
-        // A slash-command the user typed: strip the `<command-*>` tag soup and
-        // render the clean `/cmd args` as normal bubble text (it IS user input).
-        const command = parseCommandInvocation(part.text);
-        if (command) {
-          const clean = command.args
-            ? `${command.name} ${command.args}`
-            : command.name;
-          return <MarkdownText text={clean} />;
-        }
-        const bash = parseBashBlock(part.text);
-        if (bash) {
-          return (
-            <BashBlock
-              input={bash.input}
-              stdout={bash.stdout}
-              stderr={bash.stderr}
-            />
-          );
-        }
-        const tasks = parseTaskNotifications(part.text);
-        if (tasks) {
-          return (
-            <div className="flex flex-col gap-1.5">
-              {tasks.notifications.map((n, i) => (
-                <TaskNotificationBlock key={n.taskId ?? i} n={n} />
-              ))}
-              {tasks.remainder && <MarkdownText text={tasks.remainder} />}
-            </div>
-          );
-        }
-        if (message.isMeta || message.promptSource === "system") {
-          return <SystemMetaBlock text={part.text} />;
-        }
-        return <MarkdownText text={part.text} />;
-      }
-      case "thinking":
+/** The rendered content of one part (the kind switch). The selectable host,
+ *  highlight painting and click-to-edit live on {@link PartView}, which wraps
+ *  this. */
+function renderPartContent({
+  part,
+  message,
+  result,
+  terminalReady,
+  onSendKeys,
+  planVersions,
+  planVersionIndex,
+  encoded,
+}: MessagePartViewProps): React.ReactNode {
+  switch (part.kind) {
+    case "text": {
+      const imgPaths = imageOnlyPaths(part.text);
+      if (imgPaths) {
         return (
-          <CollapsibleBlock
-            label="💭 Thinking"
-            preview={truncate(part.text, 120)}
-          >
-            <CodeBody text={part.text} className="px-3 pb-3" />
-          </CollapsibleBlock>
+          <div className="flex flex-col gap-2">
+            {imgPaths.map((p, i) => (
+              <TranscriptImage key={`${i}:${p}`} path={p} />
+            ))}
+          </div>
         );
-      case "tool_use": {
-        // AskUserQuestion gets a rich card: question + options, clickable while
-        // pending (drives the TUI selector via keystrokes).
-        if (part.tool === "AskUserQuestion") {
-          const questions = parseAskInput(part.input);
-          if (questions) {
-            return (
-              <AskQuestionCard
-                questions={questions}
-                resultText={result?.output}
-                canAnswer={terminalReady && !!onSendKeys}
-                onPick={(index) =>
-                  // Selector starts on option 1: ↓ × index, then Enter.
-                  onSendKeys?.([
-                    ...Array.from({ length: index }, () => "\x1b[B"),
-                    "\r",
-                  ])
-                }
-              />
-            );
-          }
-        }
-        // The plan renders as a clean inline Plan card (anchored on the plan-file
-        // Write), not a raw tool block. The body goes through the same
-        // annotation-aware markdown path as normal assistant text, so selecting it
-        // comments via the existing chat flow.
-        if (planVersionIndex >= 0) {
-          const planText = planVersions[planVersionIndex]?.text ?? "";
-          return (
-            <PlanCard
-              versions={planVersions}
-              versionIndex={planVersionIndex}
-              encoded={encoded}
-              planPath={planFilePath(part)}
-              body={<MarkdownText text={planText} />}
-            />
-          );
-        }
-        let inputJson: string;
-        try {
-          inputJson = JSON.stringify(part.input, null, 2);
-        } catch {
-          inputJson = String(part.input);
-        }
+      }
+      // A slash-command the user typed: strip the `<command-*>` tag soup and
+      // render the clean `/cmd args` as normal bubble text (it IS user input).
+      const command = parseCommandInvocation(part.text);
+      if (command) {
+        const clean = command.args
+          ? `${command.name} ${command.args}`
+          : command.name;
+        return <MarkdownText text={clean} />;
+      }
+      const bash = parseBashBlock(part.text);
+      if (bash) {
         return (
-          <ToolCallBlock
-            tool={part.tool}
-            input={part.input}
-            inputJson={inputJson}
-            result={result}
+          <BashBlock
+            input={bash.input}
+            stdout={bash.stdout}
+            stderr={bash.stderr}
           />
         );
       }
-      case "tool_result":
-        // Rendered inline within its tool_use block (see `result`); skip here.
-        return null;
+      const tasks = parseTaskNotifications(part.text);
+      if (tasks) {
+        return (
+          <div className="flex flex-col gap-1.5">
+            {tasks.notifications.map((n, i) => (
+              <TaskNotificationBlock key={n.taskId ?? i} n={n} />
+            ))}
+            {tasks.remainder && <MarkdownText text={tasks.remainder} />}
+          </div>
+        );
+      }
+      if (message.isMeta || message.promptSource === "system") {
+        return <SystemMetaBlock text={part.text} />;
+      }
+      return <MarkdownText text={part.text} />;
     }
+    case "thinking":
+      return (
+        <CollapsibleBlock
+          label="💭 Thinking"
+          preview={truncate(part.text, 120)}
+        >
+          <CodeBody text={part.text} className="px-3 pb-3" />
+        </CollapsibleBlock>
+      );
+    case "tool_use": {
+      // AskUserQuestion gets a rich card: question + options, clickable while
+      // pending (drives the TUI selector via keystrokes).
+      if (part.tool === "AskUserQuestion") {
+        const questions = parseAskInput(part.input);
+        if (questions) {
+          return (
+            <AskQuestionCard
+              questions={questions}
+              resultText={result?.output}
+              canAnswer={terminalReady && !!onSendKeys}
+              onPick={(index) =>
+                // Selector starts on option 1: ↓ × index, then Enter.
+                onSendKeys?.([
+                  ...Array.from({ length: index }, () => "\x1b[B"),
+                  "\r",
+                ])
+              }
+            />
+          );
+        }
+      }
+      // The plan renders as a clean inline Plan card (anchored on the plan-file
+      // Write), not a raw tool block. The body goes through the same
+      // annotation-aware markdown path as normal assistant text, so selecting it
+      // comments via the existing chat flow.
+      if (planVersionIndex >= 0) {
+        const planText = planVersions[planVersionIndex]?.text ?? "";
+        return (
+          <PlanCard
+            versions={planVersions}
+            versionIndex={planVersionIndex}
+            encoded={encoded}
+            planPath={planFilePath(part)}
+            body={<MarkdownText text={planText} />}
+          />
+        );
+      }
+      let inputJson: string;
+      try {
+        inputJson = JSON.stringify(part.input, null, 2);
+      } catch {
+        inputJson = String(part.input);
+      }
+      return (
+        <ToolCallBlock
+          tool={part.tool}
+          input={part.input}
+          inputJson={inputJson}
+          result={result}
+        />
+      );
+    }
+    case "tool_result":
+      // Rendered inline within its tool_use block (see `result`); skip here.
+      return null;
+  }
+}
+
+interface PartViewProps extends MessagePartViewProps {
+  messageUuid: string;
+  partIndex: number;
+  /** Annotation covers for this part (see annotationsByMessage). */
+  partAnns: PartAnn[];
+  /** The in-flight selection's cover for this part, if any. */
+  pendingCover: PartCover | null;
+  onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
+}
+
+/**
+ * One message part, memoized, as a selectable host tagged with its
+ * (message, part) coordinates. It paints the custom highlights for any
+ * annotation covering this part plus the in-flight pending selection, and
+ * hit-tests clicks to open the editor. Hosting every part uniformly — text AND
+ * tool blocks — is what lets a selection (and its comment) span the tool rows
+ * ("Ran …/filename") and turns between two paragraphs.
+ */
+const PartView = memo(
+  function PartView(props: PartViewProps) {
+    const {
+      messageUuid,
+      partIndex,
+      partAnns,
+      pendingCover,
+      onClickAnnotation,
+      ...content
+    } = props;
+    const ref = useRef<HTMLDivElement>(null);
+
+    // Only touch the highlight registry for parts that actually have something to
+    // paint, and only observe resizes when a cover is open-ended ("to end of
+    // part") and so must re-anchor as the part grows (a tool block expanding).
+    // The vast majority of parts fall through both guards — no observer, no work.
+    useLayoutEffect(() => {
+      const root = ref.current;
+      const hl = getHighlights();
+      if (!root || !hl) return;
+      if (partAnns.length === 0 && !pendingCover) return;
+      let added: Array<{ set: Highlight; range: Range }> = [];
+      const paint = () => {
+        for (const pa of partAnns) {
+          const r = rangeForCover(root, pa.cover);
+          if (r) {
+            hl.ann.add(r);
+            added.push({ set: hl.ann, range: r });
+          }
+        }
+        if (pendingCover) {
+          const r = rangeForCover(root, pendingCover);
+          if (r) {
+            hl.pending.add(r);
+            added.push({ set: hl.pending, range: r });
+          }
+        }
+      };
+      const clear = () => {
+        for (const a of added) a.set.delete(a.range);
+        added = [];
+      };
+      paint();
+      const openEnded =
+        partAnns.some((p) => p.cover.end === null) ||
+        pendingCover?.end === null;
+      if (!openEnded) return clear;
+      const ro = new ResizeObserver(() => {
+        clear();
+        paint();
+      });
+      ro.observe(root);
+      return () => {
+        ro.disconnect();
+        clear();
+      };
+    }, [partAnns, pendingCover]);
+
+    const handleClick = useCallback(
+      (e: React.MouseEvent) => {
+        if (partAnns.length === 0) return;
+        const root = ref.current;
+        if (!root) return;
+        const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
+        if (!caret) return;
+        const off = offsetWithin(root, caret.startContainer, caret.startOffset);
+        if (off === -1) return;
+        const hit = partAnns.find((pa) => {
+          const end = pa.cover.end ?? annoText(root).length;
+          return pa.cover.start <= off && off < end;
+        });
+        if (!hit) return;
+        e.stopPropagation();
+        const r = rangeForCover(root, hit.cover);
+        const rect = r?.getBoundingClientRect() ?? root.getBoundingClientRect();
+        onClickAnnotation(hit.ann, rect);
+      },
+      [partAnns, onClickAnnotation],
+    );
+
+    return (
+      <div
+        ref={ref}
+        data-part-root=""
+        data-message-uuid={messageUuid}
+        data-part-index={partIndex}
+        onClick={handleClick}
+        className="select-text"
+      >
+        {renderPartContent(content)}
+      </div>
+    );
   },
   // Message/part objects keep their identity across session refreshes (see
-  // mergeSession), so reference checks suffice — except the paired tool result,
-  // which is rebuilt each parse and is compared by content.
+  // mergeSession), so reference checks suffice — except the paired tool result
+  // (rebuilt each parse, compared by content) and the pending cover (a fresh
+  // object each render, compared by value). partAnns is referentially stable
+  // (memoized) until the annotations actually change.
   (prev, next) =>
     prev.part === next.part &&
     prev.message === next.message &&
+    prev.messageUuid === next.messageUuid &&
+    prev.partIndex === next.partIndex &&
+    prev.partAnns === next.partAnns &&
+    prev.onClickAnnotation === next.onClickAnnotation &&
     prev.terminalReady === next.terminalReady &&
     prev.onSendKeys === next.onSendKeys &&
     prev.planVersions === next.planVersions &&
     prev.planVersionIndex === next.planVersionIndex &&
     prev.encoded === next.encoded &&
+    samePartCover(prev.pendingCover, next.pendingCover) &&
     sameResult(prev.result, next.result),
 );
 
@@ -1516,7 +1541,7 @@ export const MessageList = memo(function MessageList({
 
   // A span attaches to every part between its endpoints (across rows) with the
   // region it covers there (start part → its tail, middle parts → whole, end part
-  // → its head). Each PartWrapper then paints its own slice.
+  // → its head). Each PartView then paints its own slice.
   const annotationsByMessage = useMemo(() => {
     const map = new Map<string, Map<number, PartAnn[]>>();
     const add = (uuid: string, part: number, pa: PartAnn) => {
@@ -1925,7 +1950,7 @@ export const MessageList = memo(function MessageList({
                       const planVersionIndex =
                         planVersionByPart.get(partKey) ?? -1;
                       return (
-                        <PartWrapper
+                        <PartView
                           key={i}
                           messageUuid={m.uuid}
                           partIndex={i}
@@ -1942,26 +1967,23 @@ export const MessageList = memo(function MessageList({
                               : null
                           }
                           onClickAnnotation={handleClickAnnotation}
-                        >
-                          <MessagePartView
-                            part={p}
-                            message={m}
-                            result={
-                              p.kind === "tool_use"
-                                ? resultByToolUseId.get(p.id)
-                                : undefined
-                            }
-                            terminalReady={terminalReady}
-                            onSendKeys={onSendKeys}
-                            planVersions={
-                              planVersionIndex >= 0
-                                ? planVersions
-                                : EMPTY_PLAN_VERSIONS
-                            }
-                            planVersionIndex={planVersionIndex}
-                            encoded={encoded}
-                          />
-                        </PartWrapper>
+                          part={p}
+                          message={m}
+                          result={
+                            p.kind === "tool_use"
+                              ? resultByToolUseId.get(p.id)
+                              : undefined
+                          }
+                          terminalReady={terminalReady}
+                          onSendKeys={onSendKeys}
+                          planVersions={
+                            planVersionIndex >= 0
+                              ? planVersions
+                              : EMPTY_PLAN_VERSIONS
+                          }
+                          planVersionIndex={planVersionIndex}
+                          encoded={encoded}
+                        />
                       );
                     });
                     if (!isUser) {
