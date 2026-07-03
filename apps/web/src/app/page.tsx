@@ -105,7 +105,7 @@ export default function Home() {
       setAnnotations([]);
       setLeft(v);
     },
-    [setLeft]
+    [setLeft],
   );
 
   const handleRightChange = useCallback(
@@ -113,7 +113,7 @@ export default function Home() {
       setAnnotations([]);
       setRight(v);
     },
-    [setRight]
+    [setRight],
   );
 
   const detected = useMemo(() => {
@@ -124,7 +124,7 @@ export default function Home() {
   }, [leftText, rightText]);
 
   const effectiveLanguage =
-    language === "auto" ? detected ?? "plaintext" : language;
+    language === "auto" ? (detected ?? "plaintext") : language;
 
   const addAnnotation = useCallback(
     (
@@ -132,7 +132,7 @@ export default function Home() {
       startOffset: number,
       endOffset: number,
       comment: string,
-      side: "left" | "right"
+      side: "left" | "right",
     ) => {
       setAnnotations((prev) => [
         ...prev,
@@ -146,12 +146,12 @@ export default function Home() {
         },
       ]);
     },
-    []
+    [],
   );
 
   const updateAnnotation = useCallback((id: string, comment: string) => {
     setAnnotations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, comment } : a))
+      prev.map((a) => (a.id === id ? { ...a, comment } : a)),
     );
   }, []);
 
@@ -162,8 +162,12 @@ export default function Home() {
   const handleFormat = useCallback(async () => {
     if (!canFormat(effectiveLanguage)) return;
     const [l, r] = await Promise.all([
-      leftText ? formatCode(leftText, effectiveLanguage) : Promise.resolve(null),
-      rightText ? formatCode(rightText, effectiveLanguage) : Promise.resolve(null),
+      leftText
+        ? formatCode(leftText, effectiveLanguage)
+        : Promise.resolve(null),
+      rightText
+        ? formatCode(rightText, effectiveLanguage)
+        : Promise.resolve(null),
     ]);
     const nextLeft = l?.ok ? l.value : leftText;
     const nextRight = r?.ok ? r.value : rightText;
@@ -178,7 +182,7 @@ export default function Home() {
       setAnnotations([]);
       setBoth(next);
     },
-    [setBoth]
+    [setBoth],
   );
 
   const flashCopied = useCallback((kind: "link" | "diff") => {
@@ -211,7 +215,9 @@ export default function Home() {
   const handleCopyDiff = useCallback(async () => {
     setShareOpen(false);
     try {
-      await navigator.clipboard.writeText(formatUnifiedDiff(leftText, rightText));
+      await navigator.clipboard.writeText(
+        formatUnifiedDiff(leftText, rightText),
+      );
       flashCopied("diff");
     } catch {
       // Clipboard blocked — nothing else we can do without a user gesture.
@@ -341,8 +347,12 @@ export default function Home() {
             language={effectiveLanguage}
             annotations={annotations}
             onAddAnnotation={commentingEnabled ? addAnnotation : undefined}
-            onUpdateAnnotation={commentingEnabled ? updateAnnotation : undefined}
-            onRemoveAnnotation={commentingEnabled ? removeAnnotation : undefined}
+            onUpdateAnnotation={
+              commentingEnabled ? updateAnnotation : undefined
+            }
+            onRemoveAnnotation={
+              commentingEnabled ? removeAnnotation : undefined
+            }
             onMergeChange={handleMerge}
           />
 

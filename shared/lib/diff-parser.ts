@@ -88,7 +88,10 @@ function parseSingleFile(lines: string[]): FileDiff | null {
     }
   }
 
-  const path = status === "deleted" ? oldPath ?? newPath ?? "?" : newPath ?? oldPath ?? "?";
+  const path =
+    status === "deleted"
+      ? (oldPath ?? newPath ?? "?")
+      : (newPath ?? oldPath ?? "?");
 
   return {
     path,

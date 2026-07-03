@@ -1,9 +1,5 @@
 import { useEffect } from "react";
-import {
-  SHORTCUT_GROUPS,
-  chordTokens,
-  type Shortcut,
-} from "../lib/shortcuts";
+import { SHORTCUT_GROUPS, chordTokens, type Shortcut } from "../lib/shortcuts";
 
 interface Props {
   open: boolean;

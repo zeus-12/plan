@@ -26,20 +26,20 @@ async function load(): Promise<Stored> {
         : [],
       archivedEncoded: Array.isArray(parsed.archivedEncoded)
         ? parsed.archivedEncoded.filter(
-            (x): x is string => typeof x === "string"
+            (x): x is string => typeof x === "string",
           )
         : [],
       archivedSessions: Array.isArray(parsed.archivedSessions)
         ? parsed.archivedSessions.filter(
-            (x): x is string => typeof x === "string"
+            (x): x is string => typeof x === "string",
           )
         : [],
       sessionNames:
         parsed.sessionNames && typeof parsed.sessionNames === "object"
           ? Object.fromEntries(
               Object.entries(parsed.sessionNames).filter(
-                ([, v]) => typeof v === "string"
-              )
+                ([, v]) => typeof v === "string",
+              ),
             )
           : {},
     };
@@ -115,10 +115,7 @@ export async function getArchivedSessions(): Promise<string[]> {
   return [...data.archivedSessions];
 }
 
-export async function setSessionArchived(
-  sessionId: string,
-  archived: boolean
-) {
+export async function setSessionArchived(sessionId: string, archived: boolean) {
   const data = await load();
   const has = data.archivedSessions.includes(sessionId);
   if (archived && !has) {
@@ -126,7 +123,7 @@ export async function setSessionArchived(
     scheduleWrite();
   } else if (!archived && has) {
     data.archivedSessions = data.archivedSessions.filter(
-      (s) => s !== sessionId
+      (s) => s !== sessionId,
     );
     scheduleWrite();
   }

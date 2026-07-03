@@ -34,7 +34,12 @@ export function FindWidget({
   if (!find.open) return null;
 
   const total = find.matches.length;
-  const count = total === 0 ? (find.query ? "No results" : "") : `${find.current + 1} of ${total}`;
+  const count =
+    total === 0
+      ? find.query
+        ? "No results"
+        : ""
+      : `${find.current + 1} of ${total}`;
 
   return (
     <div
@@ -62,13 +67,25 @@ export function FindWidget({
           autoCorrect="off"
           className="h-6 w-44 bg-transparent font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)] outline-none placeholder:text-[var(--text-tertiary)]"
         />
-        <Toggle on={find.options.caseSensitive} onClick={() => find.toggle("caseSensitive")} title="Match Case">
+        <Toggle
+          on={find.options.caseSensitive}
+          onClick={() => find.toggle("caseSensitive")}
+          title="Match Case"
+        >
           Aa
         </Toggle>
-        <Toggle on={find.options.wholeWord} onClick={() => find.toggle("wholeWord")} title="Match Whole Word">
+        <Toggle
+          on={find.options.wholeWord}
+          onClick={() => find.toggle("wholeWord")}
+          title="Match Whole Word"
+        >
           <span className="underline">ab</span>
         </Toggle>
-        <Toggle on={find.options.regex} onClick={() => find.toggle("regex")} title="Use Regular Expression">
+        <Toggle
+          on={find.options.regex}
+          onClick={() => find.toggle("regex")}
+          title="Use Regular Expression"
+        >
           .*
         </Toggle>
       </div>
@@ -77,10 +94,18 @@ export function FindWidget({
         {count}
       </span>
 
-      <IconBtn onClick={find.prev} disabled={total === 0} title="Previous match (⇧↵)">
+      <IconBtn
+        onClick={find.prev}
+        disabled={total === 0}
+        title="Previous match (⇧↵)"
+      >
         <ChevronUp />
       </IconBtn>
-      <IconBtn onClick={find.next} disabled={total === 0} title="Next match (↵)">
+      <IconBtn
+        onClick={find.next}
+        disabled={total === 0}
+        title="Next match (↵)"
+      >
         <ChevronDown />
       </IconBtn>
       <IconBtn onClick={find.close} title="Close (Esc)">
@@ -111,7 +136,7 @@ function Toggle({
         "flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] leading-none transition-colors",
         on
           ? "bg-[var(--accent)] text-[var(--bg)]"
-          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
       )}
     >
       {children}
@@ -145,21 +170,48 @@ function IconBtn({
 
 function ChevronUp() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="18 15 12 9 6 15" />
     </svg>
   );
 }
 function ChevronDown() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }
 function CloseX() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <line x1="18" y1="6" x2="6" y2="18" />
       <line x1="6" y1="6" x2="18" y2="18" />
     </svg>

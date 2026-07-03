@@ -44,7 +44,13 @@ export function makeDiffTab(
   path: string,
   staged: boolean,
 ): Tab {
-  return { id: diffTabId(subPath, path, staged), kind: "diff", subPath, path, staged };
+  return {
+    id: diffTabId(subPath, path, staged),
+    kind: "diff",
+    subPath,
+    path,
+    staged,
+  };
 }
 export function makeChatTab(sessionId: string): Tab {
   return { id: chatTabId(sessionId), kind: "chat", sessionId };

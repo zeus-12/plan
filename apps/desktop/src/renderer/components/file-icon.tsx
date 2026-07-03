@@ -16,7 +16,10 @@ const modules = import.meta.glob("../assets/file-icons/*.svg", {
 
 const ICON_URL: Record<string, string> = {};
 for (const [path, url] of Object.entries(modules)) {
-  const base = path.split("/").pop()?.replace(/\.svg$/, "");
+  const base = path
+    .split("/")
+    .pop()
+    ?.replace(/\.svg$/, "");
   if (base) ICON_URL[base] = url;
 }
 
@@ -109,7 +112,8 @@ function iconName(filename: string): string {
   if (BY_NAME[lower]) return BY_NAME[lower];
   if (lower.startsWith("readme")) return "readme";
   if (lower.startsWith(".env")) return "tune";
-  if (lower.startsWith("tsconfig") && lower.endsWith(".json")) return "tsconfig";
+  if (lower.startsWith("tsconfig") && lower.endsWith(".json"))
+    return "tsconfig";
   if (lower.startsWith("license") || lower.startsWith("licence"))
     return "certificate";
   return BY_EXT[ext(lower)] ?? "document";

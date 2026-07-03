@@ -23,7 +23,7 @@ export async function readPlanConfig(name: string): Promise<string | null> {
 
 export async function writePlanConfig(
   name: string,
-  contents: string
+  contents: string,
 ): Promise<void> {
   await mkdir(PLAN_DIR, { recursive: true });
   await writeFile(planConfigPath(name), contents, "utf-8");

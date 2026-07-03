@@ -18,7 +18,7 @@ const AlertDialogOverlay = React.forwardRef<
     className={cn(
       "fixed inset-0 z-50 bg-black/40 backdrop-blur-sm",
       "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
-      className
+      className,
     )}
     {...props}
   />
@@ -36,7 +36,7 @@ const AlertDialogContent = React.forwardRef<
       className={cn(
         "fixed left-1/2 top-1/2 z-50 grid w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border border-[var(--border)] bg-[var(--popover-bg)] p-5 shadow-xl",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
-        className
+        className,
       )}
       {...props}
     />
@@ -48,12 +48,7 @@ function AlertDialogHeader({
   className,
   ...rest
 }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("flex flex-col gap-1.5", className)}
-      {...rest}
-    />
-  );
+  return <div className={cn("flex flex-col gap-1.5", className)} {...rest} />;
 }
 
 function AlertDialogFooter({
@@ -76,7 +71,7 @@ const AlertDialogTitle = React.forwardRef<
     ref={ref}
     className={cn(
       "font-[family-name:var(--font-mono)] text-[13px] font-semibold text-[var(--text)]",
-      className
+      className,
     )}
     {...props}
   />
@@ -91,7 +86,7 @@ const AlertDialogDescription = React.forwardRef<
     ref={ref}
     className={cn(
       "font-[family-name:var(--font-mono)] text-[12px] leading-relaxed text-[var(--text-secondary)]",
-      className
+      className,
     )}
     {...props}
   />
@@ -105,7 +100,10 @@ const AlertDialogAction = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Action
     ref={ref}
-    className={cn(buttonVariants({ variant: "default", size: "sm" }), className)}
+    className={cn(
+      buttonVariants({ variant: "default", size: "sm" }),
+      className,
+    )}
     {...props}
   />
 ));
@@ -117,7 +115,10 @@ const AlertDialogCancel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Cancel
     ref={ref}
-    className={cn(buttonVariants({ variant: "outline", size: "sm" }), className)}
+    className={cn(
+      buttonVariants({ variant: "outline", size: "sm" }),
+      className,
+    )}
     {...props}
   />
 ));

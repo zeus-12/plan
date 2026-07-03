@@ -39,9 +39,7 @@ export function computeChanges(lines: DiffLine[]): Change[] {
 }
 
 /** Map from a diff-lines index to the change it belongs to (if any). */
-export function buildLineToChangeMap(
-  changes: Change[]
-): Map<number, number> {
+export function buildLineToChangeMap(changes: Change[]): Map<number, number> {
   const map = new Map<number, number>();
   for (let ci = 0; ci < changes.length; ci++) {
     const c = changes[ci];
@@ -52,7 +50,10 @@ export function buildLineToChangeMap(
   return map;
 }
 
-function precedingContext(lines: DiffLine[], startIdx: number): DiffLine | null {
+function precedingContext(
+  lines: DiffLine[],
+  startIdx: number,
+): DiffLine | null {
   for (let j = startIdx - 1; j >= 0; j--) {
     if (lines[j].type === "context") return lines[j];
   }
@@ -63,7 +64,7 @@ function replaceLines(
   text: string,
   fromLine: number,
   toLine: number,
-  newLines: string[]
+  newLines: string[],
 ): string {
   // 1-based inclusive line range.
   const parts = text.split("\n");
@@ -75,7 +76,7 @@ function replaceLines(
 function insertLines(
   text: string,
   beforeLine: number,
-  newLines: string[]
+  newLines: string[],
 ): string {
   const parts = text.split("\n");
   const before = parts.slice(0, beforeLine - 1);
@@ -89,7 +90,7 @@ function insertLines(
 export function applyChangeRightToLeft(
   left: string,
   change: Change,
-  lines: DiffLine[]
+  lines: DiffLine[],
 ): string {
   if (change.removed.length > 0) {
     const fromLine = change.removed[0].oldNum!;
@@ -98,13 +99,17 @@ export function applyChangeRightToLeft(
       left,
       fromLine,
       toLine,
-      change.added.map((l) => l.content)
+      change.added.map((l) => l.content),
     );
   }
   // Pure insertion (only added lines exist) — splice into left
   const prev = precedingContext(lines, change.startLineIdx);
   const insertAt = prev ? prev.oldNum! + 1 : 1;
-  return insertLines(left, insertAt, change.added.map((l) => l.content));
+  return insertLines(
+    left,
+    insertAt,
+    change.added.map((l) => l.content),
+  );
 }
 
 /**
@@ -114,7 +119,7 @@ export function applyChangeRightToLeft(
 export function applyChangeLeftToRight(
   right: string,
   change: Change,
-  lines: DiffLine[]
+  lines: DiffLine[],
 ): string {
   if (change.added.length > 0) {
     const fromLine = change.added[0].newNum!;
@@ -123,10 +128,14 @@ export function applyChangeLeftToRight(
       right,
       fromLine,
       toLine,
-      change.removed.map((l) => l.content)
+      change.removed.map((l) => l.content),
     );
   }
   const prev = precedingContext(lines, change.startLineIdx);
   const insertAt = prev ? prev.newNum! + 1 : 1;
-  return insertLines(right, insertAt, change.removed.map((l) => l.content));
+  return insertLines(
+    right,
+    insertAt,
+    change.removed.map((l) => l.content),
+  );
 }

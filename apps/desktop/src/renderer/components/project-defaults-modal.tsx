@@ -23,11 +23,18 @@ function repoLabel(r: DiscoveredRepo): string {
  * for new worktrees, and a per-repo Setup command (run once when a worktree is
  * created). The project's Run command lives in the Run terminal's own modal.
  */
-export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Props) {
+export function ProjectDefaultsModal({
+  encoded,
+  defaults,
+  onSave,
+  onClose,
+}: Props) {
   const [repos, setRepos] = useState<DiscoveredRepo[]>([]);
   const [base, setBase] = useState(defaults.base ?? "");
   const [branchPrefix, setBranchPrefix] = useState(defaults.branchPrefix ?? "");
-  const [setup, setSetup] = useState<Record<string, string>>(defaults.setup ?? {});
+  const [setup, setSetup] = useState<Record<string, string>>(
+    defaults.setup ?? {},
+  );
   const [busy, setBusy] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -103,11 +110,16 @@ export function ProjectDefaultsModal({ encoded, defaults, onSave, onClose }: Pro
               {repos.map((r) => {
                 const key = r.subPath;
                 return (
-                  <div key={key || "."} className="rounded-md border border-[var(--border)] p-2">
+                  <div
+                    key={key || "."}
+                    className="rounded-md border border-[var(--border)] p-2"
+                  >
                     <div className="mb-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)]">
                       {repoLabel(r)}
                     </div>
-                    <label className={labelCls}>Setup (runs once on create)</label>
+                    <label className={labelCls}>
+                      Setup (runs once on create)
+                    </label>
                     <input
                       value={setup[key] ?? ""}
                       onChange={(e) =>

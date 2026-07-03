@@ -7,7 +7,7 @@ import { useCallback, useState } from "react";
  */
 export function usePersistentNumber(
   key: string,
-  fallback: number
+  fallback: number,
 ): readonly [number, (v: number) => void] {
   const [value, setValue] = useState(() => {
     if (typeof window === "undefined") return fallback;
@@ -25,7 +25,7 @@ export function usePersistentNumber(
         /* storage unavailable — keep the in-memory value */
       }
     },
-    [key]
+    [key],
   );
 
   return [value, set] as const;

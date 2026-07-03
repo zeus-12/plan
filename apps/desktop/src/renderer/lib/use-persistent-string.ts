@@ -10,7 +10,7 @@ import { useCallback, useState } from "react";
 export function usePersistentString<T extends string>(
   key: string,
   fallback: T,
-  allowed?: readonly T[]
+  allowed?: readonly T[],
 ): readonly [T, (v: T) => void] {
   const [value, setValue] = useState<T>(() => {
     if (typeof window === "undefined") return fallback;
@@ -29,7 +29,7 @@ export function usePersistentString<T extends string>(
         /* storage unavailable — keep the in-memory value */
       }
     },
-    [key]
+    [key],
   );
 
   return [value, set] as const;

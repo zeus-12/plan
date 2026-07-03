@@ -15,14 +15,14 @@ const electronAPI = {
     encoded: string,
     oldPath: string | null,
     newPath: string | null,
-    subPath: string = ""
+    subPath: string = "",
   ) =>
     ipcRenderer.invoke(
       "project:fileContents",
       encoded,
       oldPath,
       newPath,
-      subPath
+      subPath,
     ),
   listRepos: (encoded: string) => ipcRenderer.invoke("repos:list", encoded),
 
@@ -35,7 +35,7 @@ const electronAPI = {
       branch: string;
       base: string;
       bases?: Record<string, string>;
-    }
+    },
   ) => ipcRenderer.invoke("worktrees:create", encoded, input),
   removeWorktree: (id: string) => ipcRenderer.invoke("worktrees:remove", id),
   addReposToWorktree: (id: string, input: { bases: Record<string, string> }) =>
@@ -50,13 +50,13 @@ const electronAPI = {
     encoded: string,
     path: string,
     mode: "staged" | "unstaged",
-    subPath: string = ""
+    subPath: string = "",
   ) => ipcRenderer.invoke("project:fileView", encoded, path, mode, subPath),
   getFileImageDiff: (
     encoded: string,
     path: string,
     mode: "staged" | "unstaged",
-    subPath: string = ""
+    subPath: string = "",
   ) =>
     ipcRenderer.invoke("project:fileImageDiff", encoded, path, mode, subPath),
 
@@ -136,7 +136,7 @@ const electronAPI = {
     encoded: string,
     cols: number,
     rows: number,
-    initialCommand?: string
+    initialCommand?: string,
   ) =>
     ipcRenderer.invoke(
       "terminal:open",
@@ -144,7 +144,7 @@ const electronAPI = {
       encoded,
       cols,
       rows,
-      initialCommand
+      initialCommand,
     ),
   terminalInput: (id: string, data: string) =>
     ipcRenderer.send("terminal:input", id, data),
@@ -163,12 +163,11 @@ const electronAPI = {
   terminalList: () => ipcRenderer.invoke("terminal:list"),
   saveTempImage: (data: Uint8Array, ext: string) =>
     ipcRenderer.invoke("terminal:saveTempImage", data, ext),
-  fileExists: (path: string) =>
-    ipcRenderer.invoke("terminal:fileExists", path),
+  fileExists: (path: string) => ipcRenderer.invoke("terminal:fileExists", path),
   onTerminalData: (cb: (chunk: { id: string; data: string }) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      chunk: { id: string; data: string }
+      chunk: { id: string; data: string },
     ) => cb(chunk);
     ipcRenderer.on("terminal:data", handler);
     return () => ipcRenderer.removeListener("terminal:data", handler);
@@ -184,7 +183,7 @@ const electronAPI = {
     encoded: string,
     patch: string,
     mode: "stage" | "unstage" | "discard" | "apply",
-    subPath: string = ""
+    subPath: string = "",
   ) => ipcRenderer.invoke("git:applyPatch", encoded, patch, mode, subPath),
 
   // Updates (notify-only — see main/updates.ts)

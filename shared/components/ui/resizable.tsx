@@ -10,14 +10,11 @@ import {
 } from "react-resizable-panels";
 import { cn } from "../../lib/utils";
 
-const ResizablePanelGroup = ({
-  className,
-  ...props
-}: PanelGroupProps) => (
+const ResizablePanelGroup = ({ className, ...props }: PanelGroupProps) => (
   <PanelGroup
     className={cn(
       "flex h-full w-full data-[panel-group-direction=vertical]:flex-col",
-      className
+      className,
     )}
     {...props}
   />
@@ -35,7 +32,7 @@ const ResizableHandle = ({
   <PanelResizeHandle
     className={cn(
       "relative flex w-px items-center justify-center bg-[var(--border)] transition-colors hover:bg-[var(--border-strong)] data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[resize-handle-state=hover]:bg-[var(--border-strong)] data-[resize-handle-state=drag]:bg-[var(--border-strong)]",
-      className
+      className,
     )}
   >
     {withHandle && (

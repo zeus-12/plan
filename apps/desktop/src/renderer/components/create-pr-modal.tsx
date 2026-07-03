@@ -138,7 +138,11 @@ export function CreatePrModal({ worktree, onCreate, onClose }: Props) {
               {result ? "Done" : "Cancel"}
             </Button>
             {!result && (
-              <Button size="sm" onClick={() => void submit()} disabled={!canSubmit}>
+              <Button
+                size="sm"
+                onClick={() => void submit()}
+                disabled={!canSubmit}
+              >
                 {busy ? "Creating…" : "Create PR"}
               </Button>
             )}

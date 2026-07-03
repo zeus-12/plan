@@ -67,7 +67,7 @@ async function runProjectWatch(
   dir: string,
   signal: AbortSignal,
   knownFiles: Set<string>,
-  debounceTimers: Map<string, ReturnType<typeof setTimeout>>
+  debounceTimers: Map<string, ReturnType<typeof setTimeout>>,
 ) {
   try {
     const watcher = watch(dir, { signal, recursive: false });
@@ -101,7 +101,7 @@ async function runProjectWatch(
             sessionId,
             filePath,
           });
-        }, DEBOUNCE_MS)
+        }, DEBOUNCE_MS),
       );
     }
   } catch (err) {

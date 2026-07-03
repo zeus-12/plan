@@ -38,8 +38,9 @@ function isUserTurn(m: ConversationMessage): boolean {
 }
 
 function previewText(m: ConversationMessage): string {
-  const textPart = (p: MessagePart): p is Extract<MessagePart, { kind: "text" }> =>
-    p.kind === "text";
+  const textPart = (
+    p: MessagePart,
+  ): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text";
   const text = m.parts
     .filter(textPart)
     .map((p) => p.text)
@@ -74,12 +75,12 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
       messages
         .filter(isUserTurn)
         .map((m) => ({ uuid: m.uuid, text: previewText(m) })),
-    [messages]
+    [messages],
   );
 
   const uuidSet = useMemo(
     () => new Set(userMessages.map((m) => m.uuid)),
-    [userMessages]
+    [userMessages],
   );
 
   // Highlight the message entering at the leading edge of the scroll: the
@@ -122,11 +123,13 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
           firstBelow = uuid;
         }
       }
-      const chosen =
-        directionRef.current === "up" ? firstVisible : lastVisible;
+      const chosen = directionRef.current === "up" ? firstVisible : lastVisible;
       // Nearest off-screen turn, falling back to the bottom-most message.
       const nearest =
-        lastAbove ?? firstBelow ?? userMessages[userMessages.length - 1]?.uuid ?? null;
+        lastAbove ??
+        firstBelow ??
+        userMessages[userMessages.length - 1]?.uuid ??
+        null;
       // When no user message is on screen (scrolling through a long stretch of
       // assistant/tool output) keep the last highlight — don't snap.
       setActiveUuid((prev) => chosen ?? prev ?? nearest);
@@ -145,12 +148,12 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   const scrollTo = useCallback(
     (uuid: string) => {
       const row = scrollRef.current?.querySelector<HTMLElement>(
-        `[data-msg-row="${CSS.escape(uuid)}"]`
+        `[data-msg-row="${CSS.escape(uuid)}"]`,
       );
       row?.scrollIntoView({ behavior: "smooth", block: "start" });
       setOpen(false);
     },
-    [scrollRef]
+    [scrollRef],
   );
 
   const cancelClose = useCallback(() => {
@@ -203,7 +206,9 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   // Bring the active item into view whenever the popover opens.
   useEffect(() => {
     if (!open) return;
-    const node = listRef.current?.querySelector<HTMLElement>("[data-active='true']");
+    const node = listRef.current?.querySelector<HTMLElement>(
+      "[data-active='true']",
+    );
     node?.scrollIntoView({ block: "nearest" });
   }, [open]);
 
@@ -212,7 +217,7 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
       cancelClose();
       cancelOpen();
     },
-    [cancelClose, cancelOpen]
+    [cancelClose, cancelOpen],
   );
 
   const count = userMessages.length;
@@ -227,7 +232,9 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   // message in that bucket).
   const lineCount = Math.min(count, MAX_LINES);
   const lineForIndex = (idx: number) =>
-    count <= 1 ? 0 : Math.min(lineCount - 1, Math.floor((idx * lineCount) / count));
+    count <= 1
+      ? 0
+      : Math.min(lineCount - 1, Math.floor((idx * lineCount) / count));
   const indexForLine = (line: number) => Math.floor((line * count) / lineCount);
   const activeLine = lineForIndex(activeIndex);
 
@@ -263,7 +270,7 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
                   "h-[2px] w-full rounded-full transition-[background-color,opacity] duration-200 ease-out",
                   active
                     ? "bg-[var(--accent)]"
-                    : "bg-[var(--text-tertiary)] opacity-40 group-hover:opacity-70"
+                    : "bg-[var(--text-tertiary)] opacity-40 group-hover:opacity-70",
                 )}
               />
             </button>
@@ -289,7 +296,7 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
                   "block w-full truncate rounded-lg px-3 py-2 text-left text-[13px] transition-colors",
                   active
                     ? "bg-[var(--bg-surface-hover)] text-[var(--text)]"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text)]",
                 )}
               >
                 {m.text}

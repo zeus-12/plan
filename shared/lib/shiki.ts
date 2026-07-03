@@ -225,7 +225,10 @@ const FS_BOLD = 2;
  * on how large the file is. Tokenization is a synchronous main-thread cost, so
  * very large inputs may briefly cost responsiveness in exchange for color.
  */
-export function highlightTokens(code: string, languageId: string): SyntaxToken[] {
+export function highlightTokens(
+  code: string,
+  languageId: string,
+): SyntaxToken[] {
   if (!highlighter) return [];
   const lang = resolveLang(languageId);
   if (!lang) return [];
@@ -300,7 +303,7 @@ export function stripComments(code: string, languageId: string): string | null {
     let text = "";
     for (const tok of line) {
       const isComment = tok.explanation?.some((e) =>
-        e.scopes.some((s) => s.scopeName.startsWith("comment"))
+        e.scopes.some((s) => s.scopeName.startsWith("comment")),
       );
       if (!isComment) text += tok.content;
     }
@@ -346,7 +349,7 @@ function isCodeScope(innermost: string): boolean {
  */
 export function codeBracketPositions(
   code: string,
-  languageId: string
+  languageId: string,
 ): BracketPos[] {
   if (!highlighter) return [];
   const lang = resolveLang(languageId);
@@ -376,7 +379,8 @@ export function codeBracketPositions(
           : "";
         const code = isCodeScope(inner);
         for (const ch of sp.content) {
-          if (code && BRACKET_CHARS.includes(ch)) out.push({ line, col, char: ch });
+          if (code && BRACKET_CHARS.includes(ch))
+            out.push({ line, col, char: ch });
           col++;
         }
       }
@@ -386,10 +390,7 @@ export function codeBracketPositions(
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeAttr(s: string): string {
@@ -423,10 +424,14 @@ export function highlightToHtml(value: string, language: string): string {
     if (t.italic) styleBits.push("font-style:italic");
     if (t.bold) styleBits.push("font-weight:600");
 
-    const classAttr = classes.length ? ` class="${escapeAttr(classes.join(" "))}"` : "";
-    const styleAttr = styleBits.length ? ` style="${escapeAttr(styleBits.join(";"))}"` : "";
+    const classAttr = classes.length
+      ? ` class="${escapeAttr(classes.join(" "))}"`
+      : "";
+    const styleAttr = styleBits.length
+      ? ` style="${escapeAttr(styleBits.join(";"))}"`
+      : "";
     parts.push(
-      `<span${classAttr}${styleAttr}>${escapeHtml(value.slice(t.start, t.end))}</span>`
+      `<span${classAttr}${styleAttr}>${escapeHtml(value.slice(t.start, t.end))}</span>`,
     );
     cur = t.end;
   }
@@ -439,7 +444,10 @@ export function highlightToHtml(value: string, language: string): string {
  * callers (InteractiveDiff) work unchanged. Tokens that span line breaks
  * (e.g. block strings) are sliced per-line with adjusted offsets.
  */
-export function highlightPerLine(value: string, languageId: string): SyntaxToken[][] {
+export function highlightPerLine(
+  value: string,
+  languageId: string,
+): SyntaxToken[][] {
   const lines = value.split("\n");
   if (!resolveLang(languageId)) {
     return lines.map(() => []);

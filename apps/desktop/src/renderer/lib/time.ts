@@ -2,7 +2,9 @@
  * Human-friendly recency: "just now", "2 mins ago", "2 hours ago", "3 days
  * ago", "2 weeks ago" — and beyond a month, the actual date as dd/mm/yyyy.
  */
-export function relativeTime(input: number | string | null | undefined): string {
+export function relativeTime(
+  input: number | string | null | undefined,
+): string {
   if (input == null) return "";
   const ms = typeof input === "string" ? Date.parse(input) : input;
   if (!Number.isFinite(ms)) return "";

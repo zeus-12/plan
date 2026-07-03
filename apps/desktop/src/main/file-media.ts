@@ -20,13 +20,13 @@ export interface FileImageDiff {
 async function gitShowBuffer(
   cwd: string,
   rev: string,
-  path: string
+  path: string,
 ): Promise<Buffer | null> {
   try {
     const { stdout } = await execFileP(
       "git",
       ["-C", cwd, "show", `${rev}:${path}`],
-      { maxBuffer: 64 * 1024 * 1024, encoding: "buffer" }
+      { maxBuffer: 64 * 1024 * 1024, encoding: "buffer" },
     );
     return stdout as Buffer;
   } catch {
@@ -62,7 +62,7 @@ async function materialize(buf: Buffer, ext: string): Promise<string> {
 async function blobPath(
   cwd: string,
   rev: string,
-  path: string
+  path: string,
 ): Promise<string | null> {
   const buf = await gitShowBuffer(cwd, rev, path);
   if (!buf) return null;
@@ -91,7 +91,7 @@ export async function getFileImageDiff(
   encoded: string,
   path: string,
   mode: "staged" | "unstaged",
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<FileImageDiff> {
   const base = await resolveProjectCwd(encoded);
   const cwd = subPath ? join(base, subPath) : base;

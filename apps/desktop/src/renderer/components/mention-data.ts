@@ -40,12 +40,15 @@ async function buildFileIndex(encoded: string): Promise<FileIndex> {
   const folders = new Set<string>();
   for (const f of files) {
     const parts = f.split("/");
-    for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join("/"));
+    for (let i = 1; i < parts.length; i++)
+      folders.add(parts.slice(0, i).join("/"));
   }
   const last = (p: string) => p.slice(p.lastIndexOf("/") + 1);
   const entries: FileEntry[] = [
     ...files.map((p): FileEntry => ({ kind: "file", path: p, name: last(p) })),
-    ...[...folders].map((p): FileEntry => ({ kind: "folder", path: p, name: last(p) })),
+    ...[...folders].map(
+      (p): FileEntry => ({ kind: "folder", path: p, name: last(p) }),
+    ),
   ];
   const fuse = new Fuse(entries, {
     includeScore: true,
@@ -75,7 +78,11 @@ export function loadFileIndex(encoded: string): Promise<FileIndex> {
   return pending;
 }
 
-export function searchFiles(idx: FileIndex, query: string, limit = 40): FileEntry[] {
+export function searchFiles(
+  idx: FileIndex,
+  query: string,
+  limit = 40,
+): FileEntry[] {
   if (!query) {
     // No query yet: files first, then folders, alphabetical — a sane default.
     return idx.entries.slice(0, limit);
@@ -119,7 +126,11 @@ export function loadSkillIndex(encoded: string): Promise<SkillIndex> {
   return pending;
 }
 
-export function searchSkills(idx: SkillIndex, query: string, limit = 40): SkillInfo[] {
+export function searchSkills(
+  idx: SkillIndex,
+  query: string,
+  limit = 40,
+): SkillInfo[] {
   if (!query) return idx.skills.slice(0, limit);
   return idx.fuse.search(query, { limit }).map((r) => r.item);
 }

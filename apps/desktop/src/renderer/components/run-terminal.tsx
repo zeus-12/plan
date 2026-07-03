@@ -120,7 +120,7 @@ export function RunTerminal({
           requestAnimationFrame(() => setRunning(true));
         }
       }),
-    [id]
+    [id],
   );
 
   const start = () => {
@@ -177,12 +177,14 @@ export function RunTerminal({
       <button
         onClick={start}
         disabled={!hasCommand}
-        title={hasCommand ? `Run: ${initialCommand}` : "Set a run command first"}
+        title={
+          hasCommand ? `Run: ${initialCommand}` : "Set a run command first"
+        }
         className={cn(
           "flex items-center gap-1.5 rounded-md px-3 py-1 font-[family-name:var(--font-mono)] text-[12px] font-medium transition-colors",
           hasCommand
             ? "bg-[var(--text)] text-[var(--bg)] hover:opacity-90"
-            : "cursor-not-allowed border border-[var(--border)] text-[var(--text-tertiary)]"
+            : "cursor-not-allowed border border-[var(--border)] text-[var(--text-tertiary)]",
         )}
       >
         <PlayIcon />

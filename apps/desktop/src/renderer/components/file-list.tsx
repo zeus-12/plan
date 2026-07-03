@@ -107,7 +107,7 @@ function treeRows(
   section: "staged" | "unstaged",
   files: FileEntry[],
   repoKey: string,
-  collapsedFolders: Set<string>
+  collapsedFolders: Set<string>,
 ): Row[] {
   const root: DirNode = { name: "", path: "", dirs: new Map(), files: [] };
   for (const f of files) {
@@ -153,7 +153,7 @@ function treeRows(
       if (!collapsedFolders.has(collapseKey)) emit(child, depth + 1);
     }
     const sorted = [...node.files].sort((a, b) =>
-      basename(a.path).localeCompare(basename(b.path))
+      basename(a.path).localeCompare(basename(b.path)),
     );
     for (const f of sorted) {
       out.push({
@@ -198,7 +198,7 @@ function Chevron({ open }: { open: boolean }) {
       strokeLinejoin="round"
       className={cn(
         "shrink-0 text-[var(--text-tertiary)] transition-transform",
-        open && "rotate-90"
+        open && "rotate-90",
       )}
     >
       <polyline points="9 6 15 12 9 18" />
@@ -305,7 +305,7 @@ function ViewModeToggle({
             "flex h-[18px] w-[22px] items-center justify-center rounded-[4px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]",
             mode === m
               ? "bg-[var(--bg-surface-hover)] text-[var(--text)] shadow-sm"
-              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
           )}
         >
           {icon}
@@ -349,7 +349,7 @@ function SectionIconButton({
             "flex h-5 w-5 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
             danger && "hover:text-[var(--removed-text)]",
             accent && "hover:text-[var(--text)]",
-            !danger && !accent && "hover:text-[var(--text-secondary)]"
+            !danger && !accent && "hover:text-[var(--text-secondary)]",
           )}
         >
           {icon}
@@ -382,7 +382,7 @@ function ActionButton({
         "flex h-5 w-5 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface)]",
         danger && "hover:text-[var(--removed-text)]",
         accent && "hover:text-[var(--text)]",
-        !danger && !accent && "hover:text-[var(--text-secondary)]"
+        !danger && !accent && "hover:text-[var(--text-secondary)]",
       )}
     >
       {icon}
@@ -409,20 +409,20 @@ export function FileList({
   // Default = everything open; we only track the *collapsed* keys.
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [viewMode, setViewMode] = usePersistentString<ViewMode>(
     "plan.diffs.viewMode",
     "list",
-    VIEW_MODES
+    VIEW_MODES,
   );
 
   const nonEmpty = useMemo(
     () => groups.filter((g) => g.staged.length + g.unstaged.length > 0),
-    [groups]
+    [groups],
   );
   const multiRepo = nonEmpty.length > 1;
   const hasCommit = !!renderCommit;
@@ -439,7 +439,10 @@ export function FileList({
       if (hasCommit && g.staged.length > 0) {
         out.push({ kind: "commit", key: `commit:${repoKey}`, group: g });
       }
-      const pushSection = (section: "staged" | "unstaged", files: FileEntry[]) => {
+      const pushSection = (
+        section: "staged" | "unstaged",
+        files: FileEntry[],
+      ) => {
         if (files.length === 0) return;
         const sKey = `${repoKey}::${section}`;
         out.push({ kind: "section", key: `sec:${sKey}`, group: g, section });
@@ -519,7 +522,10 @@ export function FileList({
 
   return (
     <div ref={parentRef} className="h-full min-h-0 overflow-auto">
-      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+      <div
+        className="relative w-full"
+        style={{ height: virtualizer.getTotalSize() }}
+      >
         {virtualizer.getVirtualItems().map((vi) => {
           const row = rows[vi.index];
           const style: React.CSSProperties = {
@@ -701,12 +707,14 @@ export function FileList({
                   ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
                   : isActive
                     ? "border-l-[var(--accent)] bg-[var(--bg-surface)]"
-                    : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
+                    : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
               )}
             >
               <button
                 onClick={() => onSelect(file.subPath, file.path, file.staged)}
-                title={file.subPath ? `${file.subPath}/${file.path}` : file.path}
+                title={
+                  file.subPath ? `${file.subPath}/${file.path}` : file.path
+                }
                 style={{ paddingLeft: INDENT + row.depth * INDENT }}
                 className="flex h-full min-w-0 flex-1 items-center gap-2 pr-2 text-left"
               >
@@ -729,7 +737,7 @@ export function FileList({
               <span
                 className={cn(
                   "shrink-0 pl-1 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
-                  statusColor(file.letter)
+                  statusColor(file.letter),
                 )}
                 title={file.letter === "?" ? "Untracked" : undefined}
               >

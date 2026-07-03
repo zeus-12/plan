@@ -26,7 +26,8 @@ export function SettingsPopover({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -57,7 +58,10 @@ export function SettingsPopover({
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5 shadow-lg">
           {rows.map(({ label, control }) => (
-            <div key={label} className="flex items-center justify-between gap-4">
+            <div
+              key={label}
+              className="flex items-center justify-between gap-4"
+            >
               <span className="text-[11px] text-[var(--text-tertiary)]">
                 {label}
               </span>

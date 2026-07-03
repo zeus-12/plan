@@ -1,4 +1,10 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 /** VS Code-style match options for the in-view find widget. */
 export interface FindOptions {
@@ -30,7 +36,7 @@ export function buildFindRegex(query: string, opts: FindOptions): RegExp {
 export function computeMatches(
   text: string,
   query: string,
-  opts: FindOptions
+  opts: FindOptions,
 ): FindMatch[] {
   if (!query) return [];
   let re: RegExp;
@@ -95,13 +101,13 @@ export function useTextFind(source: string | (() => string)): TextFind {
   // even as the underlying content (source identity) changes.
   const text = useMemo(
     () => (open ? (typeof source === "function" ? source() : source) : ""),
-    [open, source]
+    [open, source],
   );
 
   const deferredQuery = useDeferredValue(query);
   const matches = useMemo(
     () => (open ? computeMatches(text, deferredQuery, options) : []),
-    [open, text, deferredQuery, options]
+    [open, text, deferredQuery, options],
   );
 
   // New query/options → jump back to the first match.
@@ -110,9 +116,8 @@ export function useTextFind(source: string | (() => string)): TextFind {
   }, [deferredQuery, options]);
 
   const toggle = useCallback(
-    (key: keyof FindOptions) =>
-      setOptions((o) => ({ ...o, [key]: !o[key] })),
-    []
+    (key: keyof FindOptions) => setOptions((o) => ({ ...o, [key]: !o[key] })),
+    [],
   );
 
   const show = useCallback((seed?: string) => {
@@ -128,7 +133,7 @@ export function useTextFind(source: string | (() => string)): TextFind {
 
   const prev = useCallback(() => {
     setCurrent((c) =>
-      matches.length ? (c - 1 + matches.length) % matches.length : 0
+      matches.length ? (c - 1 + matches.length) % matches.length : 0,
     );
   }, [matches.length]);
 

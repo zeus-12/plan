@@ -104,7 +104,8 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                   Notify when a session finishes
                 </span>
                 <span className="text-[11px] text-[var(--text-tertiary)]">
-                  Any running Claude session, whether or not it&apos;s on screen.
+                  Any running Claude session, whether or not it&apos;s on
+                  screen.
                 </span>
               </div>
               <Switch

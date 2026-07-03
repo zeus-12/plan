@@ -77,11 +77,15 @@ const pluginCache = new Map<string, Plugin[]>();
 export async function formatCode(
   source: string,
   languageId: string,
-  overrides?: Partial<Options>
+  overrides?: Partial<Options>,
 ): Promise<FormatResult> {
   const config = CONFIGS[languageId];
   if (!config) {
-    return { ok: false, value: source, error: `No formatter for ${languageId}` };
+    return {
+      ok: false,
+      value: source,
+      error: `No formatter for ${languageId}`,
+    };
   }
 
   try {

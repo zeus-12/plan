@@ -61,7 +61,9 @@ export function AddReposModal({
 
   const canSubmit =
     selected.length > 0 &&
-    selected.every((r) => (repoBases[r.subPath] ?? defaultBase).trim() !== "") &&
+    selected.every(
+      (r) => (repoBases[r.subPath] ?? defaultBase).trim() !== "",
+    ) &&
     !busy;
 
   const submit = async () => {
@@ -130,7 +132,10 @@ export function AddReposModal({
                         type="checkbox"
                         checked={on}
                         onChange={(e) =>
-                          setExcluded((m) => ({ ...m, [sp]: !e.target.checked }))
+                          setExcluded((m) => ({
+                            ...m,
+                            [sp]: !e.target.checked,
+                          }))
                         }
                         className="shrink-0 accent-[var(--accent)]"
                       />

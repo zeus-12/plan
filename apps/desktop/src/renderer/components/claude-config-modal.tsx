@@ -119,8 +119,7 @@ export function ClaudeConfigModal({ encoded, initialScope, onClose }: Props) {
         </div>
       ) : (
         files.map((f) => {
-          const isDirty =
-            (drafts[f.path] ?? "") !== (saved[f.path] ?? "");
+          const isDirty = (drafts[f.path] ?? "") !== (saved[f.path] ?? "");
           return (
             <button
               key={f.path}
@@ -129,7 +128,7 @@ export function ClaudeConfigModal({ encoded, initialScope, onClose }: Props) {
                 "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] transition-colors",
                 f.path === activePath
                   ? "bg-[var(--bg-surface-hover)] text-[var(--text)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]",
               )}
               title={f.label}
             >
@@ -177,7 +176,16 @@ export function ClaudeConfigModal({ encoded, initialScope, onClose }: Props) {
             aria-label="Close"
             className="text-[var(--text-tertiary)] transition-colors hover:text-[var(--text)]"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
             </svg>

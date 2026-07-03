@@ -26,7 +26,7 @@ export interface UseCommentSelectionOptions<T> {
     range: Range,
     selection: Selection,
     /** How many clicks produced this selection (3 = triple-click / line gesture). */
-    clickCount: number
+    clickCount: number,
   ) => {
     data: T;
     selectedText: string;
@@ -59,7 +59,7 @@ export interface UseCommentSelectionResult<T> {
  * `pending`.
  */
 export function useCommentSelection<T>(
-  opts: UseCommentSelectionOptions<T>
+  opts: UseCommentSelectionOptions<T>,
 ): UseCommentSelectionResult<T> {
   const { enabled = true, resolve, onCreate } = opts;
   const [pending, setPending] = useState<SelectionAnchor<T> | null>(null);
@@ -84,7 +84,7 @@ export function useCommentSelection<T>(
         position,
       });
     },
-    [resolve]
+    [resolve],
   );
 
   useSelectionCommit(handle, enabled);
@@ -96,7 +96,7 @@ export function useCommentSelection<T>(
       setPending(null);
       window.getSelection()?.removeAllRanges();
     },
-    [pending, onCreate]
+    [pending, onCreate],
   );
 
   const cancel = useCallback(() => {

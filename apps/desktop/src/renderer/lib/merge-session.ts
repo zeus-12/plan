@@ -16,7 +16,7 @@ import type {
  */
 export function mergeSession(
   prev: ParsedSession | null,
-  next: ParsedSession | null
+  next: ParsedSession | null,
 ): ParsedSession | null {
   if (!next) return null;
   if (!prev) return next;
@@ -65,7 +65,9 @@ function samePart(a: MessagePart, b: MessagePart): boolean {
       // same line (same id) once the full input is assembled. Comparing only
       // id+tool would hold the stale empty version forever — e.g. an
       // ExitPlanMode card stuck blank because its `plan` arrived in the rewrite.
-      return a.id === tb.id && a.tool === tb.tool && sameInput(a.input, tb.input);
+      return (
+        a.id === tb.id && a.tool === tb.tool && sameInput(a.input, tb.input)
+      );
     }
     case "tool_result": {
       const tb = b as Extract<MessagePart, { kind: "tool_result" }>;

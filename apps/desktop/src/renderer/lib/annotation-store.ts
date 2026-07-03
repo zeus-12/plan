@@ -195,7 +195,7 @@ export function useProjectAnnotations(encoded: string): {
   const snapshot = useSyncExternalStore(
     subscribe,
     () => get(encoded),
-    () => get(encoded)
+    () => get(encoded),
   );
 
   const setAnnotationsByFile = useCallback<
@@ -203,11 +203,10 @@ export function useProjectAnnotations(encoded: string): {
   >(
     (update) => {
       const cur = get(encoded);
-      const next =
-        typeof update === "function" ? update(cur.byFile) : update;
+      const next = typeof update === "function" ? update(cur.byFile) : update;
       set(encoded, { ...cur, byFile: next });
     },
-    [encoded]
+    [encoded],
   );
 
   const setChatAnnotations = useCallback<
@@ -218,7 +217,7 @@ export function useProjectAnnotations(encoded: string): {
       const next = typeof update === "function" ? update(cur.chat) : update;
       set(encoded, { ...cur, chat: next });
     },
-    [encoded]
+    [encoded],
   );
 
   const setAnnotationsByProjectFile = useCallback<
@@ -230,7 +229,7 @@ export function useProjectAnnotations(encoded: string): {
         typeof update === "function" ? update(cur.byProjectFile) : update;
       set(encoded, { ...cur, byProjectFile: next });
     },
-    [encoded]
+    [encoded],
   );
 
   return {

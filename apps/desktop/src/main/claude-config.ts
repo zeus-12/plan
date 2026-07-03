@@ -31,7 +31,7 @@ function tildify(path: string): string {
 }
 
 async function readMaybe(
-  path: string
+  path: string,
 ): Promise<{ text: string; exists: boolean }> {
   try {
     return { text: await readFile(path, "utf-8"), exists: true };
@@ -42,7 +42,7 @@ async function readMaybe(
 
 async function toConfigFile(
   path: string,
-  scope: ClaudeConfigScope
+  scope: ClaudeConfigScope,
 ): Promise<ClaudeConfigFile> {
   const { text, exists } = await readMaybe(path);
   return { path, label: tildify(path), scope, text, exists };
@@ -65,11 +65,13 @@ function cascadeCandidates(cwd: string): string[] {
   return out;
 }
 
-async function readProjectCascade(encoded: string): Promise<ClaudeConfigFile[]> {
+async function readProjectCascade(
+  encoded: string,
+): Promise<ClaudeConfigFile[]> {
   const cwd = await resolveProjectCwd(encoded);
   const candidates = cascadeCandidates(cwd);
   const files = await Promise.all(
-    candidates.map((p) => toConfigFile(p, "project"))
+    candidates.map((p) => toConfigFile(p, "project")),
   );
   // Keep only files that exist, but always surface the project-root CLAUDE.md
   // (the first candidate) even when missing, so the user can create it.
@@ -86,13 +88,13 @@ async function readMemory(encoded: string): Promise<ClaudeConfigFile[]> {
   }
   // MEMORY.md (the index) first, then the rest alphabetically.
   names.sort((a, b) =>
-    a === "MEMORY.md" ? -1 : b === "MEMORY.md" ? 1 : a.localeCompare(b)
+    a === "MEMORY.md" ? -1 : b === "MEMORY.md" ? 1 : a.localeCompare(b),
   );
   return Promise.all(names.map((n) => toConfigFile(join(dir, n), "memory")));
 }
 
 export async function readClaudeConfig(
-  encoded: string | null
+  encoded: string | null,
 ): Promise<ClaudeConfigBundle> {
   const [global, project, memory] = await Promise.all([
     toConfigFile(GLOBAL_CLAUDE_MD, "global"),
@@ -111,13 +113,14 @@ function assertWritable(path: string): void {
   if (path === GLOBAL_CLAUDE_MD) return;
   const base = basename(path);
   if (base === "CLAUDE.md" || base === "CLAUDE.local.md") return;
-  if (path.startsWith(CLAUDE_PROJECTS_DIR + "/") && path.endsWith(".md")) return;
+  if (path.startsWith(CLAUDE_PROJECTS_DIR + "/") && path.endsWith(".md"))
+    return;
   throw new Error(`Refusing to write outside Claude config files: ${path}`);
 }
 
 export async function writeClaudeConfig(
   path: string,
-  text: string
+  text: string,
 ): Promise<{ ok: true }> {
   assertWritable(path);
   await mkdir(dirname(path), { recursive: true });

@@ -61,10 +61,7 @@ export function ThemeProvider({
   themes: ThemeDefinition[];
   children: React.ReactNode;
 }) {
-  const byId = useMemo(
-    () => new Map(themes.map((t) => [t.id, t])),
-    [themes]
-  );
+  const byId = useMemo(() => new Map(themes.map((t) => [t.id, t])), [themes]);
   // Generated once and rendered inline (below) so the variables are present on
   // the very first paint and in SSR output — no flash of unstyled content.
   const styleSheet = useMemo(() => buildThemeStylesheet(themes), [themes]);
@@ -87,7 +84,7 @@ export function ThemeProvider({
       // Keep syntax highlighting in lockstep with the UI theme.
       setActiveShikiTheme(t ? shikiNameFor(t) : "github-dark");
     },
-    [byId, themes]
+    [byId, themes],
   );
 
   // Resolve the persisted/preferred theme and apply its class. Runs client-side
@@ -126,7 +123,7 @@ export function ThemeProvider({
       localStorage.setItem(STORAGE_KEY, id);
       applyTheme(id);
     },
-    [applyTheme]
+    [applyTheme],
   );
 
   const toggle = useCallback(() => {

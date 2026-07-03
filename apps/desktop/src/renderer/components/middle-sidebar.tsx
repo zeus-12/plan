@@ -75,7 +75,7 @@ interface Props {
     path: string,
     line: number,
     colStart: number,
-    colEnd: number
+    colEnd: number,
   ) => void;
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
@@ -198,10 +198,13 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   // Minimise the embedded terminal pane while keeping the tab strip visible.
   // Local UI state — independent of the dock and ⌘J.
   const [paneCollapsed, setPaneCollapsed] = useState(false);
-  const [width, setWidth] = usePersistentNumber("plan.middleSidebar.width", 280);
+  const [width, setWidth] = usePersistentNumber(
+    "plan.middleSidebar.width",
+    280,
+  );
   const [termHeight, setTermHeight] = usePersistentNumber(
     "plan.middleSidebar.termHeight",
-    288 // current h-72
+    288, // current h-72
   );
 
   const startTermResize = (e: React.PointerEvent) => {
@@ -458,7 +461,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     "group flex shrink-0 items-center gap-1.5 border-b-2 pb-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
                     active && !paneCollapsed
                       ? "border-[var(--text)] text-[var(--text)]"
-                      : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                      : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
                   )}
                 >
                   <span>{t.label}</span>
@@ -475,7 +478,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                         "-mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-[12px] leading-none transition-opacity hover:text-[var(--text)]",
                         active
                           ? "text-[var(--text-tertiary)]"
-                          : "opacity-0 group-hover:opacity-100"
+                          : "opacity-0 group-hover:opacity-100",
                       )}
                     >
                       ×
@@ -507,7 +510,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
           <div
             className={cn(
               "relative border-t border-[var(--border)]",
-              paneCollapsed && "border-t-0"
+              paneCollapsed && "border-t-0",
             )}
             style={{ height: paneCollapsed ? 0 : termHeight }}
           >
@@ -525,7 +528,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                   key={t.id}
                   className={cn(
                     "absolute inset-0 overflow-hidden",
-                    (!active || paneCollapsed) && "hidden"
+                    (!active || paneCollapsed) && "hidden",
                   )}
                 >
                   {t.kind === "run" ? (

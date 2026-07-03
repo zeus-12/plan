@@ -25,7 +25,10 @@ import {
   foldRangeMap,
   hiddenLineSet,
 } from "@plan/shared/lib/folding";
-import { bracketColorsByLine, type BracketMark } from "@plan/shared/lib/brackets";
+import {
+  bracketColorsByLine,
+  type BracketMark,
+} from "@plan/shared/lib/brackets";
 import {
   useFoldEngine,
   useFolds,
@@ -78,7 +81,7 @@ function makeBoolSetting(key: string, defaultOn: boolean) {
         return () => listeners.delete(cb);
       },
       () => value,
-      () => value
+      () => value,
     );
   return { use, set };
 }
@@ -136,7 +139,7 @@ interface Props {
     endOffset: number,
     startLine: number,
     endLine: number,
-    comment: string
+    comment: string,
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
@@ -219,7 +222,7 @@ function lineNodes(
   line: string,
   tokens: SyntaxToken[] | undefined,
   hls: Hl[],
-  brackets?: BracketMark[]
+  brackets?: BracketMark[],
 ): ReactNode {
   const hasTokens = !!tokens && tokens.length > 0;
   if (!hasTokens && hls.length === 0) return line.length ? line : " ";
@@ -251,7 +254,7 @@ function lineNodes(
     .sort((a, b) => a - b);
 
   const findTok = (p: number) =>
-    hasTokens ? tokens!.find((t) => t.start <= p && p < t.end) ?? null : null;
+    hasTokens ? (tokens!.find((t) => t.start <= p && p < t.end) ?? null) : null;
   const findHl = (p: number) => hls.find((h) => h.s <= p && p < h.e) ?? null;
 
   const parts: ReactNode[] = [];
@@ -298,7 +301,7 @@ function lineNodes(
         style={style as React.CSSProperties}
       >
         {slice}
-      </span>
+      </span>,
     );
   }
   return <>{parts}</>;
@@ -328,13 +331,16 @@ function FileViewerImpl({
   const [lightbox, setLightbox] = useState(false);
   // The Search-tab match to paint (absolute char offsets), cleared when the
   // user starts their own selection so it doesn't linger as a fake highlight.
-  const [revealRange, setRevealRange] = useState<{ s: number; e: number } | null>(
-    null,
-  );
+  const [revealRange, setRevealRange] = useState<{
+    s: number;
+    e: number;
+  } | null>(null);
   // Start lines of the regions the user has collapsed (VS Code-style folding).
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   // A line to scroll to once the layout reflects any fold changes (reveal/find).
-  const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(null);
+  const [pendingScrollLine, setPendingScrollLine] = useState<number | null>(
+    null,
+  );
   // Sticky scroll: pin enclosing scope headers at the top as you scroll.
   const stickyEnabled = stickyScrollSetting.use();
   const bracketEnabled = bracketColorSetting.use();
@@ -433,7 +439,7 @@ function FileViewerImpl({
   }, [collapsed, foldByStart]);
   const hiddenLines = useMemo(
     () => hiddenLineSet(liveCollapsed, foldByStart),
-    [liveCollapsed, foldByStart]
+    [liveCollapsed, foldByStart],
   );
   // The line indices actually rendered, in order, and the reverse lookup from a
   // line index to its position in that list (-1 when the line is folded away).
@@ -456,7 +462,8 @@ function FileViewerImpl({
   useEffect(() => {
     if (!settingsOpen) return;
     const onDown = (e: PointerEvent) => {
-      if (!settingsRef.current?.contains(e.target as Node)) setSettingsOpen(false);
+      if (!settingsRef.current?.contains(e.target as Node))
+        setSettingsOpen(false);
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
@@ -475,7 +482,11 @@ function FileViewerImpl({
   // re-render has restored the line to the visible set.
   const revealLine = useCallback(
     (line: number) => {
-      const toOpen = collapsedRangesContaining(line, liveCollapsed, foldByStart);
+      const toOpen = collapsedRangesContaining(
+        line,
+        liveCollapsed,
+        foldByStart,
+      );
       if (toOpen.length) {
         setCollapsed((prev) => {
           const next = new Set(prev);
@@ -485,7 +496,7 @@ function FileViewerImpl({
       }
       setPendingScrollLine(line);
     },
-    [liveCollapsed, foldByStart]
+    [liveCollapsed, foldByStart],
   );
   // Tokenizing a whole file is a synchronous main-thread cost. For small/medium
   // files it's sub-frame, so we tokenize on the urgent (switch) render and the
@@ -504,7 +515,7 @@ function FileViewerImpl({
     // shikiReady / shikiTheme are deps so colors appear once the highlighter
     // finishes loading and re-tokenize when the theme changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, text, highlightStale, language, shikiReady, shikiTheme]
+    [data, text, highlightStale, language, shikiReady, shikiTheme],
   );
 
   // Bracket-pair colours per line. Real brackets are identified by the
@@ -531,7 +542,7 @@ function FileViewerImpl({
       data,
       highlightStale,
       EMPTY_BRACKETS,
-    ]
+    ],
   );
 
   // Character offset where each line begins — lets a line/selection map back to
@@ -563,7 +574,7 @@ function FileViewerImpl({
       }
       return ans;
     },
-    [lineStarts]
+    [lineStarts],
   );
 
   // The caret overlay is a single full-height textarea holding the whole file,
@@ -636,12 +647,14 @@ function FileViewerImpl({
 
   // Live selection inside the editor textarea, in absolute char offsets. Drives
   // the visible highlight (the textarea's own selection is hidden via CSS).
-  const [editorSel, setEditorSel] = useState<{ start: number; end: number } | null>(
-    null
-  );
-  const [editorPopover, setEditorPopover] = useState<
-    { top: number; left: number } | null
-  >(null);
+  const [editorSel, setEditorSel] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [editorPopover, setEditorPopover] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
 
   useEffect(() => {
     // Reset selection, folds, and the symbol palette when the open file changes.
@@ -671,11 +684,11 @@ function FileViewerImpl({
         top: y + 8,
         left: Math.max(
           8,
-          Math.min(x, window.innerWidth - POPOVER_VIEWPORT_PAD)
+          Math.min(x, window.innerWidth - POPOVER_VIEWPORT_PAD),
         ),
       };
     },
-    [lineOfOffset, lineStarts, gutterWidthPx, charWidth]
+    [lineOfOffset, lineStarts, gutterWidthPx, charWidth],
   );
 
   const ensureCaretVisible = useCallback(
@@ -697,7 +710,7 @@ function FileViewerImpl({
       else if (caretX > parent.scrollLeft + parent.clientWidth)
         parent.scrollLeft = caretX - parent.clientWidth;
     },
-    [lineOfOffset, lineStarts, gutterWidthPx, charWidth]
+    [lineOfOffset, lineStarts, gutterWidthPx, charWidth],
   );
 
   // Read the textarea's current selection into our state (drives the visible
@@ -716,7 +729,7 @@ function FileViewerImpl({
   // Map a selection endpoint back to the 0-based line index of its row.
   const lineIndexOf = useCallback((node: Node | null): number | null => {
     let el: Element | null =
-      node instanceof Element ? node : node?.parentElement ?? null;
+      node instanceof Element ? node : (node?.parentElement ?? null);
     while (el && el !== parentRef.current) {
       const attr = el.getAttribute("data-line-index");
       if (attr != null) return parseInt(attr, 10);
@@ -729,7 +742,7 @@ function FileViewerImpl({
   // gutter's line-number text).
   const contentElOf = useCallback((node: Node | null): Element | null => {
     let el: Element | null =
-      node instanceof Element ? node : node?.parentElement ?? null;
+      node instanceof Element ? node : (node?.parentElement ?? null);
     while (el && el !== parentRef.current) {
       if (el.hasAttribute("data-line-content")) return el;
       el = el.parentElement;
@@ -773,7 +786,7 @@ function FileViewerImpl({
         selectedText: sel,
       };
     },
-    [lineIndexOf, contentElOf, lineStarts]
+    [lineIndexOf, contentElOf, lineStarts],
   );
 
   const createAnnotation = useCallback(
@@ -784,10 +797,10 @@ function FileViewerImpl({
         data.endOffset,
         data.startLine,
         data.endLine,
-        comment
+        comment,
       );
     },
-    [onAddAnnotation]
+    [onAddAnnotation],
   );
 
   const selection = useCommentSelection<FileAnchor>({
@@ -885,7 +898,7 @@ function FileViewerImpl({
       }
       return out.sort((a, b) => a.s - b.s);
     },
-    [annotations, activeRange, revealRange, findByLine, lineStarts, lines]
+    [annotations, activeRange, revealRange, findByLine, lineStarts, lines],
   );
 
   // Track the scroll viewport's height so `paddingEnd` below can equal it. The
@@ -930,7 +943,8 @@ function FileViewerImpl({
     if (!stickyEnabled || foldRanges.length === 0) return [];
     // Derive the top visible row from the virtualizer (not scrollOffset /
     // LINE_HEIGHT) so it stays correct when line wrap makes rows variable-height.
-    const topPos = virtualizer.getVirtualItemForOffset(scrollOffset)?.index ?? 0;
+    const topPos =
+      virtualizer.getVirtualItemForOffset(scrollOffset)?.index ?? 0;
     // Build the stack slot by slot. Slot d sits at viewport y = d·LINE_HEIGHT,
     // i.e. over the line `topPos + d`. A scope fills slot d when it encloses that
     // line — so a deeper scope joins the moment its header reaches the BOTTOM of
@@ -942,7 +956,7 @@ function FileViewerImpl({
       const chain = foldRanges
         .filter(
           (r) =>
-            r.start <= refLine && r.end >= refLine && !hiddenLines.has(r.start)
+            r.start <= refLine && r.end >= refLine && !hiddenLines.has(r.start),
         )
         .sort((a, b) => a.start - b.start);
       const next = chain[d];
@@ -1026,7 +1040,9 @@ function FileViewerImpl({
       ) {
         e.preventDefault();
         const sel = window.getSelection()?.toString() ?? "";
-        find.show(sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined);
+        find.show(
+          sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined,
+        );
         setFindReveal((n) => n + 1);
       } else if (e.key === "Escape" && find.open) {
         find.close();
@@ -1050,9 +1066,9 @@ function FileViewerImpl({
         e.preventDefault();
         setSymbolQuery("");
         setSymbolOpen(true);
-        void Promise.resolve(
-          foldEngine.computeSymbols!(text, language)
-        ).then((syms) => setSymbols(syms));
+        void Promise.resolve(foldEngine.computeSymbols!(text, language)).then(
+          (syms) => setSymbols(syms),
+        );
       }
     };
     window.addEventListener("keydown", handler);
@@ -1066,7 +1082,7 @@ function FileViewerImpl({
         threshold: 0.4,
         ignoreLocation: true,
       }),
-    [symbols]
+    [symbols],
   );
   const symbolItems = useMemo<PaletteItem[]>(() => {
     const list = symbolQuery
@@ -1106,7 +1122,7 @@ function FileViewerImpl({
         left: rect.left,
       });
     },
-    [selection]
+    [selection],
   );
 
   const submitEditorComment = useCallback(
@@ -1120,14 +1136,14 @@ function FileViewerImpl({
         e,
         lineOfOffset(s) + 1,
         lineOfOffset(e) + 1,
-        comment
+        comment,
       );
       setEditorPopover(null);
       const ta = textareaRef.current;
       if (ta) ta.setSelectionRange(e, e);
       setEditorSel({ start: e, end: e });
     },
-    [editorSel, text, onAddAnnotation, lineOfOffset]
+    [editorSel, text, onAddAnnotation, lineOfOffset],
   );
 
   /* ── Gutter cell (line number + comment marker) ──────────────── */
@@ -1143,7 +1159,7 @@ function FileViewerImpl({
           "sticky left-0 z-10 flex shrink-0 select-none justify-end gap-1 bg-[var(--bg)] pr-5 pl-3 text-right text-[var(--text-tertiary)]",
           // When wrapping, a row can span several visual lines — pin the number
           // to the first one instead of centering it across the whole block.
-          lineWrapEnabled ? "items-start" : "items-center"
+          lineWrapEnabled ? "items-start" : "items-center",
         )}
         // Pixel width (not `ch`) so it matches the textarea overlay's measured
         // metrics exactly — otherwise the caret/selection drift from the glyphs.
@@ -1172,7 +1188,7 @@ function FileViewerImpl({
             className={cn(
               "absolute right-0 top-1/2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-[var(--text-tertiary)] transition-all duration-100 hover:scale-110 hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] hover:opacity-100 active:scale-90",
               // Always visible but subtle; brightens on hover / when collapsed.
-              isCollapsed ? "opacity-100" : "opacity-60"
+              isCollapsed ? "opacity-100" : "opacity-60",
             )}
           >
             <FoldChevron collapsed={isCollapsed} />
@@ -1188,13 +1204,14 @@ function FileViewerImpl({
           position: editorPopover,
           selectedText: text.slice(
             Math.min(editorSel.start, editorSel.end),
-            Math.max(editorSel.start, editorSel.end)
+            Math.max(editorSel.start, editorSel.end),
           ),
           onSubmit: submitEditorComment,
           onClose: () => {
             setEditorPopover(null);
             const ta = textareaRef.current;
-            if (ta && editorSel) ta.setSelectionRange(editorSel.end, editorSel.end);
+            if (ta && editorSel)
+              ta.setSelectionRange(editorSel.end, editorSel.end);
             setEditorSel((s) => (s ? { start: s.end, end: s.end } : null));
           },
         }
@@ -1234,7 +1251,7 @@ function FileViewerImpl({
                 window.open(
                   buildDocUrl({ text, language, comments: [] }),
                   "_blank",
-                  "noopener"
+                  "noopener",
                 )
               }
               title="Open this file as a shareable doc others can comment on"
@@ -1253,7 +1270,7 @@ function FileViewerImpl({
                 "flex h-7 w-7 items-center justify-center rounded-md border text-[14px] transition-colors",
                 settingsOpen
                   ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-                  : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+                  : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
               )}
             >
               ⚙
@@ -1293,7 +1310,7 @@ function FileViewerImpl({
                         "rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
                         on
                           ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-                          : "border-[var(--border)] text-[var(--text-tertiary)]"
+                          : "border-[var(--border)] text-[var(--text-tertiary)]",
                       )}
                     >
                       {on ? "On" : "Off"}
@@ -1334,138 +1351,144 @@ function FileViewerImpl({
          * files — only the visible highlighted lines are real DOM).
          */
         <div className="relative min-h-0 flex-1">
-        <div
-          ref={parentRef}
-          className="absolute inset-0 overflow-auto font-[family-name:var(--font-mono)] text-[13px] leading-[20px]"
-        >
           <div
-            style={{
-              height: virtualizer.getTotalSize(),
-              // Wrapping keeps text inside the viewport width; otherwise the
-              // content grows as wide as its longest line for horizontal scroll.
-              width: lineWrapEnabled ? "100%" : "max-content",
-              minWidth: "100%",
-              position: "relative",
-            }}
+            ref={parentRef}
+            className="absolute inset-0 overflow-auto font-[family-name:var(--font-mono)] text-[13px] leading-[20px]"
           >
-            {virtualizer.getVirtualItems().map((vi) => {
-              const lineIdx = visibleLineIndices[vi.index];
-              const line = lines[lineIdx];
-              const isCollapsed = liveCollapsed.has(lineIdx);
-              return (
-                <div
-                  key={vi.key}
-                  data-line-index={lineIdx}
-                  data-index={vi.index}
-                  // In wrap mode the row's height is whatever the wrapped text
-                  // measures to, so hand it to the virtualizer to size; otherwise
-                  // every row is a fixed 20px and needs no measurement.
-                  ref={lineWrapEnabled ? virtualizer.measureElement : undefined}
-                  className={cn(
-                    "group absolute left-0 top-0 flex w-full",
-                    lineWrapEnabled && "items-start"
-                  )}
-                  style={{
-                    height: lineWrapEnabled ? undefined : LINE_HEIGHT,
-                    transform: `translateY(${vi.start}px)`,
-                  }}
-                >
-                  {gutterCell(lineIdx)}
-                  <span
-                    data-line-content
+            <div
+              style={{
+                height: virtualizer.getTotalSize(),
+                // Wrapping keeps text inside the viewport width; otherwise the
+                // content grows as wide as its longest line for horizontal scroll.
+                width: lineWrapEnabled ? "100%" : "max-content",
+                minWidth: "100%",
+                position: "relative",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((vi) => {
+                const lineIdx = visibleLineIndices[vi.index];
+                const line = lines[lineIdx];
+                const isCollapsed = liveCollapsed.has(lineIdx);
+                return (
+                  <div
+                    key={vi.key}
+                    data-line-index={lineIdx}
+                    data-index={vi.index}
+                    // In wrap mode the row's height is whatever the wrapped text
+                    // measures to, so hand it to the virtualizer to size; otherwise
+                    // every row is a fixed 20px and needs no measurement.
+                    ref={
+                      lineWrapEnabled ? virtualizer.measureElement : undefined
+                    }
                     className={cn(
-                      "pl-3 pr-6 text-[var(--text)]",
-                      // Wrapping needs the span to shrink within the flex row
-                      // (min-w-0) and break long lines; otherwise it stays on one
-                      // pre-formatted line and the row scrolls horizontally.
-                      lineWrapEnabled
-                        ? "min-w-0 flex-1 whitespace-pre-wrap break-words"
-                        : "whitespace-pre",
-                      // In editor mode the textarea owns selection; elsewhere the
-                      // content opts into native text selection.
-                      !editorMode && "select-text [cursor:text]"
+                      "group absolute left-0 top-0 flex w-full",
+                      lineWrapEnabled && "items-start",
                     )}
+                    style={{
+                      height: lineWrapEnabled ? undefined : LINE_HEIGHT,
+                      transform: `translateY(${vi.start}px)`,
+                    }}
                   >
-                    {lineNodes(
-                      line,
-                      perLine[lineIdx],
-                      hlsForLine(lineIdx),
-                      bracketByLine.get(lineIdx)
-                    )}
-                    {/* A collapsed region shows a "⋯" affordance on its header
+                    {gutterCell(lineIdx)}
+                    <span
+                      data-line-content
+                      className={cn(
+                        "pl-3 pr-6 text-[var(--text)]",
+                        // Wrapping needs the span to shrink within the flex row
+                        // (min-w-0) and break long lines; otherwise it stays on one
+                        // pre-formatted line and the row scrolls horizontally.
+                        lineWrapEnabled
+                          ? "min-w-0 flex-1 whitespace-pre-wrap break-words"
+                          : "whitespace-pre",
+                        // In editor mode the textarea owns selection; elsewhere the
+                        // content opts into native text selection.
+                        !editorMode && "select-text [cursor:text]",
+                      )}
+                    >
+                      {lineNodes(
+                        line,
+                        perLine[lineIdx],
+                        hlsForLine(lineIdx),
+                        bracketByLine.get(lineIdx),
+                      )}
+                      {/* A collapsed region shows a "⋯" affordance on its header
                         line; clicking it (or the gutter chevron) re-expands. */}
-                    {isCollapsed && (
-                      <span
-                        onClick={() => toggleFold(lineIdx)}
-                        className="ml-1 cursor-pointer select-none rounded-sm bg-[var(--bg-surface-hover)] px-1 text-[var(--text-tertiary)]"
-                        title="Expand"
-                      >
-                        ⋯
-                      </span>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-            {editorMode && (
-              <textarea
-                ref={textareaRef}
-                className="file-editor-input absolute bottom-0 top-0 resize-none border-0 bg-transparent p-0 text-[13px] leading-[20px] outline-none"
-                style={{
-                  left: gutterWidthPx,
-                  // Span the full content width (not the viewport) so the
-                  // transparent textarea scrolls in lockstep with the highlighted
-                  // layer — pinning to `right: 0` clipped it at the viewport and
-                  // desynced selection on lines wider than the screen.
-                  width: editorContentWidth,
-                  paddingLeft: CONTENT_PAD_LEFT,
-                  fontFamily: "var(--font-mono)",
-                  color: "transparent",
-                  caretColor: "var(--text)",
-                  whiteSpace: "pre",
-                  overflow: "hidden",
-                }}
-                value={text}
-                wrap="off"
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-                aria-label={`${basename(path)} contents`}
-                // Editable (so the caret actually shows — readOnly hides it), but
-                // every mutation is cancelled. Flip ALLOW_TYPING to make it a real
-                // editor later; the controlled value is the second line of defense.
-                onChange={() => {}}
-                onBeforeInput={(e) => {
-                  if (!ALLOW_TYPING) e.preventDefault();
-                }}
-                onPaste={(e) => {
-                  if (!ALLOW_TYPING) e.preventDefault();
-                }}
-                onDrop={(e) => {
-                  if (!ALLOW_TYPING) e.preventDefault();
-                }}
-                // No onSelect: the native selection renders live on its own.
-                // Reading it into React state per drag-tick is what made the old
-                // selection lag — so we only settle it on release / key-up.
-                onMouseUp={() => {
-                  const s = readEditorSel();
-                  if (!s) return;
-                  if (s.start !== s.end)
-                    setEditorPopover(caretPopoverPos(Math.max(s.start, s.end)));
-                  else setEditorPopover(null);
-                }}
-                onKeyUp={(e) => {
-                  const s = readEditorSel();
-                  if (!s) return;
-                  ensureCaretVisible(s.end);
-                  if (e.shiftKey && s.start !== s.end)
-                    setEditorPopover(caretPopoverPos(Math.max(s.start, s.end)));
-                  else if (s.start === s.end) setEditorPopover(null);
-                }}
-              />
-            )}
+                      {isCollapsed && (
+                        <span
+                          onClick={() => toggleFold(lineIdx)}
+                          className="ml-1 cursor-pointer select-none rounded-sm bg-[var(--bg-surface-hover)] px-1 text-[var(--text-tertiary)]"
+                          title="Expand"
+                        >
+                          ⋯
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+              {editorMode && (
+                <textarea
+                  ref={textareaRef}
+                  className="file-editor-input absolute bottom-0 top-0 resize-none border-0 bg-transparent p-0 text-[13px] leading-[20px] outline-none"
+                  style={{
+                    left: gutterWidthPx,
+                    // Span the full content width (not the viewport) so the
+                    // transparent textarea scrolls in lockstep with the highlighted
+                    // layer — pinning to `right: 0` clipped it at the viewport and
+                    // desynced selection on lines wider than the screen.
+                    width: editorContentWidth,
+                    paddingLeft: CONTENT_PAD_LEFT,
+                    fontFamily: "var(--font-mono)",
+                    color: "transparent",
+                    caretColor: "var(--text)",
+                    whiteSpace: "pre",
+                    overflow: "hidden",
+                  }}
+                  value={text}
+                  wrap="off"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  aria-label={`${basename(path)} contents`}
+                  // Editable (so the caret actually shows — readOnly hides it), but
+                  // every mutation is cancelled. Flip ALLOW_TYPING to make it a real
+                  // editor later; the controlled value is the second line of defense.
+                  onChange={() => {}}
+                  onBeforeInput={(e) => {
+                    if (!ALLOW_TYPING) e.preventDefault();
+                  }}
+                  onPaste={(e) => {
+                    if (!ALLOW_TYPING) e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    if (!ALLOW_TYPING) e.preventDefault();
+                  }}
+                  // No onSelect: the native selection renders live on its own.
+                  // Reading it into React state per drag-tick is what made the old
+                  // selection lag — so we only settle it on release / key-up.
+                  onMouseUp={() => {
+                    const s = readEditorSel();
+                    if (!s) return;
+                    if (s.start !== s.end)
+                      setEditorPopover(
+                        caretPopoverPos(Math.max(s.start, s.end)),
+                      );
+                    else setEditorPopover(null);
+                  }}
+                  onKeyUp={(e) => {
+                    const s = readEditorSel();
+                    if (!s) return;
+                    ensureCaretVisible(s.end);
+                    if (e.shiftKey && s.start !== s.end)
+                      setEditorPopover(
+                        caretPopoverPos(Math.max(s.start, s.end)),
+                      );
+                    else if (s.start === s.end) setEditorPopover(null);
+                  }}
+                />
+              )}
+            </div>
           </div>
-        </div>
           {/* Sticky scroll: enclosing scope headers pinned at the top, each a
               click-to-jump target. Overlays the scroll viewport (z above it). */}
           {stickyHeaders.length > 0 && (
@@ -1495,7 +1518,7 @@ function FileViewerImpl({
                       lines[startIdx],
                       perLine[startIdx],
                       [],
-                      bracketByLine.get(startIdx)
+                      bracketByLine.get(startIdx),
                     )}
                   </span>
                 </div>
@@ -1551,7 +1574,7 @@ function FileViewerImpl({
 function offsetWithinContent(
   contentEl: Element,
   node: Node,
-  nodeOffset: number
+  nodeOffset: number,
 ): number {
   const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
   let within = 0;

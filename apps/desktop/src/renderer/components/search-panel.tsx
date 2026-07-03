@@ -20,7 +20,7 @@ interface Props {
     path: string,
     line: number,
     colStart: number,
-    colEnd: number
+    colEnd: number,
   ) => void;
 }
 
@@ -52,7 +52,7 @@ type Row =
 /** Trim leading indentation for display and shift the highlight ranges to match. */
 function previewNodes(
   text: string,
-  ranges: { start: number; end: number }[]
+  ranges: { start: number; end: number }[],
 ): ReactNode {
   const lead = text.length - text.trimStart().length;
   let display = text.slice(lead);
@@ -71,7 +71,7 @@ function previewNodes(
         className="rounded-[2px] bg-[var(--highlight-bg)] text-[var(--text)]"
       >
         {display.slice(Math.max(s, cursor), Math.min(e, display.length))}
-      </mark>
+      </mark>,
     );
     cursor = Math.min(e, display.length);
   }
@@ -101,7 +101,7 @@ function ToggleBtn({
         "flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] leading-none transition-colors",
         on
           ? "bg-[var(--accent)] text-[var(--bg)]"
-          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
       )}
     >
       {children}
@@ -166,7 +166,7 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
           setStatus("done");
         });
     },
-    [encoded]
+    [encoded],
   );
 
   // Debounce query changes; option toggles re-run with the current query.
@@ -189,7 +189,7 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
 
   const toggle = useCallback(
     (key: keyof SearchOptions) => setOpts((o) => ({ ...o, [key]: !o[key] })),
-    []
+    [],
   );
 
   const toggleFile = useCallback((path: string) => {
@@ -280,7 +280,9 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
           <div
             className={cn(
               "mt-1.5 px-0.5 font-[family-name:var(--font-mono)] text-[10px]",
-              error ? "text-[var(--removed-text)]" : "text-[var(--text-tertiary)]"
+              error
+                ? "text-[var(--removed-text)]"
+                : "text-[var(--text-tertiary)]",
             )}
           >
             {summary}
@@ -343,7 +345,7 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
                   "flex items-center gap-2 py-0 pl-7 pr-2 text-left transition-colors",
                   selected === key
                     ? "bg-[var(--bg-surface-hover)]"
-                    : "hover:bg-[var(--bg-surface-hover)]"
+                    : "hover:bg-[var(--bg-surface-hover)]",
                 )}
               >
                 <span className="w-9 shrink-0 text-right font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-[var(--text-tertiary)]">
@@ -374,7 +376,7 @@ function Chevron({ open }: { open: boolean }) {
       strokeLinejoin="round"
       className={cn(
         "shrink-0 text-[var(--text-tertiary)] transition-transform",
-        open ? "rotate-90" : ""
+        open ? "rotate-90" : "",
       )}
     >
       <polyline points="9 18 15 12 9 6" />

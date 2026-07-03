@@ -69,7 +69,7 @@ export function MessageOutput({
 
   const baseMessage = useMemo(
     () => prebuilt ?? generateMessage(annotations, options),
-    [prebuilt, annotations, options]
+    [prebuilt, annotations, options],
   );
   const message = customMessage ?? baseMessage;
   const commentCount = count ?? annotations.length;
@@ -330,7 +330,10 @@ export function MessageOutput({
                     <button
                       onClick={saveEdit}
                       className="rounded-md px-3 py-1 text-xs font-medium"
-                      style={{ background: "var(--accent)", color: "var(--bg)" }}
+                      style={{
+                        background: "var(--accent)",
+                        color: "var(--bg)",
+                      }}
                     >
                       Save
                     </button>

@@ -86,7 +86,7 @@ export function SessionsDashboard({ open, onClose, onNavigate }: Props) {
 
   const rows = useMemo(
     () => items.map((t) => ({ ...t, parsed: parseId(t.id) })),
-    [items]
+    [items],
   );
 
   if (!open) return null;
@@ -180,13 +180,15 @@ function SessionRow({
       onClick={onOpen}
       className={cn(
         "flex items-center gap-2.5 rounded-md px-2.5 py-2 hover:bg-[var(--bg-surface-hover)]",
-        onOpen && "cursor-pointer"
+        onOpen && "cursor-pointer",
       )}
     >
       <span
         className={cn(
           "h-1.5 w-1.5 shrink-0 rounded-full",
-          working ? "animate-pulse bg-emerald-500" : "bg-[var(--text-tertiary)]"
+          working
+            ? "animate-pulse bg-emerald-500"
+            : "bg-[var(--text-tertiary)]",
         )}
         title={working ? "Working" : "Idle"}
       />

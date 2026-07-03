@@ -41,7 +41,9 @@ interface LoadedLanguage {
 // One in-flight/resolved load per language id — shared across files.
 const loaders = new Map<string, Promise<LoadedLanguage | null>>();
 
-async function loadLanguage(entry: GrammarEntry): Promise<LoadedLanguage | null> {
+async function loadLanguage(
+  entry: GrammarEntry,
+): Promise<LoadedLanguage | null> {
   const url = grammarUrls[`./grammars/${entry.grammar}.wasm`];
   const source = querySources[`./queries/${entry.query}.scm`];
   if (!url || !source) return null;
@@ -94,7 +96,7 @@ export const treeSitterFoldEngine: FoldEngine = {
         return indentationFoldEngine.computeFolds(text, languageId);
       }
       const ranges = foldRangesFromCaptures(
-        loaded.foldQuery.captures(tree.rootNode)
+        loaded.foldQuery.captures(tree.rootNode),
       );
       tree.delete();
       parser.delete();
@@ -105,7 +107,7 @@ export const treeSitterFoldEngine: FoldEngine = {
   },
   async computeSymbols(
     text: string,
-    languageId: string
+    languageId: string,
   ): Promise<CodeSymbol[]> {
     try {
       const loaded = await loadFor(languageId);
@@ -117,7 +119,9 @@ export const treeSitterFoldEngine: FoldEngine = {
         parser.delete();
         return [];
       }
-      const symbols = symbolsFromMatches(loaded.tagsQuery.matches(tree.rootNode));
+      const symbols = symbolsFromMatches(
+        loaded.tagsQuery.matches(tree.rootNode),
+      );
       tree.delete();
       parser.delete();
       return symbols;

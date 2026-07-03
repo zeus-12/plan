@@ -1,7 +1,4 @@
-import type {
-  DiscoveredRepo,
-  ProjectEntry,
-} from "../../shared-types";
+import type { DiscoveredRepo, ProjectEntry } from "../../shared-types";
 
 /**
  * A "primary repo" for a project = the first repo discovered there. If the
@@ -11,7 +8,7 @@ import type {
  */
 function primaryCommonDir(
   encoded: string,
-  repos: Map<string, DiscoveredRepo[]>
+  repos: Map<string, DiscoveredRepo[]>,
 ): string | null {
   const list = repos.get(encoded) ?? [];
   if (list.length === 0) return null;
@@ -56,7 +53,7 @@ function repoNameFromCommonDir(commonDir: string): string {
  */
 export function buildProjectTree(
   projects: ProjectEntry[],
-  reposByProject: Map<string, DiscoveredRepo[]>
+  reposByProject: Map<string, DiscoveredRepo[]>,
 ): ProjectNode[] {
   const groups = new Map<
     string,
@@ -107,7 +104,7 @@ export type VisibleItem =
 
 export function flattenTree(
   tree: ProjectNode[],
-  expanded: Set<string>
+  expanded: Set<string>,
 ): VisibleItem[] {
   const out: VisibleItem[] = [];
   for (const n of tree) {

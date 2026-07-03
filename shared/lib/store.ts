@@ -68,7 +68,7 @@ export function useStore() {
       startOffset: number,
       endOffset: number,
       comment: string,
-      side: "left" | "right"
+      side: "left" | "right",
     ) => {
       const annotation: Annotation = {
         id: crypto.randomUUID(),
@@ -81,12 +81,12 @@ export function useStore() {
       const versions = store.versions.map((v, i) =>
         i === versionIndex
           ? { ...v, annotations: [...v.annotations, annotation] }
-          : v
+          : v,
       );
       store = { ...store, versions };
       emitChange();
     },
-    []
+    [],
   );
 
   const updateAnnotation = useCallback(
@@ -96,15 +96,15 @@ export function useStore() {
           ? {
               ...v,
               annotations: v.annotations.map((a) =>
-                a.id === annotationId ? { ...a, comment } : a
+                a.id === annotationId ? { ...a, comment } : a,
               ),
             }
-          : v
+          : v,
       );
       store = { ...store, versions };
       emitChange();
     },
-    []
+    [],
   );
 
   const removeAnnotation = useCallback(
@@ -115,12 +115,12 @@ export function useStore() {
               ...v,
               annotations: v.annotations.filter((a) => a.id !== annotationId),
             }
-          : v
+          : v,
       );
       store = { ...store, versions };
       emitChange();
     },
-    []
+    [],
   );
 
   const initVersions = useCallback((versions: PlanVersion[]) => {
@@ -185,7 +185,7 @@ export interface MessageOptions {
 
 export function generateMessage(
   annotations: Annotation[],
-  opts: MessageOptions = {}
+  opts: MessageOptions = {},
 ): string {
   if (annotations.length === 0) return "";
 

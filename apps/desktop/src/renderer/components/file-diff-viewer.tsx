@@ -3,7 +3,10 @@ import type { FileDiff } from "@plan/shared/lib/diff-parser";
 import type { FileView, FileImageDiff } from "../../shared-types";
 import type { Annotation } from "@plan/shared/lib/store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
-import { InteractiveDiff, type HunkRange } from "@plan/shared/components/interactive-diff";
+import {
+  InteractiveDiff,
+  type HunkRange,
+} from "@plan/shared/components/interactive-diff";
 import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
 import {
@@ -13,10 +16,7 @@ import {
 } from "@plan/shared/components/ui/tooltip";
 import { cn } from "@plan/shared/lib/utils";
 import { useWorktreeRevision } from "../lib/worktree-revision";
-import {
-  detectLanguage,
-  languageFromPath,
-} from "@plan/shared/lib/highlight";
+import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
 import {
   canFormat,
   formatCode,
@@ -96,13 +96,13 @@ function FileDiffViewerImpl({
   // partially-staged file shows only the relevant hunks in each section.
   const parsedHunks = useMemo(
     () => parseFileDiff(contents?.diffBody ?? ""),
-    [contents?.diffBody]
+    [contents?.diffBody],
   );
 
   // Undo stack of per-hunk ops applied in this view (⌘Z reverses them).
-  const undoStack = useRef<{ action: "stage" | "unstage" | "discard"; patch: string }[]>(
-    []
-  );
+  const undoStack = useRef<
+    { action: "stage" | "unstage" | "discard"; patch: string }[]
+  >([]);
 
   /**
    * Match an InteractiveDiff change block (given as a line range) to one of
@@ -125,7 +125,7 @@ function FileDiffViewerImpl({
         return oldOverlap || newOverlap;
       });
     },
-    [parsedHunks]
+    [parsedHunks],
   );
 
   const applyHunk = useCallback(
@@ -149,7 +149,7 @@ function FileDiffViewerImpl({
         encoded,
         patch,
         mode,
-        subPath
+        subPath,
       );
       if (!res.ok) {
         console.warn(`${mode} hunk failed:`, res.error);
@@ -159,7 +159,7 @@ function FileDiffViewerImpl({
       setReloadKey((k) => k + 1);
       onChanged();
     },
-    [findHunkIndex, parsedHunks, encoded, subPath, onChanged, confirm]
+    [findHunkIndex, parsedHunks, encoded, subPath, onChanged, confirm],
   );
 
   // ⌘Z reverses the last per-hunk op:
@@ -177,7 +177,7 @@ function FileDiffViewerImpl({
       encoded,
       op.patch,
       inverse,
-      subPath
+      subPath,
     );
     if (!res.ok) console.warn("undo hunk failed:", res.error);
     setReloadKey((k) => k + 1);
@@ -187,15 +187,15 @@ function FileDiffViewerImpl({
   useEffect(() => {
     if (!active) return;
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== "z")
+      if (
+        !(e.metaKey || e.ctrlKey) ||
+        e.shiftKey ||
+        e.key.toLowerCase() !== "z"
+      )
         return;
       // Don't hijack undo inside text inputs / the terminal.
       const el = document.activeElement;
-      if (
-        el &&
-        (el.tagName === "INPUT" || el.tagName === "TEXTAREA")
-      )
-        return;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
       if (undoStack.current.length === 0) return;
       e.preventDefault();
       void undoLastHunk();
@@ -263,7 +263,7 @@ function FileDiffViewerImpl({
   }, [file.path, contents]);
 
   const effectiveLanguage =
-    language === "auto" ? detected ?? "plaintext" : language;
+    language === "auto" ? (detected ?? "plaintext") : language;
 
   // Reset the formatted cache when the language changes — a previous formatting
   // is no longer relevant.
@@ -277,9 +277,9 @@ function FileDiffViewerImpl({
   // Annotations attach to offsets in this text, so line-number computation
   // must use the same source.
   const viewOldText =
-    formatActive && formatted ? formatted.oldText : contents?.oldText ?? "";
+    formatActive && formatted ? formatted.oldText : (contents?.oldText ?? "");
   const viewNewText =
-    formatActive && formatted ? formatted.newText : contents?.newText ?? "";
+    formatActive && formatted ? formatted.newText : (contents?.newText ?? "");
 
   const addAnnotation = useCallback(
     (
@@ -287,13 +287,16 @@ function FileDiffViewerImpl({
       startOffset: number,
       endOffset: number,
       comment: string,
-      side: "left" | "right"
+      side: "left" | "right",
     ) => {
       // Compute line range from the side's source text (matches what the diff
       // viewer was actually rendering when the user made the selection).
       const sourceText = side === "left" ? viewOldText : viewNewText;
       const startLine = offsetToLine(sourceText, startOffset);
-      const endLine = offsetToLine(sourceText, Math.max(startOffset, endOffset - 1));
+      const endLine = offsetToLine(
+        sourceText,
+        Math.max(startOffset, endOffset - 1),
+      );
       setAnnotationsByFile((prev) => ({
         ...prev,
         [file.path]: [
@@ -314,7 +317,7 @@ function FileDiffViewerImpl({
         ],
       }));
     },
-    [file.path, setAnnotationsByFile, viewOldText, viewNewText]
+    [file.path, setAnnotationsByFile, viewOldText, viewNewText],
   );
 
   const updateAnnotation = useCallback(
@@ -322,11 +325,11 @@ function FileDiffViewerImpl({
       setAnnotationsByFile((prev) => ({
         ...prev,
         [file.path]: (prev[file.path] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a
+          a.id === id ? { ...a, comment } : a,
         ),
       }));
     },
-    [file.path, setAnnotationsByFile]
+    [file.path, setAnnotationsByFile],
   );
 
   const removeAnnotation = useCallback(
@@ -336,7 +339,7 @@ function FileDiffViewerImpl({
         [file.path]: (prev[file.path] ?? []).filter((a) => a.id !== id),
       }));
     },
-    [file.path, setAnnotationsByFile]
+    [file.path, setAnnotationsByFile],
   );
 
   const formatAvailable = canFormat(effectiveLanguage);
@@ -367,7 +370,13 @@ function FileDiffViewerImpl({
       setFormatted({ oldText: oldFmt, newText: newFmt, changed });
       setFormatActive(changed); // only switch to preview if there's something to show
       if (!l.ok || !r.ok) {
-        setFormatError(l.ok ? r.ok ? null : r.error ?? "Format failed" : l.error ?? "Format failed");
+        setFormatError(
+          l.ok
+            ? r.ok
+              ? null
+              : (r.error ?? "Format failed")
+            : (l.error ?? "Format failed"),
+        );
       }
     } finally {
       setFormatPending(false);
@@ -408,15 +417,30 @@ function FileDiffViewerImpl({
         </div>
         <div className="flex items-center gap-2">
           {isStaged ? (
-            <Button variant="outline" size="sm" onClick={onUnstage} title="Unstage all changes for this file">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onUnstage}
+              title="Unstage all changes for this file"
+            >
               Unstage
             </Button>
           ) : (
             <>
-              <Button variant="outline" size="sm" onClick={onDiscard} title="Discard all unstaged changes for this file">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onDiscard}
+                title="Discard all unstaged changes for this file"
+              >
                 Discard
               </Button>
-              <Button variant="default" size="sm" onClick={onStage} title="Stage all changes for this file">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={onStage}
+                title="Stage all changes for this file"
+              >
                 Stage
               </Button>
             </>
@@ -442,7 +466,7 @@ function FileDiffViewerImpl({
                 className={cn(
                   formatted &&
                     !formatted.changed &&
-                    "opacity-100 ring-1 ring-[var(--accent)]"
+                    "opacity-100 ring-1 ring-[var(--accent)]",
                 )}
               >
                 {formatPending
@@ -531,7 +555,16 @@ function statusLabel(s: FileDiff["status"]): string {
 
 /** Image file types we render visually (before/after) instead of as a diff. */
 const IMAGE_EXTS = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif", "svg", "apng",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "avif",
+  "svg",
+  "apng",
 ]);
 
 function isImagePath(path: string): boolean {
@@ -648,7 +681,11 @@ function ImageDiffView({
   return (
     <div className="flex h-full items-start justify-center gap-6 p-2">
       {single ? (
-        <ImagePane label={single.label} path={single.path} cacheKey={cacheKey} />
+        <ImagePane
+          label={single.label}
+          path={single.path}
+          cacheKey={cacheKey}
+        />
       ) : (
         <>
           <ImagePane label="Before" path={oldPath!} cacheKey={cacheKey} />

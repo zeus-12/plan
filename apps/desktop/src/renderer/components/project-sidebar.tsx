@@ -235,7 +235,7 @@ export function ProjectSidebar({
 
   const tree = useMemo(
     () => buildProjectTree(active, reposByProject),
-    [active, reposByProject]
+    [active, reposByProject],
   );
 
   // Auto-expand the group containing the selected project so it's visible.
@@ -243,7 +243,10 @@ export function ProjectSidebar({
     if (!selected) return;
     for (const n of tree) {
       if (n.kind !== "group") continue;
-      if (n.children.some((c) => c.encoded === selected) && !expanded.has(n.key)) {
+      if (
+        n.children.some((c) => c.encoded === selected) &&
+        !expanded.has(n.key)
+      ) {
         setExpanded((prev) => {
           const next = new Set(prev);
           next.add(n.key);
@@ -297,8 +300,7 @@ export function ProjectSidebar({
     if (confirmTarget.kind === "archive") {
       return {
         title: `Archive "${name}"?`,
-        body:
-          "It will move to the Archived section. You can restore it from there at any time. Sessions continue to be tracked in the background.",
+        body: "It will move to the Archived section. You can restore it from there at any time. Sessions continue to be tracked in the background.",
         action: "Archive",
       };
     }
@@ -309,7 +311,10 @@ export function ProjectSidebar({
     };
   }, [confirmTarget]);
 
-  const [width, setWidth] = usePersistentNumber("plan.projectSidebar.width", 260);
+  const [width, setWidth] = usePersistentNumber(
+    "plan.projectSidebar.width",
+    260,
+  );
 
   return (
     <Sidebar
@@ -425,7 +430,7 @@ export function ProjectSidebar({
                       <span
                         className={cn(
                           "inline-block text-[9px] text-[var(--text-tertiary)] transition-transform",
-                          row.expanded && "rotate-90"
+                          row.expanded && "rotate-90",
                         )}
                       >
                         ▶
@@ -455,7 +460,7 @@ export function ProjectSidebar({
                           p.archived && "opacity-60",
                           isSelected
                             ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                            : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
+                            : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
                         )}
                         style={{
                           transform,
@@ -469,7 +474,7 @@ export function ProjectSidebar({
                               "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-xs",
                               isSelected
                                 ? "text-[var(--text)]"
-                                : "text-[var(--text-secondary)]"
+                                : "text-[var(--text-secondary)]",
                             )}
                           >
                             {shortName}
@@ -533,7 +538,7 @@ export function ProjectSidebar({
                   onClick={() => setArchivedView((v) => !v)}
                   className={cn(
                     archivedView &&
-                      "border-[var(--accent)] text-[var(--accent)]"
+                      "border-[var(--accent)] text-[var(--accent)]",
                   )}
                 >
                   <TrashIcon />
@@ -558,7 +563,9 @@ export function ProjectSidebar({
             <>
               <AlertDialogHeader>
                 <AlertDialogTitle>{confirmCopy.title}</AlertDialogTitle>
-                <AlertDialogDescription>{confirmCopy.body}</AlertDialogDescription>
+                <AlertDialogDescription>
+                  {confirmCopy.body}
+                </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -567,7 +574,7 @@ export function ProjectSidebar({
                     if (!confirmTarget) return;
                     await onSetArchived(
                       confirmTarget.project.encoded,
-                      confirmTarget.kind === "archive"
+                      confirmTarget.kind === "archive",
                     );
                     setConfirmTarget(null);
                   }}

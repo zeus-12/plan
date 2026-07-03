@@ -13,7 +13,7 @@ const EMPTY: FoldRange[] = [];
 export function useFolds(
   engine: FoldEngine,
   text: string,
-  languageId: string
+  languageId: string,
 ): FoldRange[] {
   const [folds, setFolds] = useState<FoldRange[]>(() => {
     const r = engine.computeFolds(text, languageId);

@@ -43,7 +43,9 @@ function sanitizeWorktree(w: unknown): WorktreeRecord | null {
     !Array.isArray(o.repos)
   )
     return null;
-  const repos = o.repos.map(sanitizeRepo).filter((r): r is WorktreeRepoRecord => !!r);
+  const repos = o.repos
+    .map(sanitizeRepo)
+    .filter((r): r is WorktreeRepoRecord => !!r);
   return {
     id: o.id,
     projectEncoded: o.projectEncoded,
@@ -63,7 +65,9 @@ async function load(): Promise<Stored> {
     const parsed = JSON.parse(raw) as Partial<Stored>;
     cache = {
       worktrees: Array.isArray(parsed.worktrees)
-        ? parsed.worktrees.map(sanitizeWorktree).filter((w): w is WorktreeRecord => !!w)
+        ? parsed.worktrees
+            .map(sanitizeWorktree)
+            .filter((w): w is WorktreeRecord => !!w)
         : [],
       defaults:
         parsed.defaults && typeof parsed.defaults === "object"
@@ -91,24 +95,28 @@ function scheduleWrite() {
 }
 
 export async function listWorktreeRecords(
-  projectEncoded: string
+  projectEncoded: string,
 ): Promise<WorktreeRecord[]> {
   const data = await load();
   return data.worktrees.filter((w) => w.projectEncoded === projectEncoded);
 }
 
 export async function getWorktreeRecord(
-  id: string
+  id: string,
 ): Promise<WorktreeRecord | null> {
   const data = await load();
   return data.worktrees.find((w) => w.id === id) ?? null;
 }
 
 export async function addWorktreeRecord(
-  rec: Omit<WorktreeRecord, "id" | "createdAt">
+  rec: Omit<WorktreeRecord, "id" | "createdAt">,
 ): Promise<WorktreeRecord> {
   const data = await load();
-  const full: WorktreeRecord = { ...rec, id: randomUUID(), createdAt: Date.now() };
+  const full: WorktreeRecord = {
+    ...rec,
+    id: randomUUID(),
+    createdAt: Date.now(),
+  };
   data.worktrees.push(full);
   scheduleWrite();
   return full;
@@ -135,16 +143,16 @@ export async function deleteWorktreeRecord(id: string): Promise<void> {
 /** True when a worktree with this name already exists for the project. */
 export async function worktreeNameTaken(
   projectEncoded: string,
-  name: string
+  name: string,
 ): Promise<boolean> {
   const data = await load();
   return data.worktrees.some(
-    (w) => w.projectEncoded === projectEncoded && w.name === name
+    (w) => w.projectEncoded === projectEncoded && w.name === name,
   );
 }
 
 export async function getProjectDefaults(
-  projectEncoded: string
+  projectEncoded: string,
 ): Promise<ProjectDefaults> {
   const data = await load();
   return data.defaults[projectEncoded] ?? {};
@@ -152,7 +160,7 @@ export async function getProjectDefaults(
 
 export async function setProjectDefaults(
   projectEncoded: string,
-  defaults: ProjectDefaults
+  defaults: ProjectDefaults,
 ): Promise<void> {
   const data = await load();
   data.defaults[projectEncoded] = defaults;

@@ -71,7 +71,7 @@ export interface ProjectFile {
 /** Read one project file for the viewer. Guards against path traversal. */
 export async function readProjectFile(
   encoded: string,
-  relPath: string
+  relPath: string,
 ): Promise<ProjectFile | null> {
   const cwd = await resolveProjectCwd(encoded);
   const full = join(cwd, relPath);
@@ -105,7 +105,7 @@ function isBinary(buf: Buffer): boolean {
  */
 export async function resolveProjectFilePath(
   encoded: string,
-  relPath: string
+  relPath: string,
 ): Promise<string | null> {
   const cwd = await resolveProjectCwd(encoded);
   const full = join(cwd, relPath);
@@ -123,13 +123,59 @@ const SEARCH_CONCURRENCY = 16;
 
 /** Obvious-binary extensions — skipped without ever reading the file. */
 const BINARY_EXTS = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif", "tif", "tiff",
-  "pdf", "zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar",
-  "mp4", "mov", "avi", "mkv", "webm", "mp3", "wav", "flac", "ogg", "m4a",
-  "woff", "woff2", "ttf", "otf", "eot",
-  "wasm", "node", "dylib", "so", "dll", "exe", "bin", "dat",
-  "class", "jar", "o", "a", "lib", "pyc", "pdb",
-  "heic", "psd", "sketch", "ai",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "avif",
+  "tif",
+  "tiff",
+  "pdf",
+  "zip",
+  "gz",
+  "tgz",
+  "bz2",
+  "xz",
+  "7z",
+  "rar",
+  "tar",
+  "mp4",
+  "mov",
+  "avi",
+  "mkv",
+  "webm",
+  "mp3",
+  "wav",
+  "flac",
+  "ogg",
+  "m4a",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+  "wasm",
+  "node",
+  "dylib",
+  "so",
+  "dll",
+  "exe",
+  "bin",
+  "dat",
+  "class",
+  "jar",
+  "o",
+  "a",
+  "lib",
+  "pyc",
+  "pdb",
+  "heic",
+  "psd",
+  "sketch",
+  "ai",
 ]);
 
 function extOf(path: string): string {
@@ -154,7 +200,10 @@ function buildSearchRegex(query: string, opts: SearchOptions): RegExp {
 }
 
 /** Every match range on one line. Guards against zero-width matches looping. */
-function lineRanges(line: string, re: RegExp): { start: number; end: number }[] {
+function lineRanges(
+  line: string,
+  re: RegExp,
+): { start: number; end: number }[] {
   re.lastIndex = 0;
   const out: { start: number; end: number }[] = [];
   let m: RegExpExecArray | null;
@@ -218,7 +267,7 @@ async function* streamLines(full: string): AsyncGenerator<string> {
 export async function searchProjectFiles(
   encoded: string,
   query: string,
-  opts: SearchOptions
+  opts: SearchOptions,
 ): Promise<SearchResult> {
   if (!query) return { files: [], totalMatches: 0, truncated: false };
 
@@ -289,7 +338,10 @@ export async function searchProjectFiles(
     }
 
     await Promise.all(
-      Array.from({ length: Math.min(SEARCH_CONCURRENCY, paths.length) }, worker)
+      Array.from(
+        { length: Math.min(SEARCH_CONCURRENCY, paths.length) },
+        worker,
+      ),
     );
 
     // The pool visits files out of order; restore the stable alphabetical order.

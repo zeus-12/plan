@@ -81,28 +81,28 @@ export function useUndoable({ initial }: UndoableOptions = {}) {
       setPastLen(pastRef.current.length);
       setFutureLen(0);
     },
-    [armCoalesceTimer, stopCoalesceTimer]
+    [armCoalesceTimer, stopCoalesceTimer],
   );
 
   const setLeft = useCallback(
     (v: string) => {
       applyState({ ...presentRef.current, left: v }, { coalesce: true });
     },
-    [applyState]
+    [applyState],
   );
 
   const setRight = useCallback(
     (v: string) => {
       applyState({ ...presentRef.current, right: v }, { coalesce: true });
     },
-    [applyState]
+    [applyState],
   );
 
   const setBoth = useCallback(
     (next: DiffState) => {
       applyState(next, { coalesce: false });
     },
-    [applyState]
+    [applyState],
   );
 
   const reset = useCallback(
@@ -116,7 +116,7 @@ export function useUndoable({ initial }: UndoableOptions = {}) {
       setPastLen(0);
       setFutureLen(0);
     },
-    [stopCoalesceTimer]
+    [stopCoalesceTimer],
   );
 
   const undo = useCallback(() => {

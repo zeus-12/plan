@@ -16,7 +16,7 @@ export function Kbd({ keys, className, ...rest }: KbdProps) {
         // (tertiary text, an outline button, or the accent send button) so they
         // always read against whatever they sit on, including dark mode.
         "inline-flex items-center gap-0.5 font-[family-name:var(--font-mono)] text-[10px]",
-        className
+        className,
       )}
       {...rest}
     >

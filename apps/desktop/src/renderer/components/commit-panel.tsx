@@ -49,7 +49,7 @@ export function CommitPanel({
         handleSubmit();
       }
     },
-    [handleSubmit]
+    [handleSubmit],
   );
 
   return (
@@ -63,7 +63,7 @@ export function CommitPanel({
         className={cn(
           "w-full resize-y rounded-md border p-2 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed",
           "border-[var(--border)] bg-[var(--bg)] text-[var(--text)]",
-          "placeholder:text-[var(--text-tertiary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)]"
+          "placeholder:text-[var(--text-tertiary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)]",
         )}
       />
       <div className="mt-1.5 flex items-center justify-between gap-2">

@@ -96,7 +96,7 @@ export function PlanCard({
       startOffset: number,
       endOffset: number,
       comment: string,
-      side: "left" | "right"
+      side: "left" | "right",
     ) => {
       if (!diffKey) return;
       setAnnotationsByFile((prev) => ({
@@ -115,7 +115,7 @@ export function PlanCard({
         ],
       }));
     },
-    [diffKey, planPath, setAnnotationsByFile]
+    [diffKey, planPath, setAnnotationsByFile],
   );
 
   const updateDiffAnnotation = useCallback(
@@ -124,11 +124,11 @@ export function PlanCard({
       setAnnotationsByFile((prev) => ({
         ...prev,
         [diffKey]: (prev[diffKey] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a
+          a.id === id ? { ...a, comment } : a,
         ),
       }));
     },
-    [diffKey, setAnnotationsByFile]
+    [diffKey, setAnnotationsByFile],
   );
 
   const removeDiffAnnotation = useCallback(
@@ -139,7 +139,7 @@ export function PlanCard({
         [diffKey]: (prev[diffKey] ?? []).filter((a) => a.id !== id),
       }));
     },
-    [diffKey, setAnnotationsByFile]
+    [diffKey, setAnnotationsByFile],
   );
 
   return (

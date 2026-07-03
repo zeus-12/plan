@@ -24,12 +24,16 @@ function looksBinary(s: string): boolean {
 }
 
 /** `git show <rev>:<path>` → blob text, or "" if it doesn't exist there. */
-async function gitShow(cwd: string, rev: string, path: string): Promise<string> {
+async function gitShow(
+  cwd: string,
+  rev: string,
+  path: string,
+): Promise<string> {
   try {
     const { stdout } = await execFileP(
       "git",
       ["-C", cwd, "show", `${rev}:${path}`],
-      { maxBuffer: 32 * 1024 * 1024 }
+      { maxBuffer: 32 * 1024 * 1024 },
     );
     return stdout;
   } catch {
@@ -40,7 +44,7 @@ async function gitShow(cwd: string, rev: string, path: string): Promise<string> 
 async function gitDiff(
   cwd: string,
   path: string,
-  cached: boolean
+  cached: boolean,
 ): Promise<string> {
   try {
     const args = ["-C", cwd, "diff", "--no-color"];
@@ -67,7 +71,7 @@ export async function getFileContents(
   encoded: string,
   oldPath: string | null,
   newPath: string | null,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<FileContents> {
   const base = await resolveProjectCwd(encoded);
   const cwd = subPath ? join(base, subPath) : base;
@@ -97,7 +101,7 @@ export async function getFileView(
   encoded: string,
   path: string,
   mode: "staged" | "unstaged",
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<FileView> {
   const base = await resolveProjectCwd(encoded);
   const cwd = subPath ? join(base, subPath) : base;

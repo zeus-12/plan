@@ -299,7 +299,10 @@ function Shell() {
       const startX = e.clientX;
       const startW = worktreeRailWidth;
       const onMove = (ev: PointerEvent) => {
-        const next = Math.min(Math.max(startW + (ev.clientX - startX), 200), 420);
+        const next = Math.min(
+          Math.max(startW + (ev.clientX - startX), 200),
+          420,
+        );
         setWorktreeRailWidth(next);
       };
       const onUp = () => {

@@ -94,7 +94,7 @@ function shellZdotdir(): string | null {
           // Full cwd (home shown as ~) in one soft tint, dim prompt symbol.
           "PROMPT='%F{108}%~%f %F{244}%#%f '",
           "",
-        ].join("\n")
+        ].join("\n"),
     );
     cachedZdotdir = dir;
   } catch {
@@ -133,7 +133,7 @@ export async function openTerminal(
   encoded: string,
   cols = 80,
   rows = 24,
-  initialCommand?: string
+  initialCommand?: string,
 ): Promise<{ cwd: string; error?: string }> {
   const existing = sessions.get(id);
   if (existing) {
@@ -170,7 +170,9 @@ export async function openTerminal(
       // dir the parent stashed in USER_ZDOTDIR (then $HOME).
       const inherited = process.env.ZDOTDIR;
       const realUserDir =
-        inherited && inherited !== zdotdir ? inherited : process.env.USER_ZDOTDIR;
+        inherited && inherited !== zdotdir
+          ? inherited
+          : process.env.USER_ZDOTDIR;
       env.USER_ZDOTDIR = realUserDir || process.env.HOME || "";
       env.ZDOTDIR = zdotdir;
     }
@@ -228,8 +230,12 @@ export async function openTerminal(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     setTimeout(
-      () => onData?.({ id, data: `\r\n\x1b[31mFailed to start shell: ${msg}\x1b[0m\r\n` }),
-      0
+      () =>
+        onData?.({
+          id,
+          data: `\r\n\x1b[31mFailed to start shell: ${msg}\x1b[0m\r\n`,
+        }),
+      0,
     );
     return { cwd, error: msg };
   }
@@ -287,7 +293,7 @@ function getProcessTree(): Promise<ProcTree> {
 }
 
 export async function terminalStatus(
-  id: string
+  id: string,
 ): Promise<{ running: boolean; process: string | null }> {
   const s = sessions.get(id);
   if (!s) return { running: false, process: null };
@@ -342,7 +348,7 @@ export function sendKeys(id: string, keys: string[]) {
 export function submitToTerminal(
   id: string,
   text: string,
-  imagePaths: string[] = []
+  imagePaths: string[] = [],
 ) {
   const s = sessions.get(id);
   if (!s) return;
@@ -363,7 +369,7 @@ export function submitToTerminal(
     () => {
       sessions.get(id)?.pty.write("\r");
     },
-    imagePaths.length > 0 ? 650 : 150
+    imagePaths.length > 0 ? 650 : 150,
   );
 }
 
@@ -438,9 +444,10 @@ const INPUT_BOX_RE = /[│|]\s*[>❯]\s/;
  * free-text input box, a selection menu, or unknown. Returns the matched lines
  * too, so the renderer can surface them for debugging/validation.
  */
-export function detectInputState(
-  id: string
-): { state: TerminalInputState; lines: string[] } {
+export function detectInputState(id: string): {
+  state: TerminalInputState;
+  lines: string[];
+} {
   const all = readScreen(id);
   // Only the bottom chunk matters (the box sits at the foot of the frame), and
   // ignoring the top avoids matching menu-like text in scrollback history.

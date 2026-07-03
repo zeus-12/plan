@@ -19,10 +19,7 @@ import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
 import { ImageLightbox } from "./image-lightbox";
 import { UserMessageOverview } from "./user-message-overview";
-import type {
-  ConversationMessage,
-  MessagePart,
-} from "../../shared-types";
+import type { ConversationMessage, MessagePart } from "../../shared-types";
 
 /** How far (px) above the bottom the user must scroll before the "jump to
  *  latest" button appears. */
@@ -56,7 +53,7 @@ function isTaskNotificationMessage(m: ConversationMessage): boolean {
   return (
     m.parts.length > 0 &&
     m.parts.every(
-      (p) => p.kind === "text" && parseTaskNotifications(p.text) !== null
+      (p) => p.kind === "text" && parseTaskNotifications(p.text) !== null,
     )
   );
 }
@@ -70,7 +67,7 @@ function isSystemMetaMessage(m: ConversationMessage): boolean {
   if (m.role !== "user") return false;
   if (m.isMeta !== true && m.promptSource !== "system") return false;
   return !m.parts.every(
-    (p) => p.kind === "text" && imageOnlyPaths(p.text) !== null
+    (p) => p.kind === "text" && imageOnlyPaths(p.text) !== null,
   );
 }
 
@@ -96,7 +93,7 @@ interface Props {
     selectedText: string,
     startOffset: number,
     endOffset: number,
-    comment: string
+    comment: string,
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
@@ -177,7 +174,7 @@ function applyEdit(
   content: string,
   oldStr: string,
   newStr: string,
-  replaceAll: boolean
+  replaceAll: boolean,
 ): string {
   if (!oldStr) return content;
   if (replaceAll) return content.split(oldStr).join(newStr);
@@ -214,7 +211,7 @@ function CollapsibleBlock({
         <span
           className={cn(
             "inline-block text-[9px] transition-transform duration-200",
-            open && "rotate-90"
+            open && "rotate-90",
           )}
         >
           ▶
@@ -245,7 +242,9 @@ function CollapsibleBlock({
 /** Plain text a user turn copies to the clipboard — its text parts joined. */
 function userMessageText(m: ConversationMessage): string {
   return m.parts
-    .filter((p): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text")
+    .filter(
+      (p): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text",
+    )
     .map((p) => p.text)
     .join("\n\n")
     .trim();
@@ -282,7 +281,8 @@ function CollapsibleUserMessage({ children }: { children: React.ReactNode }) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const check = () => setOverflowing(el.scrollHeight > USER_MESSAGE_MAX_H + 1);
+    const check = () =>
+      setOverflowing(el.scrollHeight > USER_MESSAGE_MAX_H + 1);
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
@@ -326,7 +326,7 @@ function CopyButton({ getText }: { getText: () => string }) {
     () => () => {
       if (timer.current) clearTimeout(timer.current);
     },
-    []
+    [],
   );
 
   const onCopy = useCallback(async () => {
@@ -364,7 +364,7 @@ function ChevronRight({ open }: { open: boolean }) {
       strokeLinejoin="round"
       className={cn(
         "shrink-0 text-[var(--text-tertiary)] transition-transform duration-200",
-        open && "rotate-90"
+        open && "rotate-90",
       )}
     >
       <polyline points="9 18 15 12 9 6" />
@@ -383,9 +383,14 @@ function baseName(p: string): string {
  * Read → ("Read", "file.ts"), Bash → ("Ran", "<description>"). Tools without a
  * special case fall back to the raw tool name + a generic input preview.
  */
-function toolHeader(tool: string, input: unknown): { verb: string; target: string } {
+function toolHeader(
+  tool: string,
+  input: unknown,
+): { verb: string; target: string } {
   const obj =
-    input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
   const fp = asStr(obj.file_path);
   switch (tool) {
     case "Read":
@@ -470,18 +475,12 @@ function ToolCallBlock({
 }
 
 /** Monospace, scrollable code body used inside disclosure blocks. */
-function CodeBody({
-  text,
-  className,
-}: {
-  text: string;
-  className?: string;
-}) {
+function CodeBody({ text, className }: { text: string; className?: string }) {
   return (
     <pre
       className={cn(
         "max-h-[400px] select-text overflow-auto whitespace-pre-wrap break-all font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--text-secondary)] [cursor:text]",
-        className
+        className,
       )}
     >
       {text}
@@ -586,7 +585,7 @@ function collectFindable(root: HTMLElement): { text: string; segs: FindSeg[] } {
 function rangeFromSegs(
   segs: FindSeg[],
   start: number,
-  end: number
+  end: number,
 ): Range | null {
   if (segs.length === 0 || end <= start) return null;
   const seg = (off: number) => {
@@ -618,7 +617,7 @@ function rangeFromSegs(
 function rangeForOffsets(
   root: HTMLElement,
   start: number,
-  end: number
+  end: number,
 ): Range | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let acc = 0;
@@ -708,7 +707,7 @@ function MarkdownText({
       const off = offsetWithin(root, caret.startContainer, caret.startOffset);
       if (off === -1) return;
       const ann = partAnnotations.find(
-        (a) => a.startOffset <= off && off < a.endOffset
+        (a) => a.startOffset <= off && off < a.endOffset,
       );
       if (!ann) return;
       e.stopPropagation();
@@ -716,7 +715,7 @@ function MarkdownText({
       const rect = r?.getBoundingClientRect() ?? root.getBoundingClientRect();
       onClickAnnotation(ann, rect);
     },
-    [partAnnotations, onClickAnnotation]
+    [partAnnotations, onClickAnnotation],
   );
 
   return (
@@ -792,7 +791,11 @@ function TranscriptImage({ path }: { path: string }) {
  */
 function parseBashBlock(
   text: string,
-): { input: string | null; stdout: string | null; stderr: string | null } | null {
+): {
+  input: string | null;
+  stdout: string | null;
+  stderr: string | null;
+} | null {
   const t = text.trim();
   if (!/^<bash-(input|stdout|stderr)>/.test(t)) return null;
   const grab = (tag: string) => {
@@ -827,7 +830,7 @@ interface TaskNotification {
 }
 
 function parseTaskNotifications(
-  text: string
+  text: string,
 ): { notifications: TaskNotification[]; remainder: string } | null {
   if (!text.includes("<task-notification>")) return null;
   const re = /<task-notification>([\s\S]*?)<\/task-notification>/g;
@@ -895,7 +898,7 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
                 "ml-1.5",
                 ok
                   ? "text-[var(--text-tertiary)]"
-                  : "text-[var(--removed-text,#f87171)]"
+                  : "text-[var(--removed-text,#f87171)]",
               )}
             >
               {outcome}
@@ -937,7 +940,7 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
  * turn, rendered by SystemMetaBlock.)
  */
 function parseCommandInvocation(
-  text: string
+  text: string,
 ): { name: string; args: string } | null {
   const nameMatch = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
   if (!nameMatch) return null;
@@ -1069,187 +1072,192 @@ interface MessagePartViewProps {
 }
 
 /** Memoized: a keystroke elsewhere must not re-render every markdown block. */
-const MessagePartView = memo(function MessagePartView({
-  part,
-  partIndex,
-  message,
-  annotations,
-  pendingRange,
-  onClickAnnotation,
-  result,
-  terminalReady,
-  onSendKeys,
-  planVersions,
-  planVersionIndex,
-  encoded,
-}: MessagePartViewProps) {
-  switch (part.kind) {
-    case "text": {
-      const imgPaths = imageOnlyPaths(part.text);
-      if (imgPaths) {
-        return (
-          <div className="flex flex-col gap-2">
-            {imgPaths.map((p, i) => (
-              <TranscriptImage key={`${i}:${p}`} path={p} />
-            ))}
-          </div>
-        );
-      }
-      // A slash-command the user typed: strip the `<command-*>` tag soup and
-      // render the clean `/cmd args` as normal bubble text (it IS user input).
-      const command = parseCommandInvocation(part.text);
-      if (command) {
-        const clean = command.args
-          ? `${command.name} ${command.args}`
-          : command.name;
+const MessagePartView = memo(
+  function MessagePartView({
+    part,
+    partIndex,
+    message,
+    annotations,
+    pendingRange,
+    onClickAnnotation,
+    result,
+    terminalReady,
+    onSendKeys,
+    planVersions,
+    planVersionIndex,
+    encoded,
+  }: MessagePartViewProps) {
+    switch (part.kind) {
+      case "text": {
+        const imgPaths = imageOnlyPaths(part.text);
+        if (imgPaths) {
+          return (
+            <div className="flex flex-col gap-2">
+              {imgPaths.map((p, i) => (
+                <TranscriptImage key={`${i}:${p}`} path={p} />
+              ))}
+            </div>
+          );
+        }
+        // A slash-command the user typed: strip the `<command-*>` tag soup and
+        // render the clean `/cmd args` as normal bubble text (it IS user input).
+        const command = parseCommandInvocation(part.text);
+        if (command) {
+          const clean = command.args
+            ? `${command.name} ${command.args}`
+            : command.name;
+          return (
+            <MarkdownText
+              text={clean}
+              messageUuid={message.uuid}
+              partIndex={partIndex}
+              partAnnotations={EMPTY_ANNOTATIONS}
+              pendingRange={null}
+              onClickAnnotation={onClickAnnotation}
+            />
+          );
+        }
+        const bash = parseBashBlock(part.text);
+        if (bash) {
+          return (
+            <BashBlock
+              input={bash.input}
+              stdout={bash.stdout}
+              stderr={bash.stderr}
+            />
+          );
+        }
+        const tasks = parseTaskNotifications(part.text);
+        if (tasks) {
+          return (
+            <div className="flex flex-col gap-1.5">
+              {tasks.notifications.map((n, i) => (
+                <TaskNotificationBlock key={n.taskId ?? i} n={n} />
+              ))}
+              {tasks.remainder && (
+                <MarkdownText
+                  text={tasks.remainder}
+                  messageUuid={message.uuid}
+                  partIndex={partIndex}
+                  partAnnotations={annotations}
+                  pendingRange={pendingRange}
+                  onClickAnnotation={onClickAnnotation}
+                />
+              )}
+            </div>
+          );
+        }
+        if (message.isMeta || message.promptSource === "system") {
+          return <SystemMetaBlock text={part.text} />;
+        }
         return (
           <MarkdownText
-            text={clean}
+            text={part.text}
             messageUuid={message.uuid}
             partIndex={partIndex}
-            partAnnotations={EMPTY_ANNOTATIONS}
-            pendingRange={null}
+            partAnnotations={annotations}
+            pendingRange={pendingRange}
             onClickAnnotation={onClickAnnotation}
           />
         );
       }
-      const bash = parseBashBlock(part.text);
-      if (bash) {
+      case "thinking":
         return (
-          <BashBlock
-            input={bash.input}
-            stdout={bash.stdout}
-            stderr={bash.stderr}
-          />
+          <CollapsibleBlock
+            label="💭 Thinking"
+            preview={truncate(part.text, 120)}
+          >
+            <CodeBody text={part.text} className="px-3 pb-3" />
+          </CollapsibleBlock>
         );
-      }
-      const tasks = parseTaskNotifications(part.text);
-      if (tasks) {
-        return (
-          <div className="flex flex-col gap-1.5">
-            {tasks.notifications.map((n, i) => (
-              <TaskNotificationBlock key={n.taskId ?? i} n={n} />
-            ))}
-            {tasks.remainder && (
-              <MarkdownText
-                text={tasks.remainder}
-                messageUuid={message.uuid}
-                partIndex={partIndex}
-                partAnnotations={annotations}
-                pendingRange={pendingRange}
-                onClickAnnotation={onClickAnnotation}
+      case "tool_use": {
+        // AskUserQuestion gets a rich card: question + options, clickable while
+        // pending (drives the TUI selector via keystrokes).
+        if (part.tool === "AskUserQuestion") {
+          const questions = parseAskInput(part.input);
+          if (questions) {
+            return (
+              <AskQuestionCard
+                questions={questions}
+                resultText={result?.output}
+                canAnswer={terminalReady && !!onSendKeys}
+                onPick={(index) =>
+                  // Selector starts on option 1: ↓ × index, then Enter.
+                  onSendKeys?.([
+                    ...Array.from({ length: index }, () => "\x1b[B"),
+                    "\r",
+                  ])
+                }
               />
-            )}
-          </div>
-        );
-      }
-      if (message.isMeta || message.promptSource === "system") {
-        return <SystemMetaBlock text={part.text} />;
-      }
-      return (
-        <MarkdownText
-          text={part.text}
-          messageUuid={message.uuid}
-          partIndex={partIndex}
-          partAnnotations={annotations}
-          pendingRange={pendingRange}
-          onClickAnnotation={onClickAnnotation}
-        />
-      );
-    }
-    case "thinking":
-      return (
-        <CollapsibleBlock label="💭 Thinking" preview={truncate(part.text, 120)}>
-          <CodeBody text={part.text} className="px-3 pb-3" />
-        </CollapsibleBlock>
-      );
-    case "tool_use": {
-      // AskUserQuestion gets a rich card: question + options, clickable while
-      // pending (drives the TUI selector via keystrokes).
-      if (part.tool === "AskUserQuestion") {
-        const questions = parseAskInput(part.input);
-        if (questions) {
+            );
+          }
+        }
+        // The plan renders as a clean inline Plan card (anchored on the plan-file
+        // Write), not a raw tool block. The body goes through the same
+        // annotation-aware markdown path as normal assistant text, so selecting it
+        // comments via the existing chat flow.
+        if (planVersionIndex >= 0) {
+          const planText = planVersions[planVersionIndex]?.text ?? "";
           return (
-            <AskQuestionCard
-              questions={questions}
-              resultText={result?.output}
-              canAnswer={terminalReady && !!onSendKeys}
-              onPick={(index) =>
-                // Selector starts on option 1: ↓ × index, then Enter.
-                onSendKeys?.([
-                  ...Array.from({ length: index }, () => "\x1b[B"),
-                  "\r",
-                ])
+            <PlanCard
+              versions={planVersions}
+              versionIndex={planVersionIndex}
+              encoded={encoded}
+              planPath={planFilePath(part)}
+              body={
+                <MarkdownText
+                  text={planText}
+                  messageUuid={message.uuid}
+                  partIndex={partIndex}
+                  partAnnotations={annotations}
+                  pendingRange={pendingRange}
+                  onClickAnnotation={onClickAnnotation}
+                />
               }
             />
           );
         }
-      }
-      // The plan renders as a clean inline Plan card (anchored on the plan-file
-      // Write), not a raw tool block. The body goes through the same
-      // annotation-aware markdown path as normal assistant text, so selecting it
-      // comments via the existing chat flow.
-      if (planVersionIndex >= 0) {
-        const planText = planVersions[planVersionIndex]?.text ?? "";
+        let inputJson: string;
+        try {
+          inputJson = JSON.stringify(part.input, null, 2);
+        } catch {
+          inputJson = String(part.input);
+        }
         return (
-          <PlanCard
-            versions={planVersions}
-            versionIndex={planVersionIndex}
-            encoded={encoded}
-            planPath={planFilePath(part)}
-            body={
-              <MarkdownText
-                text={planText}
-                messageUuid={message.uuid}
-                partIndex={partIndex}
-                partAnnotations={annotations}
-                pendingRange={pendingRange}
-                onClickAnnotation={onClickAnnotation}
-              />
-            }
+          <ToolCallBlock
+            tool={part.tool}
+            input={part.input}
+            inputJson={inputJson}
+            result={result}
           />
         );
       }
-      let inputJson: string;
-      try {
-        inputJson = JSON.stringify(part.input, null, 2);
-      } catch {
-        inputJson = String(part.input);
-      }
-      return (
-        <ToolCallBlock
-          tool={part.tool}
-          input={part.input}
-          inputJson={inputJson}
-          result={result}
-        />
-      );
+      case "tool_result":
+        // Rendered inline within its tool_use block (see `result`); skip here.
+        return null;
     }
-    case "tool_result":
-      // Rendered inline within its tool_use block (see `result`); skip here.
-      return null;
-  }
-},
-// Message/part objects keep their identity across session refreshes (see
-// mergeSession), so reference checks suffice — except the paired tool result,
-// which is rebuilt each parse and is compared by content.
-(prev, next) =>
-  prev.part === next.part &&
-  prev.partIndex === next.partIndex &&
-  prev.message === next.message &&
-  prev.annotations === next.annotations &&
-  prev.onClickAnnotation === next.onClickAnnotation &&
-  prev.terminalReady === next.terminalReady &&
-  prev.onSendKeys === next.onSendKeys &&
-  prev.planVersions === next.planVersions &&
-  prev.planVersionIndex === next.planVersionIndex &&
-  prev.encoded === next.encoded &&
-  sameRange(prev.pendingRange, next.pendingRange) &&
-  sameResult(prev.result, next.result));
+  },
+  // Message/part objects keep their identity across session refreshes (see
+  // mergeSession), so reference checks suffice — except the paired tool result,
+  // which is rebuilt each parse and is compared by content.
+  (prev, next) =>
+    prev.part === next.part &&
+    prev.partIndex === next.partIndex &&
+    prev.message === next.message &&
+    prev.annotations === next.annotations &&
+    prev.onClickAnnotation === next.onClickAnnotation &&
+    prev.terminalReady === next.terminalReady &&
+    prev.onSendKeys === next.onSendKeys &&
+    prev.planVersions === next.planVersions &&
+    prev.planVersionIndex === next.planVersionIndex &&
+    prev.encoded === next.encoded &&
+    sameRange(prev.pendingRange, next.pendingRange) &&
+    sameResult(prev.result, next.result),
+);
 
 function sameRange(
   a: { start: number; end: number } | null,
-  b: { start: number; end: number } | null
+  b: { start: number; end: number } | null,
 ): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -1310,9 +1318,9 @@ export const MessageList = memo(function MessageList({
   const items = useMemo(
     () =>
       deferredMessages.filter(
-        (m) => !m.parts.every((p) => p.kind === "tool_result")
+        (m) => !m.parts.every((p) => p.kind === "tool_result"),
       ),
-    [deferredMessages]
+    [deferredMessages],
   );
 
   // The inline plan card is sourced from the plan FILE Claude writes to
@@ -1330,8 +1338,8 @@ export const MessageList = memo(function MessageList({
 
     const hasPlanWrites = deferredMessages.some((m) =>
       m.parts.some(
-        (p) => p.kind === "tool_use" && p.tool === "Write" && planFilePath(p)
-      )
+        (p) => p.kind === "tool_use" && p.tool === "Write" && planFilePath(p),
+      ),
     );
 
     if (!hasPlanWrites) {
@@ -1378,7 +1386,7 @@ export const MessageList = memo(function MessageList({
             text,
             asStr(input.old_string),
             asStr(input.new_string),
-            input.replace_all === true
+            input.replace_all === true,
           );
         } else {
           const edits = Array.isArray(input.edits) ? input.edits : [];
@@ -1388,7 +1396,7 @@ export const MessageList = memo(function MessageList({
               text,
               asStr(eo.old_string),
               asStr(eo.new_string),
-              eo.replace_all === true
+              eo.replace_all === true,
             );
           }
         }
@@ -1537,7 +1545,7 @@ export const MessageList = memo(function MessageList({
         top: rect.bottom + 8,
         left: Math.max(
           8,
-          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
         ),
       },
     };
@@ -1551,10 +1559,10 @@ export const MessageList = memo(function MessageList({
         selectedText,
         data.startOffset,
         data.endOffset,
-        comment
+        comment,
       );
     },
-    [onAddAnnotation]
+    [onAddAnnotation],
   );
 
   // Only listen while this pane is the visible one (the diffs/plans panes stay
@@ -1572,7 +1580,7 @@ export const MessageList = memo(function MessageList({
       onUpdateAnnotation(editing.annotation.id, comment);
       setEditing(null);
     },
-    [editing, onUpdateAnnotation]
+    [editing, onUpdateAnnotation],
   );
 
   // Stable identities so the memoized part views skip re-rendering.
@@ -1584,11 +1592,11 @@ export const MessageList = memo(function MessageList({
           top: rect.bottom + 8,
           left: Math.max(
             8,
-            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
           ),
         },
       }),
-    []
+    [],
   );
 
   /* ── In-view find (⌘F) ──────────────────────────────────────── */
@@ -1677,7 +1685,9 @@ export const MessageList = memo(function MessageList({
       ) {
         e.preventDefault();
         const sel = window.getSelection()?.toString() ?? "";
-        find.show(sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined);
+        find.show(
+          sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined,
+        );
         setFindReveal((n) => n + 1);
       } else if (e.key === "Escape" && find.open) {
         find.close();
@@ -1698,148 +1708,149 @@ export const MessageList = memo(function MessageList({
   return (
     <>
       <div className="relative h-full">
-      <FindWidget find={find} revealTrigger={findReveal} />
-      {!find.open && (
-        <UserMessageOverview messages={items} scrollRef={parentRef} />
-      )}
-      <div ref={parentRef} className="h-full overflow-auto pt-3 pb-6">
-        {/* Centered reading column (ChatGPT-style): the scrollbar stays at the
+        <FindWidget find={find} revealTrigger={findReveal} />
+        {!find.open && (
+          <UserMessageOverview messages={items} scrollRef={parentRef} />
+        )}
+        <div ref={parentRef} className="h-full overflow-auto pt-3 pb-6">
+          {/* Centered reading column (ChatGPT-style): the scrollbar stays at the
             pane edge while message width is capped for readability. Diff/file
             tabs are separate views and keep their full width. */}
-        <div className="mx-auto w-full max-w-[820px]">
-        {items.map((m, idx) => {
-          const partMap = annotationsByMessage.get(m.uuid);
-          const showHeader = showHeaderForRow[idx];
-          // iMessage-style: user turns are a right-aligned bubble capped in
-          // width; assistant turns run full-width with no bubble. Bash-mode
-          // turns read as terminal output, so they go left/full-width too.
-          const isUser =
-            !isBashMessage(m) &&
-            !isTaskNotificationMessage(m) &&
-            !isSystemMetaMessage(m) &&
-            classify(m) === "user-real";
-          return (
-            <div
-              key={m.uuid || idx}
-              data-msg-row={m.uuid}
-              className={cn(
-                // content-visibility lets the browser skip layout/paint of
-                // off-screen rows — width changes (sidebar toggles) would
-                // otherwise reflow the entire transcript.
-                // scroll-mt keeps a jumped-to message off the very top edge.
-                "group flex px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
-                showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
-                isUser ? "justify-end" : "justify-start"
-              )}
-            >
-              {(() => {
-                const partNodes = m.parts.map((p, i) => {
-                  const partKey = `${m.uuid}:${i}`;
-                  // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
-                  if (hiddenParts.has(partKey)) return null;
-                  const planVersionIndex = planVersionByPart.get(partKey) ?? -1;
-                  return (
-                    <MessagePartView
-                      key={i}
-                      part={p}
-                      partIndex={i}
-                      message={m}
-                      annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
-                      pendingRange={
-                        pending &&
-                        pending.data.messageUuid === m.uuid &&
-                        pending.data.partIndex === i
-                          ? {
-                              start: pending.data.startOffset,
-                              end: pending.data.endOffset,
-                            }
-                          : null
-                      }
-                      onClickAnnotation={handleClickAnnotation}
-                      result={
-                        p.kind === "tool_use"
-                          ? resultByToolUseId.get(p.id)
-                          : undefined
-                      }
-                      terminalReady={terminalReady}
-                      onSendKeys={onSendKeys}
-                      planVersions={
-                        planVersionIndex >= 0
-                          ? planVersions
-                          : EMPTY_PLAN_VERSIONS
-                      }
-                      planVersionIndex={planVersionIndex}
-                      encoded={encoded}
-                    />
-                  );
-                });
-                if (!isUser) {
-                  return (
-                    <div className="flex w-full flex-col gap-1.5">
-                      {partNodes}
-                    </div>
-                  );
-                }
-                const time = formatClockTime(m.timestamp);
-                return (
-                  <div className="flex max-w-[80%] flex-col items-end gap-1">
-                    <div className="flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2">
-                      <CollapsibleUserMessage>
-                        {partNodes}
-                      </CollapsibleUserMessage>
-                    </div>
-                    {/* Meta row sits outside the bubble, bottom-right: the send
+          <div className="mx-auto w-full max-w-[820px]">
+            {items.map((m, idx) => {
+              const partMap = annotationsByMessage.get(m.uuid);
+              const showHeader = showHeaderForRow[idx];
+              // iMessage-style: user turns are a right-aligned bubble capped in
+              // width; assistant turns run full-width with no bubble. Bash-mode
+              // turns read as terminal output, so they go left/full-width too.
+              const isUser =
+                !isBashMessage(m) &&
+                !isTaskNotificationMessage(m) &&
+                !isSystemMetaMessage(m) &&
+                classify(m) === "user-real";
+              return (
+                <div
+                  key={m.uuid || idx}
+                  data-msg-row={m.uuid}
+                  className={cn(
+                    // content-visibility lets the browser skip layout/paint of
+                    // off-screen rows — width changes (sidebar toggles) would
+                    // otherwise reflow the entire transcript.
+                    // scroll-mt keeps a jumped-to message off the very top edge.
+                    "group flex px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                    showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
+                    isUser ? "justify-end" : "justify-start",
+                  )}
+                >
+                  {(() => {
+                    const partNodes = m.parts.map((p, i) => {
+                      const partKey = `${m.uuid}:${i}`;
+                      // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
+                      if (hiddenParts.has(partKey)) return null;
+                      const planVersionIndex =
+                        planVersionByPart.get(partKey) ?? -1;
+                      return (
+                        <MessagePartView
+                          key={i}
+                          part={p}
+                          partIndex={i}
+                          message={m}
+                          annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
+                          pendingRange={
+                            pending &&
+                            pending.data.messageUuid === m.uuid &&
+                            pending.data.partIndex === i
+                              ? {
+                                  start: pending.data.startOffset,
+                                  end: pending.data.endOffset,
+                                }
+                              : null
+                          }
+                          onClickAnnotation={handleClickAnnotation}
+                          result={
+                            p.kind === "tool_use"
+                              ? resultByToolUseId.get(p.id)
+                              : undefined
+                          }
+                          terminalReady={terminalReady}
+                          onSendKeys={onSendKeys}
+                          planVersions={
+                            planVersionIndex >= 0
+                              ? planVersions
+                              : EMPTY_PLAN_VERSIONS
+                          }
+                          planVersionIndex={planVersionIndex}
+                          encoded={encoded}
+                        />
+                      );
+                    });
+                    if (!isUser) {
+                      return (
+                        <div className="flex w-full flex-col gap-1.5">
+                          {partNodes}
+                        </div>
+                      );
+                    }
+                    const time = formatClockTime(m.timestamp);
+                    return (
+                      <div className="flex max-w-[80%] flex-col items-end gap-1">
+                        <div className="flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2">
+                          <CollapsibleUserMessage>
+                            {partNodes}
+                          </CollapsibleUserMessage>
+                        </div>
+                        {/* Meta row sits outside the bubble, bottom-right: the send
                         time, then a small gap, then a copy button. Hidden until
                         the message row is hovered or focused. */}
-                    <div className="flex items-center gap-[7px] pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                      {time && (
-                        <span className="text-[11px] text-[var(--text-tertiary)]">
-                          {time}
-                        </span>
-                      )}
-                      <CopyButton getText={() => userMessageText(m)} />
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          );
-        })}
-        {working && <TypingIndicator />}
+                        <div className="flex items-center gap-[7px] pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                          {time && (
+                            <span className="text-[11px] text-[var(--text-tertiary)]">
+                              {time}
+                            </span>
+                          )}
+                          <CopyButton getText={() => userMessageText(m)} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+            {working && <TypingIndicator />}
+          </div>
         </div>
-      </div>
-      {/* Soft blur-fade where messages scroll up under the composer — the
+        {/* Soft blur-fade where messages scroll up under the composer — the
           bottom rows dissolve into the background instead of cutting off hard.
           pointer-events-none so it never blocks scrolling/selection. */}
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 backdrop-blur-[2px]"
-        style={{
-          background: "linear-gradient(to top, var(--bg) 20%, transparent)",
-          WebkitMaskImage: "linear-gradient(to top, black 40%, transparent)",
-          maskImage: "linear-gradient(to top, black 40%, transparent)",
-        }}
-      />
-      {showScrollDown && (
-        <button
-          onClick={scrollToBottom}
-          title="Scroll to latest"
-          aria-label="Scroll to latest"
-          className="absolute bottom-4 right-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] shadow-lg transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 backdrop-blur-[2px]"
+          style={{
+            background: "linear-gradient(to top, var(--bg) 20%, transparent)",
+            WebkitMaskImage: "linear-gradient(to top, black 40%, transparent)",
+            maskImage: "linear-gradient(to top, black 40%, transparent)",
+          }}
+        />
+        {showScrollDown && (
+          <button
+            onClick={scrollToBottom}
+            title="Scroll to latest"
+            aria-label="Scroll to latest"
+            className="absolute bottom-4 right-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] shadow-lg transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
           >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-      )}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {pending && (
@@ -1891,9 +1902,7 @@ function TypingIndicator() {
 
 function ancestorWithAttr(node: Node, attr: string): HTMLElement | null {
   let el: HTMLElement | null =
-    node instanceof HTMLElement
-      ? node
-      : node.parentElement;
+    node instanceof HTMLElement ? node : node.parentElement;
   while (el) {
     if (el.hasAttribute(attr)) return el;
     el = el.parentElement;
@@ -1924,7 +1933,7 @@ function offsetWithin(root: HTMLElement, node: Node, nodeOff: number): number {
  */
 function selectedOffsetsWithin(
   root: HTMLElement,
-  range: Range
+  range: Range,
 ): { start: number; end: number } | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let acc = 0;

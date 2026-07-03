@@ -83,7 +83,8 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 
   return {
     version: latest,
-    url: release.html_url ?? `https://github.com/${GITHUB_REPO}/releases/latest`,
+    url:
+      release.html_url ?? `https://github.com/${GITHUB_REPO}/releases/latest`,
     notes: release.body?.trim() ?? "",
   };
 }

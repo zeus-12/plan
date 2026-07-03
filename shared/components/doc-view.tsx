@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import {
-  highlightPerLine,
-  type SyntaxToken,
-} from "../lib/highlight";
+import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import { useShikiReady, useActiveShikiTheme } from "../lib/shiki";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { CommentPopover } from "./comment-popover";
@@ -15,7 +12,12 @@ interface DocViewProps {
   language: string;
   comments: DocComment[];
   /** When provided, selecting text opens a comment popover. */
-  onAddComment?: (start: number, end: number, quote: string, body: string) => void;
+  onAddComment?: (
+    start: number,
+    end: number,
+    quote: string,
+    body: string,
+  ) => void;
   onRemoveComment?: (id: string) => void;
   /** Two-way hover link with an external comments list. */
   activeCommentId?: string | null;
@@ -45,7 +47,7 @@ interface LineRange {
 function buildSegments(
   lineText: string,
   tokens: SyntaxToken[],
-  ranges: LineRange[]
+  ranges: LineRange[],
 ): Segment[] {
   const len = lineText.length;
   if (len === 0) return [];
@@ -87,7 +89,11 @@ function cellOf(node: Node): HTMLElement | null {
 }
 
 /** Number of characters within `cell` before (node, offset). */
-function offsetWithinCell(cell: Element, node: Node, nodeOffset: number): number {
+function offsetWithinCell(
+  cell: Element,
+  node: Node,
+  nodeOffset: number,
+): number {
   const r = document.createRange();
   r.selectNodeContents(cell);
   r.setEnd(node, nodeOffset);
@@ -126,7 +132,7 @@ export function DocView({
     () => highlightPerLine(text, language),
     // Re-tokenize once shiki loads and on theme change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [text, language, shikiReady, shikiTheme]
+    [text, language, shikiReady, shikiTheme],
   );
 
   // Map each line index -> the within-line highlight intervals from comments.
@@ -166,20 +172,25 @@ export function DocView({
         startBase +
         offsetWithinCell(startCell, range.startContainer, range.startOffset);
       const end =
-        endBase + offsetWithinCell(endCell, range.endContainer, range.endOffset);
+        endBase +
+        offsetWithinCell(endCell, range.endContainer, range.endOffset);
       const lo = Math.min(start, end);
       const hi = Math.max(start, end);
       if (hi <= lo) return null;
       return { data: { start: lo, end: hi }, selectedText: text.slice(lo, hi) };
     },
-    [text]
+    [text],
   );
 
   const onCreate = useCallback(
-    (data: { start: number; end: number }, selectedText: string, comment: string) => {
+    (
+      data: { start: number; end: number },
+      selectedText: string,
+      comment: string,
+    ) => {
       onAddComment?.(data.start, data.end, selectedText, comment);
     },
-    [onAddComment]
+    [onAddComment],
   );
 
   const { pending, submit, cancel } = useCommentSelection<{
@@ -216,7 +227,7 @@ export function DocView({
           const segments = buildSegments(
             lineText,
             perLineTokens[i] ?? [],
-            rangesByLine.get(i) ?? []
+            rangesByLine.get(i) ?? [],
           );
           return (
             <div key={i} className="flex">
@@ -239,43 +250,40 @@ export function DocView({
                 }
                 style={{ color: "var(--text)" }}
               >
-                {segments.length === 0 ? (
-                  "\n"
-                ) : (
-                  segments.map((seg, si) => {
-                    const commented = seg.commentIds.length > 0;
-                    const isActive =
-                      activeCommentId != null &&
-                      seg.commentIds.includes(activeCommentId);
-                    return (
-                      <span
-                        key={si}
-                        onClick={
-                          commented
-                            ? () =>
-                                onActiveCommentChange?.(seg.commentIds[0])
-                            : undefined
-                        }
-                        style={{
-                          color: seg.color,
-                          fontStyle: seg.italic ? "italic" : undefined,
-                          fontWeight: seg.bold ? 600 : undefined,
-                          cursor: commented ? "pointer" : undefined,
-                          background: isActive
-                            ? "var(--selection-bg)"
-                            : commented
-                              ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                {segments.length === 0
+                  ? "\n"
+                  : segments.map((seg, si) => {
+                      const commented = seg.commentIds.length > 0;
+                      const isActive =
+                        activeCommentId != null &&
+                        seg.commentIds.includes(activeCommentId);
+                      return (
+                        <span
+                          key={si}
+                          onClick={
+                            commented
+                              ? () => onActiveCommentChange?.(seg.commentIds[0])
+                              : undefined
+                          }
+                          style={{
+                            color: seg.color,
+                            fontStyle: seg.italic ? "italic" : undefined,
+                            fontWeight: seg.bold ? 600 : undefined,
+                            cursor: commented ? "pointer" : undefined,
+                            background: isActive
+                              ? "var(--selection-bg)"
+                              : commented
+                                ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                                : undefined,
+                            borderBottom: commented
+                              ? "1.5px solid var(--accent)"
                               : undefined,
-                          borderBottom: commented
-                            ? "1.5px solid var(--accent)"
-                            : undefined,
-                        }}
-                      >
-                        {seg.text}
-                      </span>
-                    );
-                  })
-                )}
+                          }}
+                        >
+                          {seg.text}
+                        </span>
+                      );
+                    })}
               </div>
             </div>
           );

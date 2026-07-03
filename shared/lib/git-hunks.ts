@@ -82,7 +82,10 @@ export function parseFileDiff(body: string): ParsedFileDiff {
 }
 
 /** Reassemble a minimal patch for just one hunk, suitable for `git apply`. */
-export function buildSingleHunkPatch(parsed: ParsedFileDiff, hunkIdx: number): string {
+export function buildSingleHunkPatch(
+  parsed: ParsedFileDiff,
+  hunkIdx: number,
+): string {
   const hunk = parsed.hunks[hunkIdx];
   if (!hunk) throw new Error(`No hunk at index ${hunkIdx}`);
   // `git apply` needs a trailing newline.

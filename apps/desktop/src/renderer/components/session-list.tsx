@@ -72,7 +72,7 @@ export function SessionList({
     const q = archivedSearch.trim().toLowerCase();
     if (!q) return archived;
     return archived.filter((s) =>
-      (s.title ?? "Untitled session").toLowerCase().includes(q)
+      (s.title ?? "Untitled session").toLowerCase().includes(q),
     );
   }, [archivedView, active, archived, archivedSearch]);
 
@@ -156,7 +156,7 @@ export function SessionList({
                 aria-label="Archived chats"
                 onClick={() => setArchivedView((v) => !v)}
                 className={cn(
-                  archivedView && "border-[var(--accent)] text-[var(--accent)]"
+                  archivedView && "border-[var(--accent)] text-[var(--accent)]",
                 )}
               >
                 <TrashIcon />
@@ -207,7 +207,7 @@ const SessionRow = memo(function SessionRow({
             "flex flex-col gap-0.5 border-l-2 px-3 py-2 text-left transition-colors",
             isSelected
               ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-              : "border-l-transparent hover:bg-[var(--bg-surface-hover)]"
+              : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
           )}
         >
           <span className="flex items-center gap-2">
@@ -216,7 +216,7 @@ const SessionRow = memo(function SessionRow({
                 "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[12px]",
                 isSelected
                   ? "text-[var(--text)]"
-                  : "text-[var(--text-secondary)]"
+                  : "text-[var(--text-secondary)]",
               )}
             >
               {s.title ?? "Untitled session"}

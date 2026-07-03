@@ -46,6 +46,6 @@ export function ImageLightbox({
         </button>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }

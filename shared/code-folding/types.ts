@@ -30,7 +30,7 @@ export interface FoldEngine {
    */
   computeFolds(
     text: string,
-    languageId: string
+    languageId: string,
   ): FoldRange[] | Promise<FoldRange[]>;
   /**
    * Code symbols for the "go to symbol" palette, or undefined if the engine
@@ -39,6 +39,6 @@ export interface FoldEngine {
    */
   computeSymbols?(
     text: string,
-    languageId: string
+    languageId: string,
   ): CodeSymbol[] | Promise<CodeSymbol[]>;
 }

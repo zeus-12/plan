@@ -73,7 +73,7 @@ export function SidebarProvider({
         return next;
       });
     },
-    [storageKey]
+    [storageKey],
   );
 
   const toggle = useCallback(() => setOpen((p) => !p), [setOpen]);
@@ -104,7 +104,7 @@ export function SidebarProvider({
 
   const value = useMemo(
     () => ({ open, setOpen, toggle, shortcut }),
-    [open, setOpen, toggle, shortcut]
+    [open, setOpen, toggle, shortcut],
   );
 
   return (
@@ -161,7 +161,7 @@ export function Sidebar({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [width, onWidthChange, side, minWidth, maxWidth]
+    [width, onWidthChange, side, minWidth, maxWidth],
   );
 
   return (
@@ -174,7 +174,7 @@ export function Sidebar({
         !resizing && "transition-[width] duration-200",
         !resizable && "data-[state=collapsed]:w-0",
         side === "left" ? "border-r" : "border-l",
-        className
+        className,
       )}
       style={resizable ? { width: open ? width : 0 } : undefined}
       {...rest}
@@ -189,7 +189,7 @@ export function Sidebar({
           className={cn(
             "absolute top-0 z-20 h-full w-1 cursor-col-resize transition-colors hover:bg-[var(--border-strong)]",
             side === "left" ? "right-0" : "left-0",
-            resizing && "bg-[var(--accent)]"
+            resizing && "bg-[var(--accent)]",
           )}
         />
       )}
@@ -205,7 +205,7 @@ export function SidebarHeader({
     <div
       className={cn(
         "flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2",
-        className
+        className,
       )}
       {...rest}
     />
@@ -232,7 +232,7 @@ export function SidebarFooter({
     <div
       className={cn(
         "flex shrink-0 items-center gap-2 border-t border-[var(--border)] px-3 py-2",
-        className
+        className,
       )}
       {...rest}
     />
@@ -254,15 +254,14 @@ export function SidebarSectionLabel({
     <div
       className={cn(
         "px-3 pt-3 pb-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]",
-        className
+        className,
       )}
       {...rest}
     />
   );
 }
 
-export interface SidebarTriggerProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement> {}
+export interface SidebarTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {}
 
 export function SidebarTrigger({
   className,
@@ -279,7 +278,7 @@ export function SidebarTrigger({
       }}
       className={cn(
         "inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]",
-        className
+        className,
       )}
       aria-label="Toggle sidebar"
       {...rest}

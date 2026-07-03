@@ -44,7 +44,7 @@ export function formatUnifiedDiff(oldText: string, newText: string): string {
     "original",
     "changed",
     oldText ?? "",
-    newText ?? ""
+    newText ?? "",
   );
   // jsdiff prefixes an "===" separator line; drop everything before the
   // "--- original" header so the result is a clean unified diff.
@@ -56,7 +56,7 @@ export function formatUnifiedDiff(oldText: string, newText: string): string {
 export function buildDiffLines(
   oldText: string,
   newText: string,
-  ignoreWhitespace = false
+  ignoreWhitespace = false,
 ): DiffLine[] {
   const changes = diffLines(oldText || "", newText || "");
   const result: DiffLine[] = [];
@@ -172,10 +172,11 @@ function markWhitespaceOnlyChanges(lines: DiffLine[]): void {
 
 export function filterUnchangedLines(
   dLines: DiffLine[],
-  ctx: number = CONTEXT_LINES_AROUND_CHANGES
+  ctx: number = CONTEXT_LINES_AROUND_CHANGES,
 ): FilteredItem[] {
   if (dLines.length === 0) return [];
-  const isRealChange = (l: DiffLine) => l.type !== "context" && !l.whitespaceOnly;
+  const isRealChange = (l: DiffLine) =>
+    l.type !== "context" && !l.whitespaceOnly;
   const hasChanges = dLines.some(isRealChange);
   if (!hasChanges) {
     return [{ type: "separator", hiddenCount: dLines.length }];
@@ -234,17 +235,11 @@ export function buildSplitRows(items: FilteredItem[]): SplitRow[] {
     const removes: DiffLine[] = [];
     const adds: DiffLine[] = [];
 
-    while (
-      i < items.length &&
-      items[i].type === "remove"
-    ) {
+    while (i < items.length && items[i].type === "remove") {
       removes.push(items[i] as DiffLine);
       i++;
     }
-    while (
-      i < items.length &&
-      items[i].type === "add"
-    ) {
+    while (i < items.length && items[i].type === "add") {
       adds.push(items[i] as DiffLine);
       i++;
     }
@@ -264,7 +259,7 @@ export function buildSplitRows(items: FilteredItem[]): SplitRow[] {
 
 export function getDiffLineForOffset(
   offset: number,
-  dLines: DiffLine[]
+  dLines: DiffLine[],
 ): number {
   for (let i = 0; i < dLines.length; i++) {
     if (offset <= dLines[i].flatOffset + dLines[i].content.length) return i;

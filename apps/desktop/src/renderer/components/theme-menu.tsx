@@ -105,7 +105,7 @@ export function ThemeMenu() {
                 "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--bg-surface-hover)]",
                 t.id === theme
                   ? "text-[var(--text)]"
-                  : "text-[var(--text-secondary)]"
+                  : "text-[var(--text-secondary)]",
               )}
             >
               <span className="flex items-center gap-2">

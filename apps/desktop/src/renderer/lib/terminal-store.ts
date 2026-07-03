@@ -46,7 +46,7 @@ function get(encoded: string): TerminalState {
 
 function makeSetter<K extends keyof TerminalState>(
   encoded: string,
-  key: K
+  key: K,
 ): Dispatch<SetStateAction<TerminalState[K]>> {
   return (update) => {
     const cur = get(encoded);
@@ -73,16 +73,15 @@ export function useProjectTerminals(encoded: string): {
   const snapshot = useSyncExternalStore(
     subscribe,
     () => get(encoded),
-    () => get(encoded)
+    () => get(encoded),
   );
 
   const setOpenedIds = useCallback(makeSetter(encoded, "openedIds"), [encoded]);
   const setTerminalOpen = useCallback(makeSetter(encoded, "open"), [encoded]);
   const setShells = useCallback(makeSetter(encoded, "shells"), [encoded]);
-  const setActiveShellId = useCallback(
-    makeSetter(encoded, "activeShellId"),
-    [encoded]
-  );
+  const setActiveShellId = useCallback(makeSetter(encoded, "activeShellId"), [
+    encoded,
+  ]);
 
   return {
     openedIds: snapshot.openedIds,
@@ -145,7 +144,7 @@ export function useTerminalHeight(): [
   const value = useSyncExternalStore(
     subscribeHeight,
     () => height,
-    () => height
+    () => height,
   );
   return [value, setHeight];
 }

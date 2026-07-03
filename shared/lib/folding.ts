@@ -92,7 +92,7 @@ export function foldRangeMap(ranges: FoldRange[]): Map<number, FoldRange> {
  */
 export function hiddenLineSet(
   collapsed: Iterable<number>,
-  byStart: Map<number, FoldRange>
+  byStart: Map<number, FoldRange>,
 ): Set<number> {
   const hidden = new Set<number>();
   for (const start of collapsed) {
@@ -111,7 +111,7 @@ export function hiddenLineSet(
 export function collapsedRangesContaining(
   line: number,
   collapsed: Iterable<number>,
-  byStart: Map<number, FoldRange>
+  byStart: Map<number, FoldRange>,
 ): number[] {
   const out: number[] = [];
   for (const start of collapsed) {

@@ -66,7 +66,13 @@ const PRESETS: Record<Exclude<SoundId, "off">, (ac: AudioContext) => void> = {
   // Bright, glassy two-tone.
   glass: (ac) => {
     note(ac, { freq: 1318.5, type: "triangle", dur: 0.16, gain: 0.1 });
-    note(ac, { freq: 1975.5, type: "triangle", start: 0.05, dur: 0.2, gain: 0.08 });
+    note(ac, {
+      freq: 1975.5,
+      type: "triangle",
+      start: 0.05,
+      dur: 0.2,
+      gain: 0.08,
+    });
   },
 };
 

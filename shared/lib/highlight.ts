@@ -32,7 +32,11 @@ export interface LanguageOption {
 export const LANGUAGES: LanguageOption[] = [
   { id: "auto", label: "Auto-detect", extensions: [] },
   { id: "plaintext", label: "Plain text", extensions: ["txt"] },
-  { id: "javascript", label: "JavaScript", extensions: ["js", "mjs", "cjs", "jsx"] },
+  {
+    id: "javascript",
+    label: "JavaScript",
+    extensions: ["js", "mjs", "cjs", "jsx"],
+  },
   { id: "typescript", label: "TypeScript", extensions: ["ts", "tsx"] },
   { id: "python", label: "Python", extensions: ["py"] },
   { id: "rust", label: "Rust", extensions: ["rs"] },
@@ -89,11 +93,20 @@ const SIGNALS: Record<string, Signal[]> = {
   typescript: [
     { re: /\binterface\s+\w+\s*(\extends\s+\w+\s*)?\{/g, weight: 3 },
     { re: /\btype\s+\w+\s*=/g, weight: 3 },
-    { re: /:\s*(string|number|boolean|void|any|unknown|never|null)\b/g, weight: 2 },
+    {
+      re: /:\s*(string|number|boolean|void|any|unknown|never|null)\b/g,
+      weight: 2,
+    },
     { re: /\b(import|export)\b[^\n]*\bfrom\s+['"]/g, weight: 2 },
-    { re: /\bexport\s+(const|default|function|class|interface|type|async)\b/g, weight: 2 },
+    {
+      re: /\bexport\s+(const|default|function|class|interface|type|async)\b/g,
+      weight: 2,
+    },
     { re: /\bas\s+(const|string|number|\w+\[\])/g, weight: 2 },
-    { re: /\b(useState|useEffect|useCallback|useMemo|useRef)\s*[(<]/g, weight: 3 },
+    {
+      re: /\b(useState|useEffect|useCallback|useMemo|useRef)\s*[(<]/g,
+      weight: 3,
+    },
     { re: /<\/[A-Za-z][\w.]*>|<[A-Z][\w.]*[\s/>]/g, weight: 2 }, // JSX
     { re: /=>\s*[({]/g, weight: 1 },
     { re: /\bconst\s+\w+\s*:\s*\w/g, weight: 2 },
@@ -133,7 +146,10 @@ const SIGNALS: Record<string, Signal[]> = {
     { re: /->\s*\w/g, weight: 1 },
   ],
   java: [
-    { re: /\b(public|private|protected)\s+(static\s+)?(final\s+)?(class|void|int|String)\b/g, weight: 3 },
+    {
+      re: /\b(public|private|protected)\s+(static\s+)?(final\s+)?(class|void|int|String)\b/g,
+      weight: 3,
+    },
     { re: /\bSystem\.out\.print/g, weight: 3 },
     { re: /\bimport\s+java[\w.]+;/g, weight: 3 },
     { re: /\b@Override\b/g, weight: 2 },
@@ -168,7 +184,10 @@ const SIGNALS: Record<string, Signal[]> = {
   ],
   sql: [
     { re: /\bSELECT\b[\s\S]*\bFROM\b/gi, weight: 3 },
-    { re: /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE)\b/gi, weight: 3 },
+    {
+      re: /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE)\b/gi,
+      weight: 3,
+    },
     { re: /\b(WHERE|JOIN|GROUP\s+BY|ORDER\s+BY)\b/gi, weight: 1 },
   ],
 };
@@ -194,7 +213,10 @@ export interface DetectOptions {
  * Detect the language for a body of text. Returns a LANGUAGES id, or
  * "plaintext" if confidence is too low.
  */
-export function detectLanguage(value: string, opts: DetectOptions = {}): string {
+export function detectLanguage(
+  value: string,
+  opts: DetectOptions = {},
+): string {
   const { useLowlightFallback = true } = opts;
   const trimmed = value.trim();
   if (!trimmed) return "plaintext";

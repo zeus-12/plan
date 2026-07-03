@@ -16,7 +16,7 @@ export interface UseWorktrees {
   remove: (id: string) => Promise<void>;
   addRepos: (
     id: string,
-    input: AddReposToWorktreeInput
+    input: AddReposToWorktreeInput,
   ) => Promise<WorktreeRecord>;
   createPr: (id: string, input: CreatePrInput) => Promise<CreatePrResult>;
   defaults: ProjectDefaults;
@@ -49,11 +49,14 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
 
   const create = useCallback(
     async (input: CreateWorktreeInput) => {
-      const rec = await window.electronAPI.createWorktree(projectEncoded, input);
+      const rec = await window.electronAPI.createWorktree(
+        projectEncoded,
+        input,
+      );
       await refresh();
       return rec;
     },
-    [projectEncoded, refresh]
+    [projectEncoded, refresh],
   );
 
   const remove = useCallback(
@@ -61,7 +64,7 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
       await window.electronAPI.removeWorktree(id);
       await refresh();
     },
-    [refresh]
+    [refresh],
   );
 
   const addRepos = useCallback(
@@ -70,13 +73,13 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
       await refresh();
       return rec;
     },
-    [refresh]
+    [refresh],
   );
 
   const createPr = useCallback(
     (id: string, input: CreatePrInput) =>
       window.electronAPI.createWorktreePr(id, input),
-    []
+    [],
   );
 
   const saveDefaults = useCallback(
@@ -84,7 +87,7 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
       await window.electronAPI.setWorktreeDefaults(projectEncoded, next);
       setDefaults(next);
     },
-    [projectEncoded]
+    [projectEncoded],
   );
 
   return {

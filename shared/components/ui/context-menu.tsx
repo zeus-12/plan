@@ -19,7 +19,7 @@ const ContextMenuContent = React.forwardRef<
       className={cn(
         "z-50 min-w-[180px] overflow-hidden rounded-md border border-[var(--popover-border)] bg-[var(--popover-bg)] p-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] shadow-lg",
         "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
-        className
+        className,
       )}
       {...props}
     />
@@ -37,8 +37,9 @@ const ContextMenuItem = React.forwardRef<
     ref={ref}
     className={cn(
       "relative flex cursor-default select-none items-center gap-2 rounded px-2 py-1.5 outline-none transition-colors data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-surface-hover)] data-[highlighted]:text-[var(--text)] data-[disabled]:opacity-50",
-      destructive && "text-[var(--removed-text)] data-[highlighted]:text-[var(--removed-text)]",
-      className
+      destructive &&
+        "text-[var(--removed-text)] data-[highlighted]:text-[var(--removed-text)]",
+      className,
     )}
     {...props}
   />
@@ -65,7 +66,7 @@ const ContextMenuLabel = React.forwardRef<
     ref={ref}
     className={cn(
       "px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]",
-      className
+      className,
     )}
     {...props}
   />

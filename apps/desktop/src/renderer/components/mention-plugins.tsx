@@ -205,7 +205,11 @@ function Row({
  * `@` → fuzzy file/folder picker. `@` may appear anywhere (Claude Code resolves
  * `@path` references mid-message), so the trigger fires after start-or-whitespace.
  */
-export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }) {
+export function FileMentionPlugin({
+  projectEncoded,
+}: {
+  projectEncoded: string;
+}) {
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
   const [options, setOptions] = useState<FileOption[]>([]);
@@ -217,7 +221,8 @@ export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }
     }
     let alive = true;
     void loadFileIndex(projectEncoded).then((idx) => {
-      if (alive) setOptions(searchFiles(idx, query).map((e) => new FileOption(e)));
+      if (alive)
+        setOptions(searchFiles(idx, query).map((e) => new FileOption(e)));
     });
     return () => {
       alive = false;
@@ -235,7 +240,11 @@ export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }
   }, []);
 
   const onSelectOption = useCallback(
-    (option: FileOption, nodeToReplace: TextNode | null, closeMenu: () => void) => {
+    (
+      option: FileOption,
+      nodeToReplace: TextNode | null,
+      closeMenu: () => void,
+    ) => {
       editor.update(() => {
         const ref = $createReferenceNode(option.entry.kind, option.entry.path);
         if (nodeToReplace) nodeToReplace.replace(ref);
@@ -256,7 +265,10 @@ export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }
       onClose={menuClosed}
       triggerFn={triggerFn}
       options={options}
-      menuRenderFn={(anchorRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
+      menuRenderFn={(
+        anchorRef,
+        { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex },
+      ) =>
         anchorRef.current && options.length > 0 ? (
           <MenuShell>
             {options.map((opt, i) => (
@@ -290,7 +302,11 @@ export function FileMentionPlugin({ projectEncoded }: { projectEncoded: string }
  * Claude Code's TUI executes a `/name` command even mid-message (only its own
  * autocomplete popup is start-only), so a chip anywhere is a real invocation.
  */
-export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string }) {
+export function SkillMentionPlugin({
+  projectEncoded,
+}: {
+  projectEncoded: string;
+}) {
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
   const [options, setOptions] = useState<SkillOption[]>([]);
@@ -302,7 +318,8 @@ export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string 
     }
     let alive = true;
     void loadSkillIndex(projectEncoded).then((idx) => {
-      if (alive) setOptions(searchSkills(idx, query).map((s) => new SkillOption(s)));
+      if (alive)
+        setOptions(searchSkills(idx, query).map((s) => new SkillOption(s)));
     });
     return () => {
       alive = false;
@@ -320,7 +337,11 @@ export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string 
   }, []);
 
   const onSelectOption = useCallback(
-    (option: SkillOption, nodeToReplace: TextNode | null, closeMenu: () => void) => {
+    (
+      option: SkillOption,
+      nodeToReplace: TextNode | null,
+      closeMenu: () => void,
+    ) => {
       editor.update(() => {
         const ref = $createReferenceNode("skill", option.skill.name);
         if (nodeToReplace) nodeToReplace.replace(ref);
@@ -341,7 +362,10 @@ export function SkillMentionPlugin({ projectEncoded }: { projectEncoded: string 
       onClose={menuClosed}
       triggerFn={triggerFn}
       options={options}
-      menuRenderFn={(anchorRef, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
+      menuRenderFn={(
+        anchorRef,
+        { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex },
+      ) =>
         anchorRef.current && options.length > 0 ? (
           <MenuShell>
             {options.map((opt, i) => (

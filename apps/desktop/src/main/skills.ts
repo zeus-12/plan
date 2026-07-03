@@ -130,10 +130,14 @@ async function listPluginSkills(): Promise<SkillInfo[]> {
       const installPath = inst?.installPath;
       if (typeof installPath !== "string") continue;
       // Prefer the manifest's declared name; fall back to the install dir.
-      let pluginName = installPath.split("/").filter(Boolean).slice(-2, -1)[0] ?? "";
+      let pluginName =
+        installPath.split("/").filter(Boolean).slice(-2, -1)[0] ?? "";
       try {
         const manifest = JSON.parse(
-          await readFile(join(installPath, ".claude-plugin", "plugin.json"), "utf-8"),
+          await readFile(
+            join(installPath, ".claude-plugin", "plugin.json"),
+            "utf-8",
+          ),
         );
         if (typeof manifest?.name === "string" && manifest.name) {
           pluginName = manifest.name;

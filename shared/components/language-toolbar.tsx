@@ -75,7 +75,7 @@ export function LanguageToolbar({
           title={
             !formatAvailable
               ? `No formatter for ${effectiveLang}`
-              : formatError ?? "Format with Prettier"
+              : (formatError ?? "Format with Prettier")
           }
         >
           {formatting ? "Formatting…" : "Format"}

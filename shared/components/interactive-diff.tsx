@@ -89,7 +89,7 @@ interface Props {
     start: number,
     end: number,
     comment: string,
-    side: "left" | "right"
+    side: "left" | "right",
   ) => void;
   onUpdateAnnotation?: (id: string, comment: string) => void;
   onRemoveAnnotation?: (id: string) => void;
@@ -182,7 +182,7 @@ function visualType(line: DiffLine): DiffLine["type"] {
  */
 function computeRowFolds(
   rows: { content: string; key: number }[],
-  collapsed: Set<number>
+  collapsed: Set<number>,
 ): {
   startByRow: Map<number, { end: number; key: number }>;
   hidden: Set<number>;
@@ -289,7 +289,9 @@ function MergeOverlay({
         <div className="flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)]">
           <span>
             Change {currentIdx + 1}{" "}
-            <span className="text-[var(--text-tertiary)]">of {totalChanges}</span>
+            <span className="text-[var(--text-tertiary)]">
+              of {totalChanges}
+            </span>
           </span>
           <button
             onClick={onPrev}
@@ -395,7 +397,10 @@ function lineContentEqual(a: LineContentProps, b: LineContentProps): boolean {
     return false;
   }
   // hoveredAnnId only changes the paint of a line that carries an annotation.
-  if (b.hls.some((h) => h.kind === "ann") && a.hoveredAnnId !== b.hoveredAnnId) {
+  if (
+    b.hls.some((h) => h.kind === "ann") &&
+    a.hoveredAnnId !== b.hoveredAnnId
+  ) {
     return false;
   }
   return true;
@@ -451,7 +456,11 @@ const LineContent = memo(function LineContent({
   if (wordSegments) {
     let off = 0;
     for (const w of wordSegments) {
-      wordOffsets.push({ start: off, end: off + w.text.length, changed: w.changed });
+      wordOffsets.push({
+        start: off,
+        end: off + w.text.length,
+        changed: w.changed,
+      });
       off += w.text.length;
     }
   }
@@ -487,7 +496,11 @@ const LineContent = memo(function LineContent({
     const hovered = isAnn && hoveredAnnId === annHl?.annId;
 
     const wantsBg =
-      isAnn || isPending || isFind || isFindCurrent || (wordSeg && wordSeg.changed);
+      isAnn ||
+      isPending ||
+      isFind ||
+      isFindCurrent ||
+      (wordSeg && wordSeg.changed);
     const background = isFindCurrent
       ? "var(--find-current-bg, rgba(249,115,22,0.6))"
       : isFind
@@ -515,7 +528,7 @@ const LineContent = memo(function LineContent({
       classNames.push(
         "cursor-pointer",
         "border-b-[1.5px]",
-        "border-[var(--text-tertiary)]"
+        "border-[var(--text-tertiary)]",
       );
 
     const style: React.CSSProperties & Record<string, string | undefined> = {};
@@ -539,7 +552,7 @@ const LineContent = memo(function LineContent({
                 event.stopPropagation();
                 onClickAnn(
                   annId,
-                  (event.currentTarget as HTMLElement).getBoundingClientRect()
+                  (event.currentTarget as HTMLElement).getBoundingClientRect(),
                 );
               }
             : undefined
@@ -548,7 +561,7 @@ const LineContent = memo(function LineContent({
         onMouseLeave={isAnn ? () => onHoverAnn(null) : undefined}
       >
         {slice}
-      </span>
+      </span>,
     );
   }
   return <>{parts}</>;
@@ -585,7 +598,7 @@ export function InteractiveDiff({
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
-    new Set()
+    new Set(),
   );
   // Start lines (DiffLine.idx) of the regions the user has collapsed.
   const [collapsedFolds, setCollapsedFolds] = useState<Set<number>>(new Set());
@@ -615,7 +628,7 @@ export function InteractiveDiff({
 
   const dLines = useMemo(
     () => buildDiffLines(oldText, newText, settings.ignoreWhitespace),
-    [oldText, newText, settings.ignoreWhitespace]
+    [oldText, newText, settings.ignoreWhitespace],
   );
 
   /* ── Code folding (indentation regions, folded by visual row) ────── */
@@ -673,7 +686,7 @@ export function InteractiveDiff({
 
   const splitRows: SplitRow[] = useMemo(
     () => buildSplitRows(expandedFiltered),
-    [expandedFiltered]
+    [expandedFiltered],
   );
 
   // Per-view fold ranges over the displayed rows: which rows begin a fold and
@@ -685,11 +698,11 @@ export function InteractiveDiff({
         expandedFiltered.map((it) =>
           it.type === "separator"
             ? { content: "", key: -1 }
-            : { content: it.content, key: it.idx }
+            : { content: it.content, key: it.idx },
         ),
-        collapsedFolds
+        collapsedFolds,
       ),
-    [expandedFiltered, collapsedFolds]
+    [expandedFiltered, collapsedFolds],
   );
   const splitFold = useMemo(
     () =>
@@ -699,9 +712,9 @@ export function InteractiveDiff({
           const rep = row.right ?? row.left;
           return { content: rep?.content ?? "", key: rep?.idx ?? -1 };
         }),
-        collapsedFolds
+        collapsedFolds,
       ),
-    [splitRows, collapsedFolds]
+    [splitRows, collapsedFolds],
   );
 
   /* ── In-view find (⌘F) ─────────────────────────────────────── */
@@ -733,10 +746,10 @@ export function InteractiveDiff({
     () =>
       find.open
         ? expandedFiltered.filter(
-            (it): it is DiffLine => it.type !== "separator"
+            (it): it is DiffLine => it.type !== "separator",
           )
         : EMPTY_VISIBLE_LINES,
-    [find.open, expandedFiltered]
+    [find.open, expandedFiltered],
   );
   const findLineStarts = useMemo(() => {
     const arr = new Array<number>(visibleLines.length);
@@ -762,7 +775,7 @@ export function InteractiveDiff({
       }
       return ans;
     },
-    [findLineStarts]
+    [findLineStarts],
   );
 
   // dLines index → its find matches as line-local ranges, each tagged with its
@@ -805,7 +818,9 @@ export function InteractiveDiff({
       ) {
         e.preventDefault();
         const sel = window.getSelection()?.toString() ?? "";
-        find.show(sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined);
+        find.show(
+          sel && sel.length <= 200 && !sel.includes("\n") ? sel : undefined,
+        );
         setFindReveal((n) => n + 1);
       } else if (e.key === "Escape" && find.open) {
         find.close();
@@ -846,16 +861,18 @@ export function InteractiveDiff({
     oldText.length + newText.length > SYNC_HIGHLIGHT_MAX_CHARS &&
     (deferredOld !== oldText || deferredNew !== newText);
   const oldLineTokens = useMemo(
-    () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(oldText, language)),
+    () =>
+      tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(oldText, language),
     // shikiReady / shikiTheme are deps so the memo invalidates when the
     // highlighter becomes ready and re-tokenizes when the theme changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [oldText, tokensStale, language, shikiReady, shikiTheme]
+    [oldText, tokensStale, language, shikiReady, shikiTheme],
   );
   const newLineTokens = useMemo(
-    () => (tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(newText, language)),
+    () =>
+      tokensStale ? EMPTY_LINE_TOKENS : highlightPerLine(newText, language),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [newText, tokensStale, language, shikiReady, shikiTheme]
+    [newText, tokensStale, language, shikiReady, shikiTheme],
   );
 
   function tokensForDiffLine(line: DiffLine): SyntaxToken[] {
@@ -872,11 +889,12 @@ export function InteractiveDiff({
   const blocksEnabled = mergeEnabled || hunkActionsEnabled;
   const changes: Change[] = useMemo(
     () => (blocksEnabled ? computeChanges(dLines) : []),
-    [dLines, blocksEnabled]
+    [dLines, blocksEnabled],
   );
   const lineToChange = useMemo(
-    () => (blocksEnabled ? buildLineToChangeMap(changes) : new Map<number, number>()),
-    [changes, blocksEnabled]
+    () =>
+      blocksEnabled ? buildLineToChangeMap(changes) : new Map<number, number>(),
+    [changes, blocksEnabled],
   );
 
   /* ── Split-view per-hunk gutter (VS Code-style stage/revert) ── */
@@ -904,7 +922,7 @@ export function InteractiveDiff({
     }));
     const findHunk = (
       ranges: { start: number; end: number }[],
-      n: number
+      n: number,
     ): number => {
       let lo = 0;
       let hi = ranges.length - 1;
@@ -948,7 +966,9 @@ export function InteractiveDiff({
   }, [hunkActionsEnabled, hunkList, dLines]);
 
   const showGutter =
-    hunkActionsEnabled && effectiveViewMode === "split" && hunkBlocks.length > 0;
+    hunkActionsEnabled &&
+    effectiveViewMode === "split" &&
+    hunkBlocks.length > 0;
 
   const gutterRef = useRef<HTMLDivElement>(null);
   const hunkBoxRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -957,7 +977,7 @@ export function InteractiveDiff({
   // Measured only on layout changes; the scroll handler reads these, never the
   // DOM — which is why the box can't jitter or drift the way earlier tries did.
   const hunkExtents = useRef<Map<number, { top: number; bottom: number }>>(
-    new Map()
+    new Map(),
   );
 
   useLayoutEffect(() => {
@@ -1035,7 +1055,9 @@ export function InteractiveDiff({
         const min = ext.top + half;
         const max = ext.bottom - half;
         box.style.top = `${
-          max < min ? (ext.top + ext.bottom) / 2 : Math.min(Math.max(center, min), max)
+          max < min
+            ? (ext.top + ext.bottom) / 2
+            : Math.min(Math.max(center, min), max)
         }px`;
       }
     };
@@ -1075,9 +1097,10 @@ export function InteractiveDiff({
   ]);
 
   const [activeChangeIdx, setActiveChangeIdx] = useState<number | null>(null);
-  const [overlayPos, setOverlayPos] = useState<
-    { top: number; height: number } | null
-  >(null);
+  const [overlayPos, setOverlayPos] = useState<{
+    top: number;
+    height: number;
+  } | null>(null);
 
   // Reset active change whenever the underlying texts change (their change
   // indices are no longer valid).
@@ -1097,10 +1120,10 @@ export function InteractiveDiff({
     if (!change) return;
     const root = contentRef.current;
     const startEl = root.querySelector<HTMLElement>(
-      `[data-dline="${change.startLineIdx}"]`
+      `[data-dline="${change.startLineIdx}"]`,
     );
     const endEl = root.querySelector<HTMLElement>(
-      `[data-dline="${change.endLineIdx}"]`
+      `[data-dline="${change.endLineIdx}"]`,
     );
     if (!startEl || !endEl) return;
     const rootRect = root.getBoundingClientRect();
@@ -1110,7 +1133,13 @@ export function InteractiveDiff({
       top: startRect.top - rootRect.top,
       height: endRect.bottom - startRect.top,
     });
-  }, [activeChangeIdx, changes, settings.viewMode, settings.hideUnchanged, expandedSeparators]);
+  }, [
+    activeChangeIdx,
+    changes,
+    settings.viewMode,
+    settings.hideUnchanged,
+    expandedSeparators,
+  ]);
 
   // Close overlay on outside click or Escape.
   useEffect(() => {
@@ -1143,12 +1172,18 @@ export function InteractiveDiff({
       if (!change) return;
       const next =
         direction === "rightToLeft"
-          ? { left: applyChangeRightToLeft(oldText, change, dLines), right: newText }
-          : { left: oldText, right: applyChangeLeftToRight(newText, change, dLines) };
+          ? {
+              left: applyChangeRightToLeft(oldText, change, dLines),
+              right: newText,
+            }
+          : {
+              left: oldText,
+              right: applyChangeLeftToRight(newText, change, dLines),
+            };
       onMergeChange(next);
       setActiveChangeIdx(null);
     },
-    [activeChangeIdx, changes, dLines, oldText, newText, onMergeChange]
+    [activeChangeIdx, changes, dLines, oldText, newText, onMergeChange],
   );
 
   const goToChange = useCallback(
@@ -1158,7 +1193,7 @@ export function InteractiveDiff({
       const next = (cur + delta + changes.length) % changes.length;
       setActiveChangeIdx(next);
     },
-    [changes.length, activeChangeIdx]
+    [changes.length, activeChangeIdx],
   );
 
   /* ── Inline hunk-staging affordance ─────────────────────── */
@@ -1212,11 +1247,7 @@ export function InteractiveDiff({
   }
 
   useEffect(() => {
-    if (
-      !hunkActionsEnabled ||
-      hoverChangeIdx === null ||
-      !contentRef.current
-    ) {
+    if (!hunkActionsEnabled || hoverChangeIdx === null || !contentRef.current) {
       setHunkCtrlTop(null);
       return;
     }
@@ -1224,7 +1255,7 @@ export function InteractiveDiff({
     if (!change) return;
     const root = contentRef.current;
     const startEl = root.querySelector<HTMLElement>(
-      `[data-dline="${change.startLineIdx}"]`
+      `[data-dline="${change.startLineIdx}"]`,
     );
     if (!startEl) return;
     const endEl =
@@ -1244,23 +1275,20 @@ export function InteractiveDiff({
     expandedSeparators,
   ]);
 
-  const changeRange = useCallback(
-    (change: Change): HunkRange => {
-      const olds = change.removed
-        .map((l) => l.oldNum)
-        .filter((n): n is number => typeof n === "number");
-      const news = change.added
-        .map((l) => l.newNum)
-        .filter((n): n is number => typeof n === "number");
-      return {
-        oldStart: olds.length ? Math.min(...olds) : null,
-        oldEnd: olds.length ? Math.max(...olds) : null,
-        newStart: news.length ? Math.min(...news) : null,
-        newEnd: news.length ? Math.max(...news) : null,
-      };
-    },
-    []
-  );
+  const changeRange = useCallback((change: Change): HunkRange => {
+    const olds = change.removed
+      .map((l) => l.oldNum)
+      .filter((n): n is number => typeof n === "number");
+    const news = change.added
+      .map((l) => l.newNum)
+      .filter((n): n is number => typeof n === "number");
+    return {
+      oldStart: olds.length ? Math.min(...olds) : null,
+      oldEnd: olds.length ? Math.max(...olds) : null,
+      newStart: news.length ? Math.min(...news) : null,
+      newEnd: news.length ? Math.max(...news) : null,
+    };
+  }, []);
 
   /* ── Inline comment positions (by end line) ─────────────── */
 
@@ -1269,7 +1297,7 @@ export function InteractiveDiff({
     annotations.forEach((a, i) => {
       const lineIdx = getDiffLineForOffset(
         Math.max(0, a.endOffset - 1),
-        dLines
+        dLines,
       );
       const existing = map.get(lineIdx) || [];
       existing.push({ annotation: a, index: i });
@@ -1282,7 +1310,7 @@ export function InteractiveDiff({
 
   const maxLineNum = dLines.reduce(
     (m, l) => Math.max(m, l.oldNum ?? 0, l.newNum ?? 0),
-    0
+    0,
   );
   const numDigits = Math.max(String(maxLineNum).length, 1);
   const numColW = numDigits * NUM_DIGIT_WIDTH + NUM_COL_PAD;
@@ -1431,7 +1459,8 @@ export function InteractiveDiff({
   // useCommentSelection; this just maps a settled selection to a diff anchor.
   function resolveSelection(range: Range, sel: Selection, clickCount: number) {
     if (!contentRef.current) return null;
-    if (!contentRef.current.contains(range.commonAncestorContainer)) return null;
+    if (!contentRef.current.contains(range.commonAncestorContainer))
+      return null;
 
     let side: "left" | "right" = "right";
 
@@ -1460,7 +1489,8 @@ export function InteractiveDiff({
       let lastIdx = firstIdx;
       while (
         lastIdx + 1 < dLines.length &&
-        end >= dLines[lastIdx + 1].flatOffset + dLines[lastIdx + 1].content.length
+        end >=
+          dLines[lastIdx + 1].flatOffset + dLines[lastIdx + 1].content.length
       ) {
         lastIdx++;
       }
@@ -1489,7 +1519,7 @@ export function InteractiveDiff({
         top: rect.bottom + 8,
         left: Math.max(
           8,
-          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
         ),
       },
     };
@@ -1504,7 +1534,7 @@ export function InteractiveDiff({
         data.startOffset,
         data.endOffset,
         comment,
-        data.side
+        data.side,
       ),
   });
   const pending = selection.pending;
@@ -1529,14 +1559,14 @@ export function InteractiveDiff({
         top: rect.bottom + 8,
         left: Math.max(
           8,
-          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD)
+          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
         ),
       },
     });
   }, []);
   const handleHoverAnn = useCallback(
     (id: string | null) => setHoveredAnnId(id),
-    []
+    [],
   );
 
   /* ── Highlights ─────────────────────────────────────────── */
@@ -1597,7 +1627,7 @@ export function InteractiveDiff({
 
   const numCellStyle = (
     type: DiffLine["type"],
-    hide?: boolean
+    hide?: boolean,
   ): React.CSSProperties => ({
     height: LINE_HEIGHT_PX,
     lineHeight: `${LINE_HEIGHT_PX}px`,
@@ -1698,7 +1728,7 @@ export function InteractiveDiff({
         onClick={(e) =>
           handleClickAnn(
             ann.id,
-            (e.currentTarget as HTMLElement).getBoundingClientRect()
+            (e.currentTarget as HTMLElement).getBoundingClientRect(),
           )
         }
         onMouseEnter={() => setHoveredAnnId(ann.id)}
@@ -1905,7 +1935,7 @@ export function InteractiveDiff({
   function renderSeparatorTd(
     colSpan: number,
     hiddenCount: number,
-    sepIdx: number
+    sepIdx: number,
   ) {
     return (
       <td
@@ -1945,16 +1975,18 @@ export function InteractiveDiff({
         onCompositionStart={abortComposition}
         className="overflow-x-auto outline-none [caret-color:var(--text)] [container-type:inline-size]"
       >
-        <table
-          className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]"
-        >
+        <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
           <tbody>
             {expandedFiltered.map((item, i) => {
               if (unifiedFold.hidden.has(i)) return null;
               if (item.type === "separator") {
                 return (
                   <tr key={`us${i}`}>
-                    {renderSeparatorTd(colCount, item.hiddenCount, sepIndices[i])}
+                    {renderSeparatorTd(
+                      colCount,
+                      item.hiddenCount,
+                      sepIndices[i],
+                    )}
                   </tr>
                 );
               }
@@ -1984,10 +2016,7 @@ export function InteractiveDiff({
                         borderRight: "1px solid var(--border)",
                       }}
                     />
-                    <td
-                      data-dline={item.idx}
-                      style={contentCellStyle(vt)}
-                    >
+                    <td data-dline={item.idx} style={contentCellStyle(vt)}>
                       {fold && renderFoldToggle(fold.key)}
                       <LineContent
                         text={item.content}
@@ -2031,7 +2060,7 @@ export function InteractiveDiff({
     line: DiffLine | undefined,
     side: "left" | "right",
     key: string,
-    foldKey: number | null
+    foldKey: number | null,
   ) {
     if (!line) {
       return (
@@ -2075,17 +2104,16 @@ export function InteractiveDiff({
           }}
         />
         <td contentEditable={false} style={barCellStyle(vt)} />
-        <td
-          data-dline={line.idx}
-          style={contentCellStyle(vt)}
-        >
+        <td data-dline={line.idx} style={contentCellStyle(vt)}>
           {foldKey != null && renderFoldToggle(foldKey)}
           <LineContent
             text={line.content}
             lineType={line.type}
             syntax={tokensForDiffLine(line)}
             wordSegments={
-              line.wordSegments && !line.whitespaceOnly ? line.wordSegments : null
+              line.wordSegments && !line.whitespaceOnly
+                ? line.wordSegments
+                : null
             }
             hls={hlsForLine(line.idx, side)}
             hoveredAnnId={hoveredAnnId}
@@ -2300,7 +2328,8 @@ export function InteractiveDiff({
           if (!mergeEnabled) return;
           // Don't trigger on a drag-select.
           const sel = window.getSelection();
-          if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return;
+          if (sel && !sel.isCollapsed && sel.toString().trim().length > 0)
+            return;
           // Find which line we clicked.
           let el: HTMLElement | null = e.target as HTMLElement | null;
           while (el && !el.hasAttribute("data-dline")) {

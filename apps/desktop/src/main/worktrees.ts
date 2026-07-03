@@ -302,7 +302,9 @@ export async function addReposToWorktree(
   const all = await discoverRepos(rec.projectEncoded);
   const have = new Set(rec.repos.map((r) => r.subPath));
   const wanted = new Set(Object.keys(input.bases));
-  const toAdd = all.filter((r) => wanted.has(r.subPath) && !have.has(r.subPath));
+  const toAdd = all.filter(
+    (r) => wanted.has(r.subPath) && !have.has(r.subPath),
+  );
   if (toAdd.length === 0) {
     throw new Error("No new repos to add to this worktree.");
   }

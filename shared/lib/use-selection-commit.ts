@@ -20,7 +20,7 @@ import { useEffect, useRef } from "react";
  */
 export function useSelectionCommit(
   onCommit: (clickCount: number) => void,
-  enabled = true
+  enabled = true,
 ) {
   const cb = useRef(onCommit);
   cb.current = onCommit;

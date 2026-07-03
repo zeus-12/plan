@@ -579,13 +579,11 @@ function registerIpc() {
   ipcMain.handle("skills:list", async (_e, encoded: string) =>
     listSkills(encoded),
   );
-  ipcMain.handle(
-    "claudeConfig:read",
-    async (_e, encoded: string | null) => readClaudeConfig(encoded),
+  ipcMain.handle("claudeConfig:read", async (_e, encoded: string | null) =>
+    readClaudeConfig(encoded),
   );
-  ipcMain.handle(
-    "claudeConfig:write",
-    async (_e, path: string, text: string) => writeClaudeConfig(path, text),
+  ipcMain.handle("claudeConfig:write", async (_e, path: string, text: string) =>
+    writeClaudeConfig(path, text),
   );
   ipcMain.handle(
     "files:search",
@@ -628,8 +626,7 @@ function registerIpc() {
   );
   ipcMain.handle(
     "worktrees:createPr",
-    async (_e, id: string, input: CreatePrInput) =>
-      createWorktreePr(id, input),
+    async (_e, id: string, input: CreatePrInput) => createWorktreePr(id, input),
   );
   ipcMain.handle("worktrees:getDefaults", async (_e, encoded: string) =>
     getProjectDefaults(encoded),

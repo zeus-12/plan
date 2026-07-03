@@ -55,7 +55,11 @@ function buildTree(files: string[]): TreeNode[] {
       }
       parent = dir;
     }
-    parent.children.push({ type: "file", name: parts[parts.length - 1], path: f });
+    parent.children.push({
+      type: "file",
+      name: parts[parts.length - 1],
+      path: f,
+    });
   }
   sortNodes(root);
   return root.children;
@@ -77,7 +81,7 @@ function flatten(
   nodes: TreeNode[],
   expanded: Set<string>,
   depth = 0,
-  out: Row[] = []
+  out: Row[] = [],
 ): Row[] {
   for (const n of nodes) {
     out.push({ node: n, depth });
@@ -125,12 +129,15 @@ export function ProjectFileList({
   const q = query.trim().toLowerCase();
   const filtered = useMemo(
     () => (q ? files.filter((f) => f.toLowerCase().includes(q)) : null),
-    [files, q]
+    [files, q],
   );
 
   const rows: Row[] = useMemo(() => {
     if (filtered) {
-      return filtered.map((f) => ({ node: { type: "file", name: f, path: f }, depth: 0 }));
+      return filtered.map((f) => ({
+        node: { type: "file", name: f, path: f },
+        depth: 0,
+      }));
     }
     return flatten(tree, expanded);
   }, [filtered, tree, expanded]);
@@ -166,7 +173,9 @@ export function ProjectFileList({
         <Centered>{files.length === 0 ? "No files" : "No matches"}</Centered>
       ) : (
         <div ref={parentRef} className="min-h-0 flex-1 overflow-auto py-1">
-          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          <div
+            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+          >
             {virtualizer.getVirtualItems().map((vi) => {
               const { node, depth } = rows[vi.index];
               const isDir = node.type === "dir";
@@ -181,7 +190,9 @@ export function ProjectFileList({
               return (
                 <button
                   key={vi.key}
-                  onClick={() => (isDir ? toggle(node.path) : onSelect(node.path))}
+                  onClick={() =>
+                    isDir ? toggle(node.path) : onSelect(node.path)
+                  }
                   title={node.path}
                   className={cn(
                     "absolute left-0 top-0 flex w-full items-center gap-1 border-l-2 pr-2 text-left font-[family-name:var(--font-mono)] text-[12px] transition-colors",
@@ -189,7 +200,7 @@ export function ProjectFileList({
                       ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)] text-[var(--text)]"
                       : isActive
                         ? "border-l-[var(--accent)] bg-[var(--bg-surface)] text-[var(--text)]"
-                        : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
+                        : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]",
                   )}
                   style={{
                     height: ROW_HEIGHT,

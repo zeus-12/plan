@@ -114,7 +114,10 @@ async function loadGitignore(cwd: string): Promise<Ignore> {
 export async function startWorktreeWatch(encoded: string): Promise<void> {
   if (watchers.has(encoded)) return;
   // Claim the slot synchronously so concurrent calls don't both build watchers.
-  const slot: ActiveWatch = { watcher: null as unknown as FSWatcher, debounce: null };
+  const slot: ActiveWatch = {
+    watcher: null as unknown as FSWatcher,
+    debounce: null,
+  };
   watchers.set(encoded, slot);
 
   let cwd: string;
@@ -142,7 +145,7 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
     }
 
     const rel = relative(cwd, p);
-    if (rel === "" ) return false;
+    if (rel === "") return false;
     if (rel.startsWith("..") || isAbsolute(rel)) return false;
     const parts = rel.split(sep);
     if (parts.some((seg) => ALWAYS_IGNORE_DIRS.has(seg))) return true;

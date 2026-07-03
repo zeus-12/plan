@@ -75,7 +75,8 @@ function parseUserParts(content: unknown): MessagePart[] {
         }
         break;
       case "tool_result": {
-        const toolUseId = typeof c.tool_use_id === "string" ? c.tool_use_id : "";
+        const toolUseId =
+          typeof c.tool_use_id === "string" ? c.tool_use_id : "";
         const output = asString(c.content);
         parts.push({
           kind: "tool_result",
@@ -90,7 +91,10 @@ function parseUserParts(content: unknown): MessagePart[] {
   return parts;
 }
 
-export function parseSessionJsonl(raw: string, filePath: string): ParsedSession {
+export function parseSessionJsonl(
+  raw: string,
+  filePath: string,
+): ParsedSession {
   const lines = raw.split("\n");
   const messages: ConversationMessage[] = [];
   let sessionId = "";
@@ -109,7 +113,8 @@ export function parseSessionJsonl(raw: string, filePath: string): ParsedSession 
       continue;
     }
 
-    if (typeof obj.sessionId === "string" && !sessionId) sessionId = obj.sessionId;
+    if (typeof obj.sessionId === "string" && !sessionId)
+      sessionId = obj.sessionId;
     if (typeof obj.cwd === "string" && !cwd) cwd = obj.cwd;
     if (typeof obj.gitBranch === "string") gitBranch = obj.gitBranch;
     if (obj.type === "ai-title" && typeof obj.aiTitle === "string") {
@@ -135,8 +140,7 @@ export function parseSessionJsonl(raw: string, filePath: string): ParsedSession 
           : undefined;
       messages.push({
         uuid: typeof obj.uuid === "string" ? obj.uuid : "",
-        parentUuid:
-          typeof obj.parentUuid === "string" ? obj.parentUuid : null,
+        parentUuid: typeof obj.parentUuid === "string" ? obj.parentUuid : null,
         role: obj.type,
         timestamp: typeof obj.timestamp === "string" ? obj.timestamp : "",
         parts,
@@ -161,7 +165,9 @@ export function parseSessionJsonl(raw: string, filePath: string): ParsedSession 
   };
 }
 
-export async function readSessionFile(filePath: string): Promise<ParsedSession> {
+export async function readSessionFile(
+  filePath: string,
+): Promise<ParsedSession> {
   const raw = await readFile(filePath, "utf-8");
   return parseSessionJsonl(raw, filePath);
 }
@@ -252,14 +258,14 @@ export function readSessionMeta(filePath: string): Promise<SessionMetaLite> {
   const existing = metaInflight.get(filePath);
   if (existing) return existing;
   const p = readSessionMetaInner(filePath).finally(() =>
-    metaInflight.delete(filePath)
+    metaInflight.delete(filePath),
   );
   metaInflight.set(filePath, p);
   return p;
 }
 
 async function readSessionMetaInner(
-  filePath: string
+  filePath: string,
 ): Promise<SessionMetaLite> {
   const { size } = await stat(filePath);
   let state = metaStates.get(filePath);

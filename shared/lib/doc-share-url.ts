@@ -56,7 +56,7 @@ export function encodeDocState(state: DocState): string {
         b: c.body,
         a: c.author,
         t: c.createdAt,
-      })
+      }),
     ),
   });
   return LZString.compressToEncodedURIComponent(payload);
@@ -66,7 +66,10 @@ export function encodeDocState(state: DocState): string {
  * Build a full, shareable `/doc` URL for the given state. Used by the desktop
  * app to open a file's contents in the web doc tool.
  */
-export function buildDocUrl(state: DocState, base: string = FRONTEND_URL): string {
+export function buildDocUrl(
+  state: DocState,
+  base: string = FRONTEND_URL,
+): string {
   return `${base.replace(/\/+$/, "")}/doc${DOC_HASH_PREFIX}${encodeDocState(state)}`;
 }
 

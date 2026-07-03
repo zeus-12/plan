@@ -58,7 +58,8 @@ export function NewWorktreeModal({
   const multiRepo = (repos?.length ?? 0) > 1;
   const selected = (repos ?? []).filter((r) => !excluded[r.subPath]);
   // A repo's base is its override, falling back to the global default.
-  const baseFor = (subPath: string) => repoBases[subPath]?.trim() || base.trim();
+  const baseFor = (subPath: string) =>
+    repoBases[subPath]?.trim() || base.trim();
 
   const canSubmit =
     branch.trim() !== "" &&
@@ -166,7 +167,10 @@ export function NewWorktreeModal({
                         type="checkbox"
                         checked={on}
                         onChange={(e) =>
-                          setExcluded((m) => ({ ...m, [sp]: !e.target.checked }))
+                          setExcluded((m) => ({
+                            ...m,
+                            [sp]: !e.target.checked,
+                          }))
                         }
                         title={on ? "Included" : "Excluded"}
                         className="shrink-0 accent-[var(--accent)]"
@@ -219,7 +223,11 @@ export function NewWorktreeModal({
             <Button variant="ghost" size="sm" onClick={onClose}>
               Cancel
             </Button>
-            <Button size="sm" onClick={() => void submit()} disabled={!canSubmit}>
+            <Button
+              size="sm"
+              onClick={() => void submit()}
+              disabled={!canSubmit}
+            >
               {busy ? (
                 "Creating…"
               ) : (

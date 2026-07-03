@@ -22,7 +22,7 @@ export async function getWorkingTreeDiff(cwd: string): Promise<GitDiffResult> {
     const { stdout } = await execFileP(
       "git",
       ["-C", cwd, "diff", "HEAD", "--no-color"],
-      { maxBuffer: 32 * 1024 * 1024 }
+      { maxBuffer: 32 * 1024 * 1024 },
     );
     return { available: true, diff: stdout };
   } catch (err) {

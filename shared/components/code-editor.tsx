@@ -32,7 +32,7 @@ export function CodeEditor({
   const highlight = useMemo(
     () => (v: string) => highlightToHtml(v, language),
     // Re-render once shiki finishes loading, and re-tokenize on theme change.
-    [language, shikiReady, shikiTheme]
+    [language, shikiReady, shikiTheme],
   );
 
   return (

@@ -33,11 +33,11 @@ const DEPTH_COLORS = [
 const UNMATCHED_COLOR = "var(--bracket-unmatched, #e2474a)";
 
 export function bracketColorsByLine(
-  positions: BracketPos[]
+  positions: BracketPos[],
 ): Map<number, BracketMark[]> {
   // Source order (line, then column) is what the stack matching needs.
   const ordered = [...positions].sort(
-    (a, b) => a.line - b.line || a.col - b.col
+    (a, b) => a.line - b.line || a.col - b.col,
   );
   const out = new Map<number, BracketMark[]>();
   const stack: string[] = [];

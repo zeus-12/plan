@@ -71,7 +71,9 @@ export function buildThemeStylesheet(themes: ThemeDefinition[]): string {
   const declarations = (t: ThemeDefinition) =>
     [
       ...Object.entries(t.colors).map(([k, v]) => `  --${k}: ${v};`),
-      ...Object.entries(t.terminal ?? {}).map(([k, v]) => `  --term-${k}: ${v};`),
+      ...Object.entries(t.terminal ?? {}).map(
+        ([k, v]) => `  --term-${k}: ${v};`,
+      ),
     ].join("\n");
   const rule = (selector: string, t: ThemeDefinition) =>
     `${selector} {\n${declarations(t)}\n}`;
@@ -88,7 +90,7 @@ export function buildThemeStylesheet(themes: ThemeDefinition[]): string {
  */
 export function toggleTarget(
   themes: ThemeDefinition[],
-  current: ThemeDefinition
+  current: ThemeDefinition,
 ): ThemeDefinition {
   if (current.toggleTo) {
     const explicit = themes.find((t) => t.id === current.toggleTo);

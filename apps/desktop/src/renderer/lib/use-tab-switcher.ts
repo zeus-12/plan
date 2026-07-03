@@ -81,8 +81,7 @@ function cycle(code: string, dir: 1 | -1) {
     return;
   }
   const ch = channels.find(
-    (c) =>
-      c.isEnabled() && c.triggerCode === code && c.getItems().length > 0,
+    (c) => c.isEnabled() && c.triggerCode === code && c.getItems().length > 0,
   );
   if (!ch) return;
   active = {
@@ -107,13 +106,8 @@ function onKeyDown(e: KeyboardEvent) {
   // (Cmd+Tab is the OS app switcher) and NOT digits (Cmd+1‑4 switch sidebar
   // tabs), so the worktree switcher stays Ctrl-only.
   const mod =
-    e.ctrlKey ||
-    (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
-  if (
-    mod &&
-    !e.altKey &&
-    channels.some((c) => c.triggerCode === e.code)
-  ) {
+    e.ctrlKey || (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
+  if (mod && !e.altKey && channels.some((c) => c.triggerCode === e.code)) {
     e.preventDefault();
     cycle(e.code, e.shiftKey ? -1 : 1);
     return;

@@ -16,7 +16,11 @@ interface GitResult {
 }
 
 /** Run git with the given args in cwd. Never throws — non-zero exit is captured. */
-async function run(cwd: string, args: string[], stdin?: string): Promise<GitResult> {
+async function run(
+  cwd: string,
+  args: string[],
+  stdin?: string,
+): Promise<GitResult> {
   try {
     const proc = execFile("git", ["-C", cwd, ...args], {
       maxBuffer: MAX_BUFFER,
@@ -25,16 +29,17 @@ async function run(cwd: string, args: string[], stdin?: string): Promise<GitResu
       proc.stdin?.write(stdin);
       proc.stdin?.end();
     }
-    const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
-      (resolve, reject) => {
-        let out = "";
-        let err = "";
-        proc.stdout?.on("data", (c) => (out += c.toString()));
-        proc.stderr?.on("data", (c) => (err += c.toString()));
-        proc.on("error", reject);
-        proc.on("close", () => resolve({ stdout: out, stderr: err }));
-      }
-    );
+    const { stdout, stderr } = await new Promise<{
+      stdout: string;
+      stderr: string;
+    }>((resolve, reject) => {
+      let out = "";
+      let err = "";
+      proc.stdout?.on("data", (c) => (out += c.toString()));
+      proc.stderr?.on("data", (c) => (err += c.toString()));
+      proc.on("error", reject);
+      proc.on("close", () => resolve({ stdout: out, stderr: err }));
+    });
     return { stdout, stderr, code: proc.exitCode ?? 0 };
   } catch (err) {
     return {
@@ -65,7 +70,7 @@ export interface GitStatusResult {
 
 async function cwdFromEncoded(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<string> {
   const base = await resolveProjectCwd(encoded);
   return subPath ? join(base, subPath) : base;
@@ -118,7 +123,7 @@ export interface DiscoveredRepo {
 
 async function inspectRepo(
   path: string,
-  subPath: string
+  subPath: string,
 ): Promise<DiscoveredRepo | null> {
   if (!(await hasGitMarker(path))) return null;
   if (!(await isGitRepo(path))) return null;
@@ -140,7 +145,9 @@ async function inspectRepo(
  *   - Otherwise, list immediate children up to GIT_SCAN_DEPTH and return any
  *     directory that is itself a git repo. Hidden dirs are skipped.
  */
-export async function discoverRepos(encoded: string): Promise<DiscoveredRepo[]> {
+export async function discoverRepos(
+  encoded: string,
+): Promise<DiscoveredRepo[]> {
   const root = await resolveProjectCwd(encoded);
   const out: DiscoveredRepo[] = [];
 
@@ -178,7 +185,7 @@ async function isGitRepo(cwd: string): Promise<boolean> {
 /** Current branch name, or null when detached/no repo. */
 export async function getBranch(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<string | null> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   if (!(await isGitRepo(cwd))) return null;
@@ -187,17 +194,28 @@ export async function getBranch(
 
 export async function getStatus(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<GitStatusResult> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   if (!(await isGitRepo(cwd))) {
-    return { available: false, branch: null, files: [], ahead: 0, hasUpstream: false };
+    return {
+      available: false,
+      branch: null,
+      files: [],
+      ahead: 0,
+      hasUpstream: false,
+    };
   }
   const [branchRes, statusRes] = await Promise.all([
     run(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
     // --untracked-files=all lists each untracked file individually instead of
     // collapsing a fully-untracked directory into a single "dir/" entry.
-    run(cwd, ["status", "--porcelain=v1", "--no-renames", "--untracked-files=all"]),
+    run(cwd, [
+      "status",
+      "--porcelain=v1",
+      "--no-renames",
+      "--untracked-files=all",
+    ]),
   ]);
   const branchRaw = branchRes.stdout.trim();
   const branch = !branchRaw || branchRaw === "HEAD" ? null : branchRaw;
@@ -227,7 +245,7 @@ export async function getStatus(
 
 export async function push(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
 
@@ -258,7 +276,8 @@ export async function push(
     const branch = await branchAt(cwd);
     if (!branch) return { ok: false, error: r.stderr };
     const r2 = await run(cwd, ["push", "--set-upstream", "origin", branch]);
-    if (r2.code !== 0) return { ok: false, error: r2.stderr || "git push failed" };
+    if (r2.code !== 0)
+      return { ok: false, error: r2.stderr || "git push failed" };
     return { ok: true };
   }
   return { ok: false, error: r.stderr || "git push failed" };
@@ -267,9 +286,13 @@ export async function push(
 export async function stageFile(
   encoded: string,
   path: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const r = await run(await cwdFromEncoded(encoded, subPath), ["add", "--", path]);
+  const r = await run(await cwdFromEncoded(encoded, subPath), [
+    "add",
+    "--",
+    path,
+  ]);
   if (r.code !== 0) return { ok: false, error: r.stderr || "git add failed" };
   return { ok: true };
 }
@@ -277,7 +300,7 @@ export async function stageFile(
 export async function unstageFile(
   encoded: string,
   path: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   const r = await run(cwd, ["restore", "--staged", "--", path]);
@@ -291,7 +314,7 @@ export async function unstageFile(
 export async function discardFile(
   encoded: string,
   path: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   const r = await run(cwd, ["restore", "--worktree", "--", path]);
@@ -306,16 +329,17 @@ export async function discardFile(
 
 export async function stageAll(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const r = await run(await cwdFromEncoded(encoded, subPath), ["add", "-A"]);
-  if (r.code !== 0) return { ok: false, error: r.stderr || "git add -A failed" };
+  if (r.code !== 0)
+    return { ok: false, error: r.stderr || "git add -A failed" };
   return { ok: true };
 }
 
 export async function unstageAll(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   const r = await run(cwd, ["restore", "--staged", "."]);
@@ -333,13 +357,16 @@ export async function unstageAll(
  */
 export async function discardAll(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   const restore = await run(cwd, ["restore", "--worktree", "."]);
   const clean = await run(cwd, ["clean", "-fd"]);
   if (restore.code !== 0 && clean.code !== 0) {
-    return { ok: false, error: restore.stderr || clean.stderr || "discard failed" };
+    return {
+      ok: false,
+      error: restore.stderr || clean.stderr || "discard failed",
+    };
   }
   return { ok: true };
 }
@@ -350,7 +377,7 @@ export async function discardAll(
  */
 export async function stashAll(
   encoded: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   const r = await run(cwd, ["stash", "push", "--include-untracked"]);
@@ -364,11 +391,17 @@ export async function stashAll(
 export async function commit(
   encoded: string,
   message: string,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!message.trim()) return { ok: false, error: "Commit message is required" };
-  const r = await run(await cwdFromEncoded(encoded, subPath), ["commit", "-m", message]);
-  if (r.code !== 0) return { ok: false, error: r.stderr || "git commit failed" };
+  if (!message.trim())
+    return { ok: false, error: "Commit message is required" };
+  const r = await run(await cwdFromEncoded(encoded, subPath), [
+    "commit",
+    "-m",
+    message,
+  ]);
+  if (r.code !== 0)
+    return { ok: false, error: r.stderr || "git commit failed" };
   return { ok: true };
 }
 
@@ -386,7 +419,7 @@ export async function applyPatch(
   encoded: string,
   patch: string,
   opts: ApplyHunkOptions,
-  subPath: string = ""
+  subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
   const cwd = await cwdFromEncoded(encoded, subPath);
   const args: string[] = ["apply", "--whitespace=nowarn", "--unidiff-zero"];

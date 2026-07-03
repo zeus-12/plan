@@ -94,7 +94,8 @@ function extractAnswer(question: string, resultText: string): string | null {
  * degrades to the custom line rather than highlighting — no info is lost.)
  */
 function resolveSelection(q: AskQuestion, answer: string | null): Resolution {
-  if (answer === null) return { selected: new Set(), custom: null, parsed: false };
+  if (answer === null)
+    return { selected: new Set(), custom: null, parsed: false };
   if (q.multiSelect) {
     const tokens = answer.split(", ").filter((t) => t.length > 0);
     const selected = new Set<number>();
@@ -106,7 +107,11 @@ function resolveSelection(q: AskQuestion, answer: string | null): Resolution {
       }
     });
     const extra = tokens.filter((t) => !matched.has(t));
-    return { selected, custom: extra.length ? extra.join(", ") : null, parsed: true };
+    return {
+      selected,
+      custom: extra.length ? extra.join(", ") : null,
+      parsed: true,
+    };
   }
   const idx = q.options.findIndex((o) => o.label === answer);
   if (idx >= 0) return { selected: new Set([idx]), custom: null, parsed: true };
@@ -132,7 +137,9 @@ export function AskQuestionCard({
   // (transcript truth) so we can highlight the answer in place instead of
   // restating it. We only fall back to the raw result text if NONE parsed.
   const resolutions = answered
-    ? questions.map((q) => resolveSelection(q, extractAnswer(q.question, resultText!)))
+    ? questions.map((q) =>
+        resolveSelection(q, extractAnswer(q.question, resultText!)),
+      )
     : [];
   const parsedAny = resolutions.some((r) => r.parsed);
 

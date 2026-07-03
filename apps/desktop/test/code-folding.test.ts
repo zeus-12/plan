@@ -23,20 +23,25 @@ async function folds(languageId: string, code: string) {
   parser.setLanguage(language);
   const query = new Query(
     language,
-    readFileSync(`${dir}queries/${entry.query}.scm`, "utf8")
+    readFileSync(`${dir}queries/${entry.query}.scm`, "utf8"),
   );
   const tree = parser.parse(code);
   if (!tree) throw new Error("parse failed");
-  return foldRangesFromCaptures(query.captures(tree.rootNode) as QueryCapture[]);
+  return foldRangesFromCaptures(
+    query.captures(tree.rootNode) as QueryCapture[],
+  );
 }
 
 describe("tree-sitter fold extraction", () => {
   it("typescript: folds a function body, keeps the closing brace visible", async () => {
     const code = ["function f() {", "  const a = 1;", "  return a;", "}"].join(
-      "\n"
+      "\n",
     );
     // start=0 (function line), end=2 (last body line) → line 3 `}` stays visible.
-    expect(await folds("typescript", code)).toContainEqual({ start: 0, end: 2 });
+    expect(await folds("typescript", code)).toContainEqual({
+      start: 0,
+      end: 2,
+    });
   });
 
   it("tsx: folds a JSX element", async () => {
@@ -70,7 +75,10 @@ async function symbols(languageId: string, code: string) {
   const language = await Language.load(`${dir}grammars/${entry.grammar}.wasm`);
   const parser = new Parser();
   parser.setLanguage(language);
-  const query = new Query(language, read(`${dir}tags/${entry.query}.scm`, "utf8"));
+  const query = new Query(
+    language,
+    read(`${dir}tags/${entry.query}.scm`, "utf8"),
+  );
   const tree = parser.parse(code);
   if (!tree) throw new Error("parse failed");
   return symbolsFromMatches(query.matches(tree.rootNode));
@@ -97,12 +105,14 @@ describe("tree-sitter symbol extraction (go to symbol)", () => {
 
   it("python: functions and classes, sorted by line", async () => {
     const code = ["def a(): pass", "class B:", "    def c(self): pass"].join(
-      "\n"
+      "\n",
     );
     const got = await symbols("python", code);
-    expect(got.map((s) => s.line)).toEqual([...got.map((s) => s.line)].sort((x, y) => x - y));
+    expect(got.map((s) => s.line)).toEqual(
+      [...got.map((s) => s.line)].sort((x, y) => x - y),
+    );
     expect(got.map((s) => s.name)).toEqual(
-      expect.arrayContaining(["a", "B", "c"])
+      expect.arrayContaining(["a", "B", "c"]),
     );
   });
 });
