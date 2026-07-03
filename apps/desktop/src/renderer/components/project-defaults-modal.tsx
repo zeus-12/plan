@@ -19,9 +19,9 @@ function repoLabel(r: DiscoveredRepo): string {
 }
 
 /**
- * Per-project defaults the user sets once: base branch + optional branch prefix
- * for new worktrees, and a per-repo Setup command (run once when a worktree is
- * created). The project's Run command lives in the Run terminal's own modal.
+ * Per-project defaults the user sets once: base branch for new worktrees, and a
+ * per-repo Setup command (run once when a worktree is created). The project's Run
+ * command lives in the Run terminal's own modal.
  */
 export function ProjectDefaultsModal({
   encoded,
@@ -31,7 +31,6 @@ export function ProjectDefaultsModal({
 }: Props) {
   const [repos, setRepos] = useState<DiscoveredRepo[]>([]);
   const [base, setBase] = useState(defaults.base ?? "");
-  const [branchPrefix, setBranchPrefix] = useState(defaults.branchPrefix ?? "");
   const [setup, setSetup] = useState<Record<string, string>>(
     defaults.setup ?? {},
   );
@@ -53,7 +52,6 @@ export function ProjectDefaultsModal({
     await onSave({
       ...defaults,
       base: base.trim() || undefined,
-      branchPrefix: branchPrefix.trim() || undefined,
       setup: prune(setup),
     });
     onClose();
@@ -82,26 +80,15 @@ export function ProjectDefaultsModal({
         </div>
 
         <div className="flex flex-col gap-3">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className={labelCls}>Default base branch</label>
-              <input
-                ref={firstRef}
-                value={base}
-                onChange={(e) => setBase(e.target.value)}
-                placeholder="main"
-                className={inputCls}
-              />
-            </div>
-            <div className="flex-1">
-              <label className={labelCls}>Branch prefix (optional)</label>
-              <input
-                value={branchPrefix}
-                onChange={(e) => setBranchPrefix(e.target.value)}
-                placeholder="e.g. plan/"
-                className={inputCls}
-              />
-            </div>
+          <div>
+            <label className={labelCls}>Default base branch</label>
+            <input
+              ref={firstRef}
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+              placeholder="main"
+              className={inputCls}
+            />
           </div>
 
           <div className="mt-1 border-t border-[var(--border)] pt-3">

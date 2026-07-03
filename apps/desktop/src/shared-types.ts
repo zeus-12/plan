@@ -214,6 +214,10 @@ export interface WorktreeRecord {
 /** Per-project defaults the user sets once; pre-fill new worktrees + terminals. */
 export interface ProjectDefaults {
   base?: string;
+  /**
+   * Legacy branch-prefix for new worktrees. No longer surfaced in the UI; kept
+   * in the type so existing `worktrees.json` data round-trips.
+   */
   branchPrefix?: string;
   /** subPath → setup command (run once on worktree creation). */
   setup?: Record<string, string>;

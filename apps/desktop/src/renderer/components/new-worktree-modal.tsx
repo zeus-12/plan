@@ -8,7 +8,7 @@ import type {
 } from "../../shared-types";
 
 interface Props {
-  /** Per-project defaults used to pre-fill base + branch prefix. */
+  /** Per-project defaults used to pre-fill the base branch. */
   defaults: ProjectDefaults;
   /** Project whose repos the worktree will span (for per-repo base selection). */
   projectEncoded: string;
@@ -28,7 +28,7 @@ export function NewWorktreeModal({
   onClose,
 }: Props) {
   // One field is both the branch to create and the worktree's name.
-  const [branch, setBranch] = useState(defaults.branchPrefix ?? "");
+  const [branch, setBranch] = useState("");
   const [base, setBase] = useState(defaults.base ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
