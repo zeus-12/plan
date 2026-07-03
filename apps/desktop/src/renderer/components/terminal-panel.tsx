@@ -15,6 +15,8 @@ interface Props {
   id: string;
   /** Project encoded dir — main resolves the pty cwd from it. */
   encoded: string;
+  /** Sub-repo path within the project — main joins it onto the resolved cwd. */
+  subPath?: string;
   /** Header label (e.g. "Claude", "Terminal 2"). */
   label?: string;
   /** Hide the title/close header row (e.g. embedded in the sidebar). */
@@ -142,6 +144,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     {
       id,
       encoded,
+      subPath,
       label,
       showHeader = true,
       initialCommand,
@@ -284,7 +287,14 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
 
       scheduleFit();
       window.electronAPI
-        .terminalOpen(id, encoded, term.cols, term.rows, initialCommand)
+        .terminalOpen(
+          id,
+          encoded,
+          term.cols,
+          term.rows,
+          initialCommand,
+          subPath,
+        )
         .then(() => onReadyRef.current?.());
 
       const offData = window.electronAPI.onTerminalData((chunk) => {

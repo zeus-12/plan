@@ -132,6 +132,7 @@ interface ElectronAPI {
     cols: number,
     rows: number,
     initialCommand?: string,
+    subPath?: string,
   ) => Promise<{ cwd: string; error?: string }>;
   terminalInput: (id: string, data: string) => void;
   terminalSubmit: (id: string, text: string, imagePaths?: string[]) => void;

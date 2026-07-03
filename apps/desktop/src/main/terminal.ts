@@ -127,6 +127,10 @@ function loadPty(): typeof import("node-pty") | null {
  *
  * `initialCommand`, if given, is run ONCE when the pty is first created (e.g.
  * `claude --resume <id>` for a chat-resume terminal). On reuse it's ignored.
+ *
+ * `subPath`, if given, resolves the cwd to that repo inside the project (used by
+ * the Run/Build terminals in a multi-repo project, where each command targets
+ * one of the project's git sub-repos).
  */
 export async function openTerminal(
   id: string,
@@ -134,6 +138,7 @@ export async function openTerminal(
   cols = 80,
   rows = 24,
   initialCommand?: string,
+  subPath = "",
 ): Promise<{ cwd: string; error?: string }> {
   const existing = sessions.get(id);
   if (existing) {
@@ -146,7 +151,8 @@ export async function openTerminal(
     return { cwd: existing.cwd };
   }
 
-  const cwd = await resolveProjectCwd(encoded);
+  const base = await resolveProjectCwd(encoded);
+  const cwd = subPath ? join(base, subPath) : base;
   const mod = loadPty();
   if (!mod) {
     const msg = `\r\n\x1b[31mTerminal unavailable: failed to load node-pty.\x1b[0m\r\n${ptyLoadError ?? ""}\r\nTry: pnpm --filter @plan/desktop rebuild\r\n`;

@@ -12,13 +12,13 @@ import {
   TabsTrigger,
 } from "@plan/shared/components/ui/tabs";
 import { cn } from "@plan/shared/lib/utils";
-import type { DiscoveredRepo } from "../../shared-types";
+import type { CommandEntry, DiscoveredRepo } from "../../shared-types";
 import { FileList, type RepoFileGroup } from "./file-list";
 import { SessionList, type SessionListItem } from "./session-list";
 import { ProjectFileList } from "./project-file-list";
 import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
-import { RunTerminal } from "./run-terminal";
+import { CommandsTerminal } from "./commands-terminal";
 import { SearchPanel } from "./search-panel";
 import { usePersistentNumber } from "../lib/use-persistent-number";
 
@@ -80,19 +80,20 @@ interface Props {
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
-  /** The Run tab (kind "run") is always first and non-closable; rest are shells. */
-  terminals: { id: string; label: string; kind: "run" | "shell" }[];
+  /** Run (always) + Build (worktree only) are first and non-closable; rest are shells. */
+  terminals: { id: string; label: string; kind: "run" | "build" | "shell" }[];
   /** The shell shown in the embedded pane below the tab strip. */
   activeTerminalId: string | null;
   onNewTerminal: () => void;
   onSelectTerminal: (id: string) => void;
   onCloseTerminal: (id: string) => void;
-  /** Project-level Run command (shared across worktrees); undefined = unset. */
-  runCommand?: string;
-  /** Optional build command run before the Run command. */
-  buildCommand?: string;
-  /** Open the Run-command config modal. */
+  /** Project-level Run command list (shared across worktrees). */
+  runEntries: CommandEntry[];
+  /** Project-level Build command list (surfaced only in a worktree). */
+  buildEntries: CommandEntry[];
+  /** Open the Run / Build command-config modals. */
   onConfigureRun: () => void;
+  onConfigureBuild: () => void;
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -190,9 +191,10 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onNewTerminal,
   onSelectTerminal,
   onCloseTerminal,
-  runCommand,
-  buildCommand,
+  runEntries,
+  buildEntries,
   onConfigureRun,
+  onConfigureBuild,
 }: Props) {
   const sidebar = useSidebar();
   // Minimise the embedded terminal pane while keeping the tab strip visible.
@@ -495,7 +497,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                 onNewTerminal();
                 setPaneCollapsed(false);
               }}
-              title="New terminal (⌘⇧J)"
+              title="New terminal (⌘⇧T)"
               aria-label="New terminal"
               className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
             >
@@ -531,14 +533,16 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     (!active || paneCollapsed) && "hidden",
                   )}
                 >
-                  {t.kind === "run" ? (
-                    <RunTerminal
-                      id={t.id}
+                  {t.kind === "run" || t.kind === "build" ? (
+                    <CommandsTerminal
+                      kind={t.kind}
                       encoded={encoded}
-                      runCommand={runCommand}
-                      buildCommand={buildCommand}
+                      entries={t.kind === "build" ? buildEntries : runEntries}
+                      repos={repos}
                       visible={active && !paneCollapsed && sidebar.open}
-                      onConfigure={onConfigureRun}
+                      onConfigure={
+                        t.kind === "build" ? onConfigureBuild : onConfigureRun
+                      }
                     />
                   ) : (
                     <TerminalPanel

@@ -251,7 +251,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       {
         id: "newShell",
         label: "New shell",
-        chords: [{ mods: ["meta", "shift"], key: "J" }],
+        chords: [{ mods: ["meta", "shift"], key: "T" }],
       },
       {
         id: "clearTerminal",

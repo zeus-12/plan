@@ -137,6 +137,7 @@ const electronAPI = {
     cols: number,
     rows: number,
     initialCommand?: string,
+    subPath = "",
   ) =>
     ipcRenderer.invoke(
       "terminal:open",
@@ -145,6 +146,7 @@ const electronAPI = {
       cols,
       rows,
       initialCommand,
+      subPath,
     ),
   terminalInput: (id: string, data: string) =>
     ipcRenderer.send("terminal:input", id, data),

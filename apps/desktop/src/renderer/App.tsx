@@ -16,6 +16,7 @@ import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { ProjectWorkspace } from "./components/project-workspace";
+import { runEntriesOf, buildEntriesOf } from "./lib/commands";
 import { Toaster } from "@plan/shared/components/ui/sonner";
 import { SwitcherOverlay } from "./components/switcher-overlay";
 import type { ClaudeConfigScope } from "../shared-types";
@@ -541,15 +542,23 @@ function Shell() {
             projectsSidebarOpen={projectsSidebar.open}
             projects={projects}
             onSelectProject={selectProject}
-            // Run command is project-level: keyed by the parent project's
-            // defaults, so every worktree of this project shares it.
-            runCommand={worktrees.defaults.runCommand}
-            buildCommand={worktrees.defaults.buildCommand}
-            onSaveRunConfig={(runCommand, buildCommand) =>
+            // Run/Build command lists are project-level: keyed by the parent
+            // project's defaults, so every worktree of this project shares them.
+            runEntries={runEntriesOf(worktrees.defaults)}
+            buildEntries={buildEntriesOf(worktrees.defaults)}
+            isWorktree={activeWorktree != null}
+            onSaveRun={(runCommands) =>
               worktrees.saveDefaults({
                 ...worktrees.defaults,
-                runCommand,
-                buildCommand,
+                runCommands,
+                runCommand: undefined,
+              })
+            }
+            onSaveBuild={(buildCommands) =>
+              worktrees.saveDefaults({
+                ...worktrees.defaults,
+                buildCommands,
+                buildCommand: undefined,
               })
             }
           />

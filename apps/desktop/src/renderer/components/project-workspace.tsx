@@ -30,10 +30,15 @@ import type {
   ParsedSession,
   GitFileStatus,
   DiscoveredRepo,
+  CommandEntry,
 } from "../../shared-types";
 import { MiddleSidebar, type WorkTab } from "./middle-sidebar";
 import { FileDiffViewer } from "./file-diff-viewer";
-import { MessageList, type ChatAnnotation } from "./message-list";
+import {
+  MessageList,
+  type ChatAnnotation,
+  type ChatAnchor,
+} from "./message-list";
 import { FileViewer } from "./file-viewer";
 import { CommandPalette, type PaletteItem } from "./command-palette";
 import { FileIcon } from "./file-icon";
@@ -59,7 +64,7 @@ import { TabBar } from "./tab-bar";
 import { isWorking, useTerminalWorking } from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
-import { RunConfigModal } from "./run-config-modal";
+import { CommandsConfigModal } from "./commands-config-modal";
 import { ThemeMenu } from "./theme-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
@@ -106,15 +111,15 @@ interface Props {
   /** All projects + a switch callback — drives the ⌘K palette. */
   projects: ProjectEntry[];
   onSelectProject: (encoded: string) => void;
-  /** Project-level Run terminal command (shared across this project's worktrees). */
-  runCommand?: string;
-  /** Optional build command run before the Run command. */
-  buildCommand?: string;
-  /** Persist the Run/build command to the project (parent-keyed defaults). */
-  onSaveRunConfig: (
-    runCommand: string,
-    buildCommand: string,
-  ) => Promise<void> | void;
+  /** Project-level Run command list (shared across this project's worktrees). */
+  runEntries: CommandEntry[];
+  /** Project-level Build command list (the Build tab shows only in a worktree). */
+  buildEntries: CommandEntry[];
+  /** Whether the current view is a worktree — gates the Build tab. */
+  isWorktree: boolean;
+  /** Persist the Run / Build command lists to the project (parent-keyed defaults). */
+  onSaveRun: (entries: CommandEntry[]) => Promise<void> | void;
+  onSaveBuild: (entries: CommandEntry[]) => Promise<void> | void;
 }
 
 function WorkspaceHeader({
@@ -337,11 +342,8 @@ const ChatTabPane = memo(function ChatTabPane({
   terminalReady: boolean;
   isNew: boolean;
   onAddAnnotation: (
-    messageUuid: string,
-    partIndex: number,
+    anchor: ChatAnchor,
     selectedText: string,
-    startOffset: number,
-    endOffset: number,
     comment: string,
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
@@ -378,9 +380,11 @@ export function ProjectWorkspace({
   projectsSidebarOpen,
   projects,
   onSelectProject,
-  runCommand,
-  buildCommand,
-  onSaveRunConfig,
+  runEntries,
+  buildEntries,
+  isWorktree,
+  onSaveRun,
+  onSaveBuild,
 }: Props) {
   // Auto-mode is an app-wide preference (Settings dialog); it applies to every
   // project's Claude sessions.
@@ -1340,8 +1344,10 @@ export function ProjectWorkspace({
       chatAnnotations.map((c) => ({
         id: c.id,
         selectedText: c.selectedText,
-        startOffset: c.startOffset,
-        endOffset: c.endOffset,
+        // Offsets here only order the outgoing message; the span's start/end
+        // are enough for that.
+        startOffset: c.start.offset,
+        endOffset: c.end.offset,
         comment: c.comment,
         side: "right",
       })),
@@ -1387,23 +1393,15 @@ export function ProjectWorkspace({
 
   // ── Chat annotation handlers ─────────────────────────────────
   const addChatAnnotation = useCallback(
-    (
-      messageUuid: string,
-      partIndex: number,
-      selectedText: string,
-      startOffset: number,
-      endOffset: number,
-      comment: string,
-    ) => {
+    (anchor: ChatAnchor, selectedText: string, comment: string) => {
       setChatAnnotations((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
-          messageUuid,
-          partIndex,
+          messageUuid: anchor.messageUuid,
+          start: anchor.start,
+          end: anchor.end,
           selectedText,
-          startOffset,
-          endOffset,
           comment,
         },
       ]);
@@ -2036,20 +2034,31 @@ export function ProjectWorkspace({
   );
 
   const [runConfigOpen, setRunConfigOpen] = useState(false);
+  const [buildConfigOpen, setBuildConfigOpen] = useState(false);
 
-  // The Run terminal is always first and non-closable; its pty id is scoped to
-  // this worktree's encoded so the running process is per-worktree (the command
-  // itself is project-level, threaded in via props).
+  // Run is always first and non-closable; Build follows it but only inside a
+  // worktree (that's where a per-branch build makes sense). Both pty ids are
+  // scoped to this worktree's encoded so the processes are per-worktree; the
+  // command lists themselves are project-level (threaded in via props).
   const sidebarTerminals = useMemo(
     () => [
       { id: `run:${project.encoded}`, label: "Run", kind: "run" as const },
+      ...(isWorktree
+        ? [
+            {
+              id: `build:${project.encoded}`,
+              label: "Build",
+              kind: "build" as const,
+            },
+          ]
+        : []),
       ...shells.map((id) => ({
         id,
         label: `Terminal ${shellNumber(id)}`,
         kind: "shell" as const,
       })),
     ],
-    [project.encoded, shells, shellNumber],
+    [project.encoded, isWorktree, shells, shellNumber],
   );
 
   const handleNewShell = useCallback(() => {
@@ -2329,7 +2338,7 @@ export function ProjectWorkspace({
         } else {
           setTerminalOpen(true);
         }
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === "j") {
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         handleNewShell();
       } else if (e.key === "Escape" && terminalOpen) {
@@ -2424,11 +2433,23 @@ export function ProjectWorkspace({
     >
       {confirmDialog}
       {runConfigOpen && (
-        <RunConfigModal
-          runCommand={runCommand}
-          buildCommand={buildCommand}
-          onSave={onSaveRunConfig}
+        <CommandsConfigModal
+          title="Run"
+          description="Shared across every worktree and session of this project."
+          entries={runEntries}
+          repos={repos}
+          onSave={onSaveRun}
           onClose={() => setRunConfigOpen(false)}
+        />
+      )}
+      {buildConfigOpen && (
+        <CommandsConfigModal
+          title="Build"
+          description="Shared across every worktree and session of this project."
+          entries={buildEntries}
+          repos={repos}
+          onSave={onSaveBuild}
+          onClose={() => setBuildConfigOpen(false)}
         />
       )}
       {/* Toast host lives at the app root (App.tsx) so it's always mounted. */}
@@ -2820,9 +2841,10 @@ export function ProjectWorkspace({
           onNewTerminal={handleNewShell}
           onSelectTerminal={handleSelectShell}
           onCloseTerminal={handleCloseShell}
-          runCommand={runCommand}
-          buildCommand={buildCommand}
+          runEntries={runEntries}
+          buildEntries={buildEntries}
           onConfigureRun={() => setRunConfigOpen(true)}
+          onConfigureBuild={() => setBuildConfigOpen(true)}
         />
       </div>
     </SidebarProvider>

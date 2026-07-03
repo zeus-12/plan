@@ -224,13 +224,37 @@ export interface ProjectDefaults {
    */
   run?: Record<string, string>;
   /**
-   * The "Run" terminal's command — one per project, shared across all worktrees
-   * and sessions. The running process is per-worktree (pty `run:<encoded>`); the
-   * command itself lives here.
+   * Legacy single "Run" command. Superseded by `runCommands`; still read (and
+   * migrated) so existing `worktrees.json` data keeps working, but no longer
+   * written by the UI.
    */
   runCommand?: string;
-  /** Optional command run before `runCommand` in the same Run terminal. */
+  /** Legacy single build command (once prepended to the Run command). @see buildCommands */
   buildCommand?: string;
+  /**
+   * The "Run" terminal's command list — shared across all worktrees + sessions
+   * of this project. Each entry runs in its own per-worktree pty
+   * (`run:<encoded>:<entry.id>`) and gets its own sub-tab; "Run all" starts them
+   * together. Absent = fall back to the legacy `runCommand`.
+   */
+  runCommands?: CommandEntry[];
+  /**
+   * The "Build" terminal's command list. Same shape as `runCommands`, surfaced
+   * only inside a worktree (pty `build:<encoded>:<entry.id>`).
+   */
+  buildCommands?: CommandEntry[];
+}
+
+/**
+ * One command in a Run/Build terminal's list. `subPath` targets a git sub-repo
+ * of a multi-repo project (the command runs in that repo's dir); "" / undefined
+ * runs it at the project root.
+ */
+export interface CommandEntry {
+  /** Stable id — the pty key suffix + sub-tab key. Persisted so ptys survive reloads. */
+  id: string;
+  command: string;
+  subPath?: string;
 }
 
 export interface CreateWorktreeInput {

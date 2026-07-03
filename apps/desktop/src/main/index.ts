@@ -714,7 +714,8 @@ function registerIpc() {
       cols: number,
       rows: number,
       initialCommand?: string,
-    ) => openTerminal(id, encoded, cols, rows, initialCommand),
+      subPath = "",
+    ) => openTerminal(id, encoded, cols, rows, initialCommand, subPath),
   );
   ipcMain.on("terminal:input", (_e, id: string, data: string) =>
     writeTerminal(id, data),
