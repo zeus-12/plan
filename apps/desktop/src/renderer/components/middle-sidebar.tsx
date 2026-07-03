@@ -208,6 +208,11 @@ export const MiddleSidebar = memo(function MiddleSidebar({
     "plan.middleSidebar.termHeight",
     288, // current h-72
   );
+  // Bumped when the sidebar's open/close width animation finishes so the embedded
+  // terminal refits to the settled width. The width animates through slivers
+  // during the toggle; fitting on those intermediate frames leaves the pty (and
+  // Claude's TUI) stuck a couple of columns wide once the animation ends.
+  const [fitSignal, setFitSignal] = useState(0);
 
   const startTermResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -297,6 +302,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       onWidthChange={setWidth}
       minWidth={220}
       maxWidth={520}
+      onWidthTransitionEnd={() => setFitSignal((n) => n + 1)}
     >
       <Tabs
         value={tab}
@@ -540,6 +546,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                       entries={t.kind === "build" ? buildEntries : runEntries}
                       repos={repos}
                       visible={active && !paneCollapsed && sidebar.open}
+                      fitSignal={fitSignal}
                       onConfigure={
                         t.kind === "build" ? onConfigureBuild : onConfigureRun
                       }
@@ -550,6 +557,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                       encoded={encoded}
                       showHeader={false}
                       visible={active && !paneCollapsed && sidebar.open}
+                      fitSignal={fitSignal}
                       onRequestClose={() => onCloseTerminal(t.id)}
                     />
                   )}

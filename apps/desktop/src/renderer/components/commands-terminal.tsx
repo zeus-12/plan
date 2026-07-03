@@ -15,6 +15,8 @@ interface Props {
   repos: DiscoveredRepo[];
   /** Whether the pane is shown (drives the embedded terminals' refit/focus). */
   visible: boolean;
+  /** Changing this forces a refit (e.g. after the sidebar's open animation). */
+  fitSignal?: number;
   /** Open this tab's command-config modal. */
   onConfigure: () => void;
 }
@@ -96,6 +98,7 @@ export function CommandsTerminal({
   entries,
   repos,
   visible,
+  fitSignal,
   onConfigure,
 }: Props) {
   const label = kind === "build" ? "Build" : "Run";
@@ -315,6 +318,7 @@ export function CommandsTerminal({
                 showHeader={false}
                 initialCommand={e.command.trim()}
                 visible={visible && e.id === active}
+                fitSignal={fitSignal}
               />
             </div>
           ) : null,

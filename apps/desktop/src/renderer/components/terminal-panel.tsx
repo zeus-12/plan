@@ -261,6 +261,12 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       // garbled at different widths. The repaint runs only on an actual
       // dimension change, so it stays cheap.
       const runFit = () => {
+        // Never resize the pty while the panel is hidden. When the sidebar
+        // collapses its width animates to 0, so its intermediate sliver widths
+        // must not reach the pty — otherwise Claude's TUI reflows down to a
+        // couple of columns and (once the panel is off-screen) never gets a
+        // correcting fit, leaving it "2 characters wide" on reopen.
+        if (!visibleRef.current) return;
         if (host.clientWidth === 0 || host.clientHeight === 0) return;
         try {
           fit.fit();

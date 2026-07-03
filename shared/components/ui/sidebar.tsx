@@ -120,6 +120,10 @@ export interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
   onWidthChange?: (w: number) => void;
   minWidth?: number;
   maxWidth?: number;
+  /** Fires when the open/close width animation finishes. Lets embedded content
+   *  (e.g. a terminal) refit to the settled width instead of a mid-animation
+   *  sliver — the ResizeObserver's intermediate frames aren't a reliable final. */
+  onWidthTransitionEnd?: () => void;
 }
 
 /**
@@ -134,6 +138,7 @@ export function Sidebar({
   onWidthChange,
   minWidth = 200,
   maxWidth = 520,
+  onWidthTransitionEnd,
   ...rest
 }: SidebarProps) {
   const { open } = useSidebar();
@@ -177,6 +182,12 @@ export function Sidebar({
         className,
       )}
       style={resizable ? { width: open ? width : 0 } : undefined}
+      // Only the width animates on toggle; children transition colours, so filter
+      // by propertyName to catch just the open/close completion (drags disable the
+      // transition entirely, so this never fires mid-drag).
+      onTransitionEnd={(e) => {
+        if (e.propertyName === "width") onWidthTransitionEnd?.();
+      }}
       {...rest}
     >
       {/* Inner is rendered at the sidebar's natural width; overflow on the
