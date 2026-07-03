@@ -38,6 +38,7 @@ import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { useTextFind } from "@plan/shared/lib/use-text-find";
 import { FindWidget } from "@plan/shared/components/find-widget";
+import { buildDocUrl } from "@plan/shared/lib/doc-share-url";
 import { cn } from "@plan/shared/lib/utils";
 import { FileIcon } from "./file-icon";
 import { ImageLightbox } from "./image-lightbox";
@@ -1226,6 +1227,21 @@ function FileViewerImpl({
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {data?.truncated && (
             <span className="text-[var(--text-tertiary)]">truncated</span>
+          )}
+          {!isImage && text.length > 0 && (
+            <button
+              onClick={() =>
+                window.open(
+                  buildDocUrl({ text, language, comments: [] }),
+                  "_blank",
+                  "noopener"
+                )
+              }
+              title="Open this file in the web doc tool to collect comments"
+              className="flex h-7 items-center rounded-md border border-[var(--border)] px-2 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            >
+              Open as doc
+            </button>
           )}
           <div className="relative" ref={settingsRef}>
             <button

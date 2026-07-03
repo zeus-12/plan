@@ -1,6 +1,18 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
+
+/** Key-cap hint tinted to read on the accent-colored submit button. */
+function PopoverKbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd
+      className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded px-1 text-[10px] font-medium leading-none"
+      style={{ background: "color-mix(in srgb, var(--bg) 22%, transparent)" }}
+    >
+      {children}
+    </kbd>
+  );
+}
 
 const SELECTED_TEXT_TRUNCATE_LEN = 80;
 const POPOVER_WIDTH = 360;
@@ -88,7 +100,7 @@ export function CommentPopover({
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       // Stop the keystroke from also reaching the comments panel's window-level
-      // ⌘⏎ listener (it's armed whenever the chat composer is blurred). Without
+      // ⌘↵ listener (it's armed whenever the chat composer is blurred). Without
       // this, submitting a comment would in the same stroke flush the whole
       // buffer to chat — the comment should settle in the panel first.
       e.stopPropagation();
@@ -103,7 +115,10 @@ export function CommentPopover({
       : selectedText;
 
   const top = Math.min(position.top, window.innerHeight - MIN_BOTTOM_CLEARANCE);
-  const left = Math.max(8, Math.min(position.left, window.innerWidth - POPOVER_WIDTH - 30));
+  const left = Math.max(
+    8,
+    Math.min(position.left, window.innerWidth - POPOVER_WIDTH - 30),
+  );
 
   return (
     <div
@@ -143,12 +158,6 @@ export function CommentPopover({
         />
         <div className="mt-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span
-              className="text-[10px]"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              ⌘ Enter
-            </span>
             {onDelete && (
               <button
                 onClick={onDelete}
@@ -170,13 +179,17 @@ export function CommentPopover({
             <button
               onClick={handleSubmit}
               disabled={!comment.trim()}
-              className="rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:opacity-30"
+              className="flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:opacity-30"
               style={{
                 background: "var(--accent)",
                 color: "var(--bg)",
               }}
             >
               {submitLabel}
+              <span className="flex items-center gap-0.5">
+                <PopoverKbd>⌘</PopoverKbd>
+                <PopoverKbd>↵</PopoverKbd>
+              </span>
             </button>
           </div>
         </div>

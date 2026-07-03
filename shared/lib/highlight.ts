@@ -178,11 +178,24 @@ function countMatches(text: string, re: RegExp): number {
   return m ? m.length : 0;
 }
 
+export interface DetectOptions {
+  /**
+   * When the fast heuristic scorer is inconclusive, fall back to lowlight's
+   * `highlightAuto` relevance scoring. That fallback guesses aggressively and
+   * frequently mislabels prose/gibberish as code (e.g. plain text → "css"), so
+   * surfaces where the input is often NOT code (the paste-a-doc tool) should
+   * pass `false` to stay on "plaintext" rather than color noise. Defaults to
+   * true to preserve existing callers.
+   */
+  useLowlightFallback?: boolean;
+}
+
 /**
  * Detect the language for a body of text. Returns a LANGUAGES id, or
  * "plaintext" if confidence is too low.
  */
-export function detectLanguage(value: string): string {
+export function detectLanguage(value: string, opts: DetectOptions = {}): string {
+  const { useLowlightFallback = true } = opts;
   const trimmed = value.trim();
   if (!trimmed) return "plaintext";
   // Cap the work — the first chunk is plenty for detection.
@@ -231,6 +244,7 @@ export function detectLanguage(value: string): string {
 
   // ── Fallback: lowlight, but exclude languages it tends to
   //    false-positive on (php/xml) so we don't repeat the bug. ─
+  if (!useLowlightFallback) return "plaintext";
   try {
     const lowlight = getLowlight();
     const known = new Set(lowlight.listLanguages());

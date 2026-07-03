@@ -2263,11 +2263,14 @@ export function InteractiveDiff({
 
     return (
       <div className="flex">
-        <div className="min-w-0 flex-1 border-r border-[var(--border)] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
+        {/* rounded-l/r-lg matches the container's rounded-lg so the inset focus
+            ring follows the curve at the outer corners (it stays square at the
+            inner divider, which is correct). */}
+        <div className="min-w-0 flex-1 rounded-l-lg border-r border-[var(--border)] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
           {renderColumn("left")}
         </div>
         {showGutter && renderGutter()}
-        <div className="min-w-0 flex-1 focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
+        <div className="min-w-0 flex-1 rounded-r-lg focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
           {renderColumn("right")}
         </div>
       </div>

@@ -18,6 +18,7 @@ import {
   encodeState,
   type SharedState,
 } from "@plan/shared/lib/share-url";
+import { SectionNav } from "@/components/section-nav";
 
 function SunIcon() {
   return (
@@ -86,6 +87,8 @@ export default function Home() {
   const [copied, setCopied] = useState<"link" | "diff" | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
+  // Header slot the diff portals its settings gear into (popover variant).
+  const [settingsSlot, setSettingsSlot] = useState<HTMLElement | null>(null);
 
   // Restore from URL hash on mount.
   useEffect(() => {
@@ -238,9 +241,12 @@ export default function Home() {
   return (
     <div className="mx-auto min-h-screen max-w-[1800px] px-6 py-8">
       <header className="mb-6 flex items-center justify-between">
-        <h1 className="font-[family-name:var(--font-mono)] text-base font-semibold tracking-tight text-[var(--text)]">
-          plan
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="font-[family-name:var(--font-mono)] text-base font-semibold tracking-tight text-[var(--text)]">
+            plan
+          </h1>
+          <SectionNav current="diff" />
+        </div>
         <div className="flex items-center gap-2">
           <LanguageToolbar
             language={language}
@@ -249,6 +255,9 @@ export default function Home() {
             onFormat={handleFormat}
             formatDisabled={!hasContent}
           />
+          {/* InteractiveDiff portals its settings gear here (only once a diff
+              is shown), collapsing the old inline settings bar into a popover. */}
+          <div ref={setSettingsSlot} className="flex items-center" />
           <Button
             variant={commentingEnabled ? "default" : "outline"}
             size="sm"
@@ -327,6 +336,8 @@ export default function Home() {
             newText={rightText}
             settings={settings}
             onSettingsChange={updateSettings}
+            settingsVariant="popover"
+            settingsPortalTarget={settingsSlot}
             language={effectiveLanguage}
             annotations={annotations}
             onAddAnnotation={commentingEnabled ? addAnnotation : undefined}

@@ -51,7 +51,10 @@ export function CodeEditor({
         highlight={highlight}
         placeholder={placeholder}
         padding={12}
-        textareaClassName={textareaClassName}
+        // Round the textarea's own border-radius to match the container so its
+        // native focus outline follows the rounded corners instead of cutting a
+        // square across them. Keeps the browser's default outline color.
+        textareaClassName={`rounded-lg ${textareaClassName ?? ""}`}
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 13,
