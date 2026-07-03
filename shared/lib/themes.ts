@@ -12,6 +12,16 @@
 /** CSS custom properties a theme sets, keyed WITHOUT the leading `--`. */
 export type ThemeColors = Record<string, string>;
 
+/**
+ * The embedded terminal's ANSI palette. Keys map to xterm's `ITheme` colors
+ * (kebab-cased: `bright-black` → `brightBlack`) and are injected as `--term-*`
+ * CSS variables, so `terminal-panel` reads them the same way it reads `colors`.
+ * Every key is optional — a theme that omits the block (or any entry) falls back
+ * to the component's built-in defaults. The full set is: black, red, green,
+ * yellow, blue, magenta, cyan, white and their `bright-*` variants.
+ */
+export type TerminalColors = Record<string, string>;
+
 /** A full VS Code / shiki theme object. Its `name` is the id shiki uses. */
 export interface ShikiThemeJson {
   name: string;
@@ -27,6 +37,8 @@ export interface ThemeDefinition {
   dark: boolean;
   /** Color tokens → injected as `--<key>` CSS variables. */
   colors: ThemeColors;
+  /** Terminal ANSI palette → injected as `--term-<key>` CSS variables. */
+  terminal?: TerminalColors;
   /**
    * Syntax highlighting: either a bundled shiki theme name ("github-dark") or a
    * full VS Code theme JSON object whose `name` field is the shiki id.
@@ -56,14 +68,17 @@ export function swatchFor(t: ThemeDefinition): string {
  * the very first paint.
  */
 export function buildThemeStylesheet(themes: ThemeDefinition[]): string {
-  const rule = (selector: string, colors: ThemeColors) =>
-    `${selector} {\n${Object.entries(colors)
-      .map(([key, value]) => `  --${key}: ${value};`)
-      .join("\n")}\n}`;
+  const declarations = (t: ThemeDefinition) =>
+    [
+      ...Object.entries(t.colors).map(([k, v]) => `  --${k}: ${v};`),
+      ...Object.entries(t.terminal ?? {}).map(([k, v]) => `  --term-${k}: ${v};`),
+    ].join("\n");
+  const rule = (selector: string, t: ThemeDefinition) =>
+    `${selector} {\n${declarations(t)}\n}`;
 
-  const blocks = themes.map((t) => rule(`.theme-${t.id}`, t.colors));
+  const blocks = themes.map((t) => rule(`.theme-${t.id}`, t));
   const seed = themes.find((t) => !t.dark) ?? themes[0];
-  if (seed) blocks.unshift(rule(":root", seed.colors));
+  if (seed) blocks.unshift(rule(":root", seed));
   return blocks.join("\n\n");
 }
 

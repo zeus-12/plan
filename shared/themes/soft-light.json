@@ -30,5 +30,23 @@
     "diff-remove-gutter": "#efd3cd",
     "diff-remove-bar": "#c4655c",
     "diff-remove-word": "#efd3cd"
+  },
+  "terminal": {
+    "black": "#43423d",
+    "red": "#b04a42",
+    "green": "#3a7d4f",
+    "yellow": "#9a6a1e",
+    "blue": "#4a6fa0",
+    "magenta": "#8a4f8f",
+    "cyan": "#2f7d6f",
+    "white": "#6e6c64",
+    "bright-black": "#8f8d83",
+    "bright-red": "#c4655c",
+    "bright-green": "#4d9961",
+    "bright-yellow": "#b0812e",
+    "bright-blue": "#5b80b0",
+    "bright-magenta": "#9a5f9f",
+    "bright-cyan": "#3a8d7f",
+    "bright-white": "#2b2a26"
   }
 }

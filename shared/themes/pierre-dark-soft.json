@@ -30,6 +30,24 @@
     "diff-remove-bar": "#ff91a8",
     "diff-remove-word": "rgba(255, 145, 168, 0.22)"
   },
+  "terminal": {
+    "black": "#4b4b4b",
+    "red": "#ff91a8",
+    "green": "#8cda94",
+    "yellow": "#ffde80",
+    "blue": "#97c4ff",
+    "magenta": "#ba8ffd",
+    "cyan": "#8fe0d0",
+    "white": "#d4d4d4",
+    "bright-black": "#6b6b6b",
+    "bright-red": "#ffa7ba",
+    "bright-green": "#a3e6aa",
+    "bright-yellow": "#ffe89e",
+    "bright-blue": "#b3d3ff",
+    "bright-magenta": "#cbaaff",
+    "bright-cyan": "#a8e6da",
+    "bright-white": "#f5f5f5"
+  },
   "syntax": {
     "name": "pierre-dark-soft",
     "type": "dark",

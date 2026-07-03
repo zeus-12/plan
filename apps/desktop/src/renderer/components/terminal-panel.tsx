@@ -4,7 +4,7 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { useTheme } from "@plan/shared/components/theme-provider";
 import "@xterm/xterm/css/xterm.css";
@@ -71,6 +71,53 @@ function cssVar(name: string, fallback: string): string {
   return v || fallback;
 }
 
+// The 16 ANSI slots xterm accepts, keyed as in its `ITheme` (camelCase). Their
+// values live per-theme in shared/themes/*.json under `terminal` and reach us as
+// `--term-*` CSS variables (bright-black → brightBlack).
+const ANSI_KEYS = [
+  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+  "brightBlack", "brightRed", "brightGreen", "brightYellow",
+  "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
+] as const;
+
+const kebab = (s: string) => s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+
+let warnedMissingPalette = false;
+
+// The ANSI palette for the active theme, read straight from its `--term-*` CSS
+// variables — the theme JSON is the single source of truth. A missing colour is
+// simply omitted, so xterm keeps its own built-in default for that slot; if a
+// theme defines no palette at all we warn once (rather than duplicate a copy of
+// the colours here) and let xterm's defaults stand.
+function ansiPalette(): Partial<ITheme> {
+  const out: Record<string, string> = {};
+  for (const name of ANSI_KEYS) {
+    const value = cssVar(`--term-${kebab(name)}`, "");
+    if (value) out[name] = value;
+  }
+  if (Object.keys(out).length === 0 && !warnedMissingPalette) {
+    warnedMissingPalette = true;
+    console.warn(
+      "[terminal] active theme has no `terminal` palette (--term-* vars missing); using xterm's default ANSI colors."
+    );
+  }
+  return out as Partial<ITheme>;
+}
+
+// The full xterm theme: base colours + ANSI palette, all read from the live CSS
+// vars of the active theme. Reused by the initial construction and the live
+// theme-swap effect so there's a single source of truth.
+function buildTerminalTheme(): ITheme {
+  const isDark = document.documentElement.classList.contains("dark");
+  return {
+    background: cssVar("--bg", isDark ? "#09090b" : "#ffffff"),
+    foreground: cssVar("--text", isDark ? "#e4e4e7" : "#18181b"),
+    cursor: cssVar("--text", isDark ? "#e4e4e7" : "#18181b"),
+    selectionBackground: cssVar("--selection-bg", "rgba(120,120,160,0.4)"),
+    ...ansiPalette(),
+  };
+}
+
 /**
  * An embedded terminal bound to the project's pty (cwd = project dir). The pty
  * lives in the main process and persists across ⌘J toggles and project
@@ -133,7 +180,6 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     const host = hostRef.current;
     if (!host) return;
 
-    const isDark = document.documentElement.classList.contains("dark");
     const term = new Terminal({
       fontFamily:
         '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
@@ -141,12 +187,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       cursorBlink: true,
       // The DOM renderer repaints aggressively; scrollback is cheap.
       scrollback: 5000,
-      theme: {
-        background: cssVar("--bg", isDark ? "#09090b" : "#ffffff"),
-        foreground: cssVar("--text", isDark ? "#e4e4e7" : "#18181b"),
-        cursor: cssVar("--text", isDark ? "#e4e4e7" : "#18181b"),
-        selectionBackground: cssVar("--selection-bg", "rgba(120,120,160,0.4)"),
-      },
+      theme: buildTerminalTheme(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -287,13 +328,34 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    term.options.theme = {
-      background: cssVar("--bg", "#1b1c20"),
-      foreground: cssVar("--text", "#d2d3d8"),
-      cursor: cssVar("--text", "#d2d3d8"),
-      selectionBackground: cssVar("--selection-bg", "rgba(120,120,160,0.4)"),
-    };
+    term.options.theme = buildTerminalTheme();
+    // Swapping the theme updates the palette but the DOM renderer doesn't
+    // repaint cells already on screen (the prompt, prior output), so a switch
+    // leaves the terminal half-recolored until the next keystroke/scroll. Force
+    // a full repaint of the viewport — same refresh the resize path uses.
+    term.refresh(0, Math.max(0, term.rows - 1));
   }, [theme]);
+
+  // The mono font is a webfont (loaded with `display: swap`), so xterm first
+  // measures the character cell against the fallback font — which is wider —
+  // and locks in too few columns: text under-fills the pane and never reflows
+  // to the real glyph width, even on resize (fit() reuses the stale cell). Once
+  // the font is ready, force xterm to re-measure (toggling fontFamily retriggers
+  // its CharSizeService) and refit so cols match the actual width.
+  useEffect(() => {
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      const term = termRef.current;
+      if (cancelled || !term) return;
+      const ff = term.options.fontFamily;
+      term.options.fontFamily = "monospace";
+      term.options.fontFamily = ff;
+      runFitRef.current?.();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // Refit + focus when shown (it may have been display:none with 0 size, or
   // the container may have changed width while hidden).
