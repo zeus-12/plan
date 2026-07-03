@@ -83,29 +83,77 @@ function reviveAnnotation(raw: unknown): Annotation | null {
   return annotation;
 }
 
+/**
+ * A span endpoint: {messageUuid, partIndex, offset}. `fallbackUuid` supplies the
+ * message for the intermediate shape that stored it once at the top level
+ * (start/end without their own uuid).
+ */
+function reviveChatSpan(
+  raw: unknown,
+  fallbackUuid: string,
+): { messageUuid: string; partIndex: number; offset: number } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.partIndex !== "number" || typeof s.offset !== "number") {
+    return null;
+  }
+  const messageUuid =
+    typeof s.messageUuid === "string" ? s.messageUuid : fallbackUuid;
+  if (!messageUuid) return null;
+  return { messageUuid, partIndex: s.partIndex, offset: s.offset };
+}
+
 function reviveChatAnnotation(raw: unknown): ChatAnnotation | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as Record<string, unknown>;
   if (
     typeof a.id !== "string" ||
-    typeof a.messageUuid !== "string" ||
-    typeof a.partIndex !== "number" ||
-    typeof a.startOffset !== "number" ||
-    typeof a.endOffset !== "number" ||
     typeof a.selectedText !== "string" ||
     typeof a.comment !== "string"
   ) {
     return null;
   }
-  return {
-    id: a.id,
-    messageUuid: a.messageUuid,
-    partIndex: a.partIndex,
-    startOffset: a.startOffset,
-    endOffset: a.endOffset,
-    selectedText: a.selectedText,
-    comment: a.comment,
-  };
+  // A single (possibly absent) top-level uuid backfills older shapes that didn't
+  // store the message per endpoint.
+  const topUuid = typeof a.messageUuid === "string" ? a.messageUuid : "";
+
+  // Current / intermediate shape: a span {start, end}, each a ChatSpan.
+  const start = reviveChatSpan(a.start, topUuid);
+  const end = reviveChatSpan(a.end, topUuid);
+  if (start && end) {
+    return {
+      id: a.id,
+      start,
+      end,
+      selectedText: a.selectedText,
+      comment: a.comment,
+    };
+  }
+  // Legacy shape: one part + char offsets. Migrate to a one-part span so comments
+  // drafted by an older build survive the upgrade.
+  if (
+    topUuid &&
+    typeof a.partIndex === "number" &&
+    typeof a.startOffset === "number" &&
+    typeof a.endOffset === "number"
+  ) {
+    return {
+      id: a.id,
+      start: {
+        messageUuid: topUuid,
+        partIndex: a.partIndex,
+        offset: a.startOffset,
+      },
+      end: {
+        messageUuid: topUuid,
+        partIndex: a.partIndex,
+        offset: a.endOffset,
+      },
+      selectedText: a.selectedText,
+      comment: a.comment,
+    };
+  }
+  return null;
 }
 
 /** Narrow a parsed `Record<string, Annotation[]>`, dropping malformed entries. */

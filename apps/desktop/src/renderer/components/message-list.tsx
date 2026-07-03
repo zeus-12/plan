@@ -71,12 +71,21 @@ function isSystemMetaMessage(m: ConversationMessage): boolean {
   );
 }
 
-export interface ChatAnnotation {
-  id: string;
+/** One endpoint of a chat selection: which message, which part of that turn, and
+ *  the char offset into that part's annotatable text (see `annoTextWalker`). */
+export interface ChatSpan {
   messageUuid: string;
   partIndex: number;
-  startOffset: number;
-  endOffset: number;
+  offset: number;
+}
+
+/** A chat comment anchored to a document-order span from `start` to `end`, which
+ *  may cross several parts AND several message rows (prose + the tool rows and
+ *  turns between them). */
+export interface ChatAnnotation {
+  id: string;
+  start: ChatSpan;
+  end: ChatSpan;
   selectedText: string;
   comment: string;
 }
@@ -88,11 +97,8 @@ interface Props {
   encoded: string;
   annotations: ChatAnnotation[];
   onAddAnnotation: (
-    messageUuid: string,
-    partIndex: number,
+    anchor: ChatAnchor,
     selectedText: string,
-    startOffset: number,
-    endOffset: number,
     comment: string,
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
@@ -108,12 +114,57 @@ interface Props {
   onSendKeys?: (keys: string[]) => void;
 }
 
-/** Surface-specific anchor for a chat comment: a char range within one part. */
-interface ChatAnchor {
-  messageUuid: string;
-  partIndex: number;
-  startOffset: number;
-  endOffset: number;
+/** Surface-specific anchor for a chat comment: a document-order span from `start`
+ *  to `end`, which may cross parts and message rows. */
+export interface ChatAnchor {
+  start: ChatSpan;
+  end: ChatSpan;
+}
+
+/** The portion of one part painted for a comment/pending span. `end: null` means
+ *  "to the end of the part" — the start part's tail and fully-covered middle
+ *  parts. */
+interface PartCover {
+  start: number;
+  end: number | null;
+}
+
+/** An annotation paired with the region it covers within one specific part. */
+interface PartAnn {
+  ann: ChatAnnotation;
+  cover: PartCover;
+}
+
+/** Document-order key for a part: `<messageUuid>:<partIndex>`. */
+function orderKey(messageUuid: string, partIndex: number): string {
+  return `${messageUuid}:${partIndex}`;
+}
+
+/**
+ * The region of the part `(uuid, partIndex)` covered by the span [start, end], or
+ * null when the part lies outside the span. `order` maps each part key to its
+ * document position, so this works even when the span crosses message rows.
+ */
+function coverForSpanPart(
+  start: ChatSpan,
+  end: ChatSpan,
+  uuid: string,
+  partIndex: number,
+  order: Map<string, number>,
+): PartCover | null {
+  const key = orderKey(uuid, partIndex);
+  const pos = order.get(key);
+  const startKey = orderKey(start.messageUuid, start.partIndex);
+  const endKey = orderKey(end.messageUuid, end.partIndex);
+  const sPos = order.get(startKey);
+  const ePos = order.get(endKey);
+  if (pos === undefined || sPos === undefined || ePos === undefined)
+    return null;
+  if (pos < Math.min(sPos, ePos) || pos > Math.max(sPos, ePos)) return null;
+  return {
+    start: key === startKey ? start.offset : 0,
+    end: key === endKey ? end.offset : null,
+  };
 }
 
 interface EditingAnn {
@@ -125,6 +176,16 @@ const POPOVER_VIEWPORT_PAD = 380;
 
 function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+/** A disclosure toggle that no-ops while text is being drag-selected across it —
+ *  the mouseup that ends a selection gesture also fires `click`, and expanding a
+ *  block mid-selection is never what the user meant. */
+function toggleUnlessSelecting(toggle: () => void): () => void {
+  return () => {
+    if (window.getSelection()?.isCollapsed === false) return;
+    toggle();
+  };
 }
 
 function previewInput(input: unknown): string {
@@ -205,7 +266,7 @@ function CollapsibleBlock({
   return (
     <div className="rounded-md border border-[var(--border)] bg-[var(--bg)]">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]"
       >
         <span
@@ -228,10 +289,13 @@ function CollapsibleBlock({
           </span>
         )}
       </button>
+      {/* The raw body is excluded from comment text (data-anno-skip): a comment
+          spanning this block captures its summary line, not the dump inside. */}
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
         data-find-skip={skipFindContent ? "" : undefined}
+        data-anno-skip=""
       >
         <div className="overflow-hidden">{children}</div>
       </div>
@@ -300,7 +364,7 @@ function CollapsibleUserMessage({ children }: { children: React.ReactNode }) {
       </div>
       {overflowing && (
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={toggleUnlessSelecting(() => setExpanded((v) => !v))}
           className="mt-px flex items-center gap-0.5 self-start text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
         >
           {expanded ? "Show less" : "Show more"}
@@ -437,7 +501,7 @@ function ToolCallBlock({
   return (
     <div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
         className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
       >
         <span className="shrink-0 text-[var(--text-tertiary)]">{verb}</span>
@@ -446,6 +510,8 @@ function ToolCallBlock({
             className="min-w-0 truncate text-[var(--text-secondary)]"
             data-find-skip=""
           >
+            {/* Explicit space so a comment spanning this row reads "Ran <target>",
+                not "Ran<target>" — flex collapses it visually, textContent keeps it. */}{" "}
             {target}
           </span>
         )}
@@ -455,6 +521,7 @@ function ToolCallBlock({
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
         data-find-skip=""
+        data-anno-skip=""
       >
         <div className="overflow-hidden">
           <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2">
@@ -613,13 +680,44 @@ function rangeFromSegs(
   return r;
 }
 
+/**
+ * Text-node walker over a part's *annotatable* text — the visible prose and
+ * tool-summary lines — skipping any `[data-anno-skip]` subtree (collapsible raw
+ * bodies, plan-card chrome, the in-card diff). This one character-offset space
+ * is shared by selection capture, highlight painting, and click hit-testing, so
+ * a comment never swallows a collapsed block's hidden dump.
+ */
+function annoTextWalker(root: HTMLElement): TreeWalker {
+  return document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      for (
+        let el = node.parentElement;
+        el && el !== root;
+        el = el.parentElement
+      ) {
+        if (el.hasAttribute("data-anno-skip")) return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+}
+
+/** The concatenated annotatable text of `root` (see {@link annoTextWalker}). */
+function annoText(root: HTMLElement): string {
+  const walker = annoTextWalker(root);
+  let s = "";
+  for (let n = walker.nextNode(); n; n = walker.nextNode())
+    s += n.textContent ?? "";
+  return s;
+}
+
 /** Build a DOM Range for [start, end) character offsets into `root`'s text. */
 function rangeForOffsets(
   root: HTMLElement,
   start: number,
   end: number,
 ): Range | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const walker = annoTextWalker(root);
   let acc = 0;
   let startNode: Node | null = null;
   let startNodeOff = 0;
@@ -651,83 +749,127 @@ function rangeForOffsets(
   return range;
 }
 
+/** DOM Range for the covered region of a part. An open-ended cover (`end: null`)
+ *  extends to the current end of the part's annotatable text — recomputed each
+ *  paint, so it re-anchors when a block expands. */
+function rangeForCover(root: HTMLElement, cover: PartCover): Range | null {
+  const end = cover.end ?? annoText(root).length;
+  if (end <= cover.start) return null;
+  return rangeForOffsets(root, cover.start, end);
+}
+
 /**
- * A markdown-rendered message text part. Existing annotations and the in-flight
- * selection are painted as custom highlights; clicking a highlighted span opens
- * its editor (hit-tested against the click point).
+ * A markdown-rendered message text part. Selection highlights, click-to-edit and
+ * part addressing all live on the shared {@link PartWrapper} now, so this is just
+ * the renderer.
  */
-function MarkdownText({
-  text,
+function MarkdownText({ text }: { text: string }) {
+  return (
+    <div className="[cursor:text]">
+      <Markdown content={text} />
+    </div>
+  );
+}
+
+const EMPTY_PART_ANNS: PartAnn[] = [];
+
+/**
+ * Wraps every message part with the machinery that makes it commentable: a
+ * selectable host tagged with its (message, part) coordinates, the custom
+ * highlights for annotations covering this part plus the in-flight pending
+ * selection, and click-to-edit hit-testing. Applying this uniformly to text AND
+ * tool blocks is what lets a selection — and its comment — span the tool rows
+ * ("Ran …/filename") that sit between two paragraphs.
+ */
+function PartWrapper({
   messageUuid,
   partIndex,
-  partAnnotations,
-  pendingRange,
+  partAnns,
+  pendingCover,
   onClickAnnotation,
+  children,
 }: {
-  text: string;
   messageUuid: string;
   partIndex: number;
-  partAnnotations: ChatAnnotation[];
-  pendingRange: { start: number; end: number } | null;
+  partAnns: PartAnn[];
+  pendingCover: PartCover | null;
   onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
+  children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
+  // Repaint when the covered ranges change AND whenever the part resizes: an
+  // open-ended cover ("to end of part") must re-anchor when a tool block expands
+  // or markdown reflows.
   useLayoutEffect(() => {
     const root = ref.current;
     const hl = getHighlights();
     if (!root || !hl) return;
-    const added: Array<{ set: Highlight; range: Range }> = [];
-    for (const a of partAnnotations) {
-      const r = rangeForOffsets(root, a.startOffset, a.endOffset);
-      if (r) {
-        hl.ann.add(r);
-        added.push({ set: hl.ann, range: r });
+    let added: Array<{ set: Highlight; range: Range }> = [];
+    const paint = () => {
+      for (const pa of partAnns) {
+        const r = rangeForCover(root, pa.cover);
+        if (r) {
+          hl.ann.add(r);
+          added.push({ set: hl.ann, range: r });
+        }
       }
-    }
-    if (pendingRange) {
-      const r = rangeForOffsets(root, pendingRange.start, pendingRange.end);
-      if (r) {
-        hl.pending.add(r);
-        added.push({ set: hl.pending, range: r });
+      if (pendingCover) {
+        const r = rangeForCover(root, pendingCover);
+        if (r) {
+          hl.pending.add(r);
+          added.push({ set: hl.pending, range: r });
+        }
       }
-    }
-    return () => {
-      for (const a of added) a.set.delete(a.range);
     };
-  }, [text, partAnnotations, pendingRange]);
+    const clear = () => {
+      for (const a of added) a.set.delete(a.range);
+      added = [];
+    };
+    paint();
+    const ro = new ResizeObserver(() => {
+      clear();
+      paint();
+    });
+    ro.observe(root);
+    return () => {
+      ro.disconnect();
+      clear();
+    };
+  }, [partAnns, pendingCover]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      if (partAnnotations.length === 0) return;
+      if (partAnns.length === 0) return;
       const root = ref.current;
       if (!root) return;
       const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
       if (!caret) return;
       const off = offsetWithin(root, caret.startContainer, caret.startOffset);
       if (off === -1) return;
-      const ann = partAnnotations.find(
-        (a) => a.startOffset <= off && off < a.endOffset,
-      );
-      if (!ann) return;
+      const hit = partAnns.find((pa) => {
+        const end = pa.cover.end ?? annoText(root).length;
+        return pa.cover.start <= off && off < end;
+      });
+      if (!hit) return;
       e.stopPropagation();
-      const r = rangeForOffsets(root, ann.startOffset, ann.endOffset);
+      const r = rangeForCover(root, hit.cover);
       const rect = r?.getBoundingClientRect() ?? root.getBoundingClientRect();
-      onClickAnnotation(ann, rect);
+      onClickAnnotation(hit.ann, rect);
     },
-    [partAnnotations, onClickAnnotation],
+    [partAnns, onClickAnnotation],
   );
 
   return (
     <div
       ref={ref}
+      data-part-root=""
       data-message-uuid={messageUuid}
       data-part-index={partIndex}
-      data-text-part="true"
       onClick={handleClick}
-      className="select-text [cursor:text]"
+      className="select-text"
     >
-      <Markdown content={text} />
+      {children}
     </div>
   );
 }
@@ -789,9 +931,7 @@ function TranscriptImage({ path }: { path: string }) {
  *   <bash-stdout>…</bash-stdout><bash-stderr>…</bash-stderr>      its output
  * Detect those so we can render a terminal block instead of leaking raw tags.
  */
-function parseBashBlock(
-  text: string,
-): {
+function parseBashBlock(text: string): {
   input: string | null;
   stdout: string | null;
   stderr: string | null;
@@ -883,7 +1023,7 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
   return (
     <div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
         className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
       >
         <span className="shrink-0 text-[var(--text-tertiary)]">Task</span>
@@ -891,6 +1031,7 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
           className="min-w-0 truncate text-[var(--text-secondary)]"
           data-find-skip=""
         >
+          {/* Leading space so a spanning comment reads "Task <command>". */}{" "}
           {command}
           {outcome && (
             <span
@@ -901,6 +1042,7 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
                   : "text-[var(--removed-text,#f87171)]",
               )}
             >
+              {" "}
               {outcome}
             </span>
           )}
@@ -911,6 +1053,7 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
         data-find-skip=""
+        data-anno-skip=""
       >
         <div className="overflow-hidden">
           <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2 font-[family-name:var(--font-mono)] text-[11px]">
@@ -984,7 +1127,7 @@ function SystemMetaBlock({ text }: { text: string }) {
   return (
     <div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
         className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
       >
         <span className="shrink-0 text-[var(--text-tertiary)]">{verb}</span>
@@ -993,6 +1136,7 @@ function SystemMetaBlock({ text }: { text: string }) {
             className="min-w-0 truncate text-[var(--text-secondary)]"
             data-find-skip=""
           >
+            {" "}
             {target}
           </span>
         )}
@@ -1002,6 +1146,7 @@ function SystemMetaBlock({ text }: { text: string }) {
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
         data-find-skip=""
+        data-anno-skip=""
       >
         <div className="overflow-hidden">
           <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2">
@@ -1052,11 +1197,7 @@ function BashBlock({
 
 interface MessagePartViewProps {
   part: MessagePart;
-  partIndex: number;
   message: ConversationMessage;
-  annotations: ChatAnnotation[];
-  pendingRange: { start: number; end: number } | null;
-  onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
   /** The tool_result paired with this tool_use part (rendered inline). */
   result?: ToolResult;
   /** Whether the chat's terminal is live (enables answering questions). */
@@ -1075,11 +1216,7 @@ interface MessagePartViewProps {
 const MessagePartView = memo(
   function MessagePartView({
     part,
-    partIndex,
     message,
-    annotations,
-    pendingRange,
-    onClickAnnotation,
     result,
     terminalReady,
     onSendKeys,
@@ -1106,16 +1243,7 @@ const MessagePartView = memo(
           const clean = command.args
             ? `${command.name} ${command.args}`
             : command.name;
-          return (
-            <MarkdownText
-              text={clean}
-              messageUuid={message.uuid}
-              partIndex={partIndex}
-              partAnnotations={EMPTY_ANNOTATIONS}
-              pendingRange={null}
-              onClickAnnotation={onClickAnnotation}
-            />
-          );
+          return <MarkdownText text={clean} />;
         }
         const bash = parseBashBlock(part.text);
         if (bash) {
@@ -1134,32 +1262,14 @@ const MessagePartView = memo(
               {tasks.notifications.map((n, i) => (
                 <TaskNotificationBlock key={n.taskId ?? i} n={n} />
               ))}
-              {tasks.remainder && (
-                <MarkdownText
-                  text={tasks.remainder}
-                  messageUuid={message.uuid}
-                  partIndex={partIndex}
-                  partAnnotations={annotations}
-                  pendingRange={pendingRange}
-                  onClickAnnotation={onClickAnnotation}
-                />
-              )}
+              {tasks.remainder && <MarkdownText text={tasks.remainder} />}
             </div>
           );
         }
         if (message.isMeta || message.promptSource === "system") {
           return <SystemMetaBlock text={part.text} />;
         }
-        return (
-          <MarkdownText
-            text={part.text}
-            messageUuid={message.uuid}
-            partIndex={partIndex}
-            partAnnotations={annotations}
-            pendingRange={pendingRange}
-            onClickAnnotation={onClickAnnotation}
-          />
-        );
+        return <MarkdownText text={part.text} />;
       }
       case "thinking":
         return (
@@ -1204,16 +1314,7 @@ const MessagePartView = memo(
               versionIndex={planVersionIndex}
               encoded={encoded}
               planPath={planFilePath(part)}
-              body={
-                <MarkdownText
-                  text={planText}
-                  messageUuid={message.uuid}
-                  partIndex={partIndex}
-                  partAnnotations={annotations}
-                  pendingRange={pendingRange}
-                  onClickAnnotation={onClickAnnotation}
-                />
-              }
+              body={<MarkdownText text={planText} />}
             />
           );
         }
@@ -1242,27 +1343,14 @@ const MessagePartView = memo(
   // which is rebuilt each parse and is compared by content.
   (prev, next) =>
     prev.part === next.part &&
-    prev.partIndex === next.partIndex &&
     prev.message === next.message &&
-    prev.annotations === next.annotations &&
-    prev.onClickAnnotation === next.onClickAnnotation &&
     prev.terminalReady === next.terminalReady &&
     prev.onSendKeys === next.onSendKeys &&
     prev.planVersions === next.planVersions &&
     prev.planVersionIndex === next.planVersionIndex &&
     prev.encoded === next.encoded &&
-    sameRange(prev.pendingRange, next.pendingRange) &&
     sameResult(prev.result, next.result),
 );
-
-function sameRange(
-  a: { start: number; end: number } | null,
-  b: { start: number; end: number } | null,
-): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return a.start === b.start && a.end === b.end;
-}
 
 function sameResult(a?: ToolResult, b?: ToolResult): boolean {
   if (a === b) return true;
@@ -1270,7 +1358,6 @@ function sameResult(a?: ToolResult, b?: ToolResult): boolean {
   return a.output === b.output && a.isError === b.isError;
 }
 
-const EMPTY_ANNOTATIONS: ChatAnnotation[] = [];
 // Stable reference for non-plan parts so the memoized part view doesn't re-render
 // every time `messages` changes (only plan parts read the versions array).
 const EMPTY_PLAN_VERSIONS: PlanVersionInfo[] = [];
@@ -1414,20 +1501,56 @@ export const MessageList = memo(function MessageList({
   }, [deferredMessages]);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
 
+  // Document position of every part, so a comment span can be resolved across
+  // message rows (the selection the user makes routinely crosses turns). Key is
+  // `<uuid>:<partIndex>`; the value is its 0-based order in the transcript.
+  const partOrder = useMemo(() => {
+    const order = new Map<string, number>();
+    let n = 0;
+    for (const m of deferredMessages) {
+      for (let i = 0; i < m.parts.length; i++)
+        order.set(orderKey(m.uuid, i), n++);
+    }
+    return order;
+  }, [deferredMessages]);
+
+  // A span attaches to every part between its endpoints (across rows) with the
+  // region it covers there (start part → its tail, middle parts → whole, end part
+  // → its head). Each PartWrapper then paints its own slice.
   const annotationsByMessage = useMemo(() => {
-    const map = new Map<string, Map<number, ChatAnnotation[]>>();
-    for (const a of annotations) {
-      let m = map.get(a.messageUuid);
+    const map = new Map<string, Map<number, PartAnn[]>>();
+    const add = (uuid: string, part: number, pa: PartAnn) => {
+      let m = map.get(uuid);
       if (!m) {
         m = new Map();
-        map.set(a.messageUuid, m);
+        map.set(uuid, m);
       }
-      const list = m.get(a.partIndex) ?? [];
-      list.push(a);
-      m.set(a.partIndex, list);
+      const list = m.get(part) ?? [];
+      list.push(pa);
+      m.set(part, list);
+    };
+    for (const a of annotations) {
+      const sPos = partOrder.get(
+        orderKey(a.start.messageUuid, a.start.partIndex),
+      );
+      const ePos = partOrder.get(orderKey(a.end.messageUuid, a.end.partIndex));
+      if (sPos === undefined || ePos === undefined) continue;
+      for (const m of deferredMessages) {
+        for (let i = 0; i < m.parts.length; i++) {
+          const pos = partOrder.get(orderKey(m.uuid, i));
+          if (
+            pos === undefined ||
+            pos < Math.min(sPos, ePos) ||
+            pos > Math.max(sPos, ePos)
+          )
+            continue;
+          const cover = coverForSpanPart(a.start, a.end, m.uuid, i, partOrder);
+          if (cover) add(m.uuid, i, { ann: a, cover });
+        }
+      }
     }
     return map;
-  }, [annotations]);
+  }, [annotations, deferredMessages, partOrder]);
 
   /** Per-row "should we show the role header here?" */
   const showHeaderForRow = useMemo(() => {
@@ -1500,52 +1623,108 @@ export const MessageList = memo(function MessageList({
     setShowScrollDown(false);
   }, []);
 
-  // Selection → comment popover (within a single text part). Timing (when the
-  // selection has settled, and catching releases outside the pane) is handled
-  // by useCommentSelection; this just maps a settled selection to a chat anchor.
-  const resolveSelection = useCallback((range: Range, sel: Selection) => {
-    if (!parentRef.current) return null;
-    if (!parentRef.current.contains(range.commonAncestorContainer)) return null;
+  // Selection → comment popover. A selection routinely crosses parts AND turns
+  // (prose, the tool rows between them, and separate messages), so this maps the
+  // settled DOM selection to a document-order span {start, end}, each an
+  // (messageUuid, partIndex, offset). Timing (when the selection has settled,
+  // releases outside the pane) is handled upstream by useCommentSelection.
+  const resolveSelection = useCallback((range: Range) => {
+    const pane = parentRef.current;
+    if (!pane) return null;
+    if (!pane.contains(range.commonAncestorContainer)) return null;
 
-    // Anchor on the part the selection STARTS in. A triple-click (or a
-    // double-click-drag) often lands the end boundary just past the block — in
-    // a sibling/ancestor with no data-part-index — so requiring both endpoints
-    // in the same part silently dropped those. Instead we clamp the end into
-    // the start part; cross-block selections just comment the first block.
-    const part =
-      ancestorWithAttr(range.startContainer, "data-part-index") ??
-      ancestorWithAttr(range.endContainer, "data-part-index");
-    if (!part) return null;
+    // A selection whose endpoint sits inside a raw/expandable body or an in-card
+    // diff (data-anno-skip) isn't ours — those surfaces handle their own
+    // comments (or aren't commentable). Ignore it rather than mis-anchor.
+    if (
+      ancestorWithAttr(range.startContainer, "data-anno-skip") ||
+      ancestorWithAttr(range.endContainer, "data-anno-skip")
+    ) {
+      return null;
+    }
 
-    const messageUuid = part.getAttribute("data-message-uuid") ?? "";
-    const partIndex = parseInt(part.getAttribute("data-part-index") ?? "0", 10);
-    const fullText = part.textContent ?? "";
+    // Resolve each endpoint to its part wrapper. Fall each back to the other so a
+    // triple-click landing its end boundary just past a block (on an element with
+    // no data-part-root) still resolves.
+    const startPart =
+      ancestorWithAttr(range.startContainer, "data-part-root") ??
+      ancestorWithAttr(range.endContainer, "data-part-root");
+    const endPart =
+      ancestorWithAttr(range.endContainer, "data-part-root") ?? startPart;
+    if (!startPart || !endPart) return null;
 
-    // Offsets within the part, derived from which of the part's text nodes the
-    // selection actually covers — not from the raw endpoints. A triple-click
-    // lands the end boundary on an element node just past the block (a
-    // sibling/ancestor), which we can't turn into a character offset directly;
-    // clamping it to the part's end would swallow every block below the one the
-    // user clicked. Intersecting per text node confines us to what's selected.
-    const offsets = selectedOffsetsWithin(part, range);
-    if (!offsets) return null;
-    let { start, end } = offsets;
+    // Order the two endpoints by document position over every part in the pane,
+    // so `first` is the document-earlier part regardless of which row it's in.
+    const allParts = Array.from(
+      pane.querySelectorAll<HTMLElement>("[data-part-root]"),
+    );
+    const si = allParts.indexOf(startPart);
+    const ei = allParts.indexOf(endPart);
+    if (si === -1 || ei === -1) return null;
+    const lo = Math.min(si, ei);
+    const hi = Math.max(si, ei);
+    const firstEl = allParts[lo];
+    const lastEl = allParts[hi];
 
-    // Trim whitespace by moving the offsets, so text and offsets stay in sync.
-    while (start < end && /\s/.test(fullText[start])) start++;
-    while (end > start && /\s/.test(fullText[end - 1])) end--;
-    const selectedText = fullText.slice(start, end);
+    // Offset of each endpoint within its part. The range's boundaries lie in the
+    // document-first and document-last parts respectively.
+    const firstOffs = selectedOffsetsWithin(firstEl, range);
+    if (!firstOffs) return null;
+    const lastOffs =
+      firstEl === lastEl ? firstOffs : selectedOffsetsWithin(lastEl, range);
+
+    const start: ChatSpan = {
+      messageUuid: msgUuidOf(firstEl),
+      partIndex: partIndexOf(firstEl),
+      offset: firstOffs.start,
+    };
+    const end: ChatSpan = {
+      messageUuid: msgUuidOf(lastEl),
+      partIndex: partIndexOf(lastEl),
+      offset: lastOffs ? lastOffs.end : annoText(lastEl).length,
+    };
+
+    // Trim whitespace at the two ends so the highlight and captured text don't
+    // include a trailing blank line / leading indent.
+    const firstText = annoText(firstEl);
+    while (
+      start.offset < firstText.length &&
+      /\s/.test(firstText[start.offset])
+    )
+      start.offset++;
+    const lastText = annoText(lastEl);
+    while (end.offset > 0 && /\s/.test(lastText[end.offset - 1])) end.offset--;
+
+    if (firstEl === lastEl && start.offset >= end.offset) return null;
+
+    // Build the captured text from the same covers that paint the highlight, so
+    // the two never disagree — collapsed tool bodies are excluded (annoText), the
+    // visible "Ran …/filename" summary lines are kept.
+    const pieces: string[] = [];
+    for (let i = lo; i <= hi; i++) {
+      const el = allParts[i];
+      const from = el === firstEl ? start.offset : 0;
+      const t = annoText(el);
+      const to = el === lastEl ? end.offset : t.length;
+      const piece = t.slice(from, to).trim();
+      if (piece) pieces.push(piece);
+    }
+    const selectedText = pieces.join("\n");
     if (!selectedText) return null;
 
-    const rect = range.getBoundingClientRect();
+    // Anchor the popover to the LAST visible line of the selection, not the raw
+    // bounding box: a tall multi-line range's box picks up a zero-size rect at
+    // its end boundary that can sit far below the last line, dropping the popover
+    // way down. Clamp into the viewport so it's always reachable.
+    const anchor = lastLineRect(range);
     return {
-      data: { messageUuid, partIndex, startOffset: start, endOffset: end },
+      data: { start, end },
       selectedText,
       position: {
-        top: rect.bottom + 8,
+        top: Math.max(8, Math.min(anchor.bottom + 8, window.innerHeight - 260)),
         left: Math.max(
           8,
-          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
+          Math.min(anchor.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
         ),
       },
     };
@@ -1553,14 +1732,7 @@ export const MessageList = memo(function MessageList({
 
   const createAnnotation = useCallback(
     (data: ChatAnchor, selectedText: string, comment: string) => {
-      onAddAnnotation(
-        data.messageUuid,
-        data.partIndex,
-        selectedText,
-        data.startOffset,
-        data.endOffset,
-        comment,
-      );
+      onAddAnnotation(data, selectedText, comment);
     },
     [onAddAnnotation],
   );
@@ -1747,41 +1919,49 @@ export const MessageList = memo(function MessageList({
                       const partKey = `${m.uuid}:${i}`;
                       // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
                       if (hiddenParts.has(partKey)) return null;
+                      // tool_result renders inline within its tool_use; an empty
+                      // wrapper here would add a stray flex gap.
+                      if (p.kind === "tool_result") return null;
                       const planVersionIndex =
                         planVersionByPart.get(partKey) ?? -1;
                       return (
-                        <MessagePartView
+                        <PartWrapper
                           key={i}
-                          part={p}
+                          messageUuid={m.uuid}
                           partIndex={i}
-                          message={m}
-                          annotations={partMap?.get(i) ?? EMPTY_ANNOTATIONS}
-                          pendingRange={
-                            pending &&
-                            pending.data.messageUuid === m.uuid &&
-                            pending.data.partIndex === i
-                              ? {
-                                  start: pending.data.startOffset,
-                                  end: pending.data.endOffset,
-                                }
+                          partAnns={partMap?.get(i) ?? EMPTY_PART_ANNS}
+                          pendingCover={
+                            pending
+                              ? coverForSpanPart(
+                                  pending.data.start,
+                                  pending.data.end,
+                                  m.uuid,
+                                  i,
+                                  partOrder,
+                                )
                               : null
                           }
                           onClickAnnotation={handleClickAnnotation}
-                          result={
-                            p.kind === "tool_use"
-                              ? resultByToolUseId.get(p.id)
-                              : undefined
-                          }
-                          terminalReady={terminalReady}
-                          onSendKeys={onSendKeys}
-                          planVersions={
-                            planVersionIndex >= 0
-                              ? planVersions
-                              : EMPTY_PLAN_VERSIONS
-                          }
-                          planVersionIndex={planVersionIndex}
-                          encoded={encoded}
-                        />
+                        >
+                          <MessagePartView
+                            part={p}
+                            message={m}
+                            result={
+                              p.kind === "tool_use"
+                                ? resultByToolUseId.get(p.id)
+                                : undefined
+                            }
+                            terminalReady={terminalReady}
+                            onSendKeys={onSendKeys}
+                            planVersions={
+                              planVersionIndex >= 0
+                                ? planVersions
+                                : EMPTY_PLAN_VERSIONS
+                            }
+                            planVersionIndex={planVersionIndex}
+                            encoded={encoded}
+                          />
+                        </PartWrapper>
                       );
                     });
                     if (!isUser) {
@@ -1900,6 +2080,29 @@ function TypingIndicator() {
   );
 }
 
+/**
+ * The rect of a selection's last visible line — the last of `getClientRects()`
+ * with real area. `getBoundingClientRect()` unions in a zero-size rect at the
+ * range's end boundary, which for a tall multi-line selection can sit far below
+ * the last line and mis-place anything anchored to it.
+ */
+function lastLineRect(range: Range): DOMRect {
+  const rects = Array.from(range.getClientRects()).filter(
+    (r) => r.width > 0 && r.height > 0,
+  );
+  return rects[rects.length - 1] ?? range.getBoundingClientRect();
+}
+
+/** Read a part wrapper's `data-part-index` as a number (0 if missing). */
+function partIndexOf(el: HTMLElement): number {
+  return parseInt(el.getAttribute("data-part-index") ?? "0", 10);
+}
+
+/** Read a part wrapper's owning message uuid (`data-message-uuid`). */
+function msgUuidOf(el: HTMLElement): string {
+  return el.getAttribute("data-message-uuid") ?? "";
+}
+
 function ancestorWithAttr(node: Node, attr: string): HTMLElement | null {
   let el: HTMLElement | null =
     node instanceof HTMLElement ? node : node.parentElement;
@@ -1911,7 +2114,7 @@ function ancestorWithAttr(node: Node, attr: string): HTMLElement | null {
 }
 
 function offsetWithin(root: HTMLElement, node: Node, nodeOff: number): number {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const walker = annoTextWalker(root);
   let acc = 0;
   let cur: Node | null = walker.nextNode();
   while (cur) {
@@ -1935,7 +2138,7 @@ function selectedOffsetsWithin(
   root: HTMLElement,
   range: Range,
 ): { start: number; end: number } | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const walker = annoTextWalker(root);
   let acc = 0;
   let start = -1;
   let end = -1;

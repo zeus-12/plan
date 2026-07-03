@@ -144,7 +144,12 @@ export function PlanCard({
 
   return (
     <div className="rounded-md border border-[var(--accent)]/40 bg-[var(--bg)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)]">
+      {/* Card chrome is excluded from chat comment text (data-anno-skip): a
+          selection over the plan anchors to the body only, never the header. */}
+      <div
+        className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)]"
+        data-anno-skip=""
+      >
         <span>📋</span>
         <span>Plan</span>
         <span className="text-[var(--text-tertiary)]">
@@ -164,7 +169,9 @@ export function PlanCard({
       </div>
 
       {comparing && hasPrior ? (
-        <div className="px-3 py-2.5">
+        // The in-card diff owns its own comments (diff annotations); keep the
+        // chat's selection handler out of it.
+        <div className="px-3 py-2.5" data-anno-skip="">
           {versionIndex > 1 && (
             <div className="mb-2 flex flex-wrap items-center gap-1 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
               <span>compare with</span>

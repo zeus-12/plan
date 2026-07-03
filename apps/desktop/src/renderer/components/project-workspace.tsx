@@ -1398,7 +1398,6 @@ export function ProjectWorkspace({
         ...prev,
         {
           id: crypto.randomUUID(),
-          messageUuid: anchor.messageUuid,
           start: anchor.start,
           end: anchor.end,
           selectedText,
