@@ -710,6 +710,12 @@ export function FileList({
                 style={{ paddingLeft: INDENT + row.depth * INDENT }}
                 className="flex h-full min-w-0 flex-1 items-center gap-2 pr-2 text-left"
               >
+                {/* Reserve the folder's chevron column so a file's icon aligns
+                    under its parent folder icon — since files sit one depth
+                    deeper, this nests them clearly beneath the folder. */}
+                {viewMode === "tree" && (
+                  <span aria-hidden className="w-2 shrink-0" />
+                )}
                 <FileIcon name={fileBasename} />
                 <span className="min-w-0 shrink truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
                   {fileBasename}
