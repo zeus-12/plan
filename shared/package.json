@@ -2,6 +2,10 @@
   "name": "@plan/shared",
   "version": "0.1.0",
   "private": true,
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
   "exports": {
     "./components/*": "./components/*.tsx",
     "./lib/*": "./lib/*.ts",

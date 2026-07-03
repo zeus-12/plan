@@ -10,6 +10,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:renderer": "tsc --noEmit -p tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:renderer",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "rebuild": "electron-rebuild -f -w node-pty",
     "pack": "electron-vite build && electron-builder --mac",
