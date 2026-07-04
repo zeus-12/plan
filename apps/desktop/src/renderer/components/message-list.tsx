@@ -1910,13 +1910,21 @@ export const MessageList = memo(function MessageList({
           <UserMessageOverview messages={items} scrollRef={parentRef} />
         )}
         <div ref={parentRef} className="h-full overflow-auto pt-3 pb-6">
-          {/* Centered reading column (ChatGPT-style): the scrollbar stays at the
-            pane edge while message width is capped for readability. Diff/file
-            tabs are separate views and keep their full width. */}
-          <div className="mx-auto w-full max-w-[820px]">
+          {/* Reading column (ChatGPT-style): each row centers itself and caps
+            its width for readability while the scrollbar stays at the pane edge.
+            The cap is per-row (not on this wrapper) so a plan card showing a diff
+            can opt out and run full-width, like the diff/file tabs do. */}
+          <div className="w-full">
             {items.map((m, idx) => {
               const partMap = annotationsByMessage.get(m.uuid);
               const showHeader = showHeaderForRow[idx];
+              // A plan card that has a prior version opens on its diff; let that
+              // row break out of the reading-width cap so the diff isn't boxed
+              // into the narrow column. First-version plans (body only) stay
+              // capped like normal messages.
+              const rowFullWidth = m.parts.some(
+                (_p, i) => (planVersionByPart.get(`${m.uuid}:${i}`) ?? -1) >= 1,
+              );
               // iMessage-style: user turns are a right-aligned bubble capped in
               // width; assistant turns run full-width with no bubble. Bash-mode
               // turns read as terminal output, so they go left/full-width too.
@@ -1934,7 +1942,8 @@ export const MessageList = memo(function MessageList({
                     // off-screen rows — width changes (sidebar toggles) would
                     // otherwise reflow the entire transcript.
                     // scroll-mt keeps a jumped-to message off the very top edge.
-                    "group flex px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                    "group mx-auto flex w-full px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                    rowFullWidth ? "max-w-none" : "max-w-[820px]",
                     showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
                     isUser ? "justify-end" : "justify-start",
                   )}
@@ -2018,7 +2027,11 @@ export const MessageList = memo(function MessageList({
                 </div>
               );
             })}
-            {working && <TypingIndicator />}
+            {working && (
+              <div className="mx-auto w-full max-w-[820px]">
+                <TypingIndicator />
+              </div>
+            )}
           </div>
         </div>
         {/* Soft blur-fade where messages scroll up under the composer — the

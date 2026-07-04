@@ -171,9 +171,9 @@ export function PlanCard({
       {comparing && hasPrior ? (
         // The in-card diff owns its own comments (diff annotations); keep the
         // chat's selection handler out of it.
-        <div className="px-3 py-2.5" data-anno-skip="">
+        <div className="py-2.5" data-anno-skip="">
           {versionIndex > 1 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+            <div className="mb-2 flex flex-wrap items-center gap-1 px-3 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
               <span>compare with</span>
               {versions.slice(0, versionIndex).map((v, i) => (
                 <button
@@ -207,7 +207,12 @@ export function PlanCard({
           />
         </div>
       ) : (
-        <div className="px-3 py-2.5">{body}</div>
+        // The card can run full-width (so its diff fills the pane), but prose
+        // still reads best at a capped width — keep the body left-aligned within
+        // the reading column.
+        <div className="px-3 py-2.5">
+          <div className="max-w-[820px]">{body}</div>
+        </div>
       )}
     </div>
   );

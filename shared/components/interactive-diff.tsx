@@ -2447,28 +2447,38 @@ export function InteractiveDiff({
           )}
       </div>
 
-      {pending && (
-        <CommentPopover
-          position={pending.position}
-          selectedText={pending.selectedText}
-          onSubmit={selection.submit}
-          onClose={selection.cancel}
-        />
-      )}
-      {editing && (
-        <CommentPopover
-          position={editing.pos}
-          selectedText={editing.annotation.selectedText}
-          initialComment={editing.annotation.comment}
-          submitLabel="Save"
-          onSubmit={submitEdit}
-          onClose={() => setEditing(null)}
-          onDelete={() => {
-            onRemoveAnnotation?.(editing.annotation.id);
-            setEditing(null);
-          }}
-        />
-      )}
+      {/* Popovers are position:fixed with viewport coordinates, so they must
+          escape any ancestor that establishes a containing block for fixed
+          descendants — the chat message row wrapping a plan card carries
+          `content-visibility:auto` (paint containment), which would otherwise
+          re-anchor `top`/`left` to the row and drop the popover well below the
+          selection. Portaling to <body> keeps the math viewport-relative. */}
+      {pending &&
+        createPortal(
+          <CommentPopover
+            position={pending.position}
+            selectedText={pending.selectedText}
+            onSubmit={selection.submit}
+            onClose={selection.cancel}
+          />,
+          document.body,
+        )}
+      {editing &&
+        createPortal(
+          <CommentPopover
+            position={editing.pos}
+            selectedText={editing.annotation.selectedText}
+            initialComment={editing.annotation.comment}
+            submitLabel="Save"
+            onSubmit={submitEdit}
+            onClose={() => setEditing(null)}
+            onDelete={() => {
+              onRemoveAnnotation?.(editing.annotation.id);
+              setEditing(null);
+            }}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
