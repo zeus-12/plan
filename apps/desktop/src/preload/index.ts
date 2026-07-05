@@ -28,6 +28,7 @@ const electronAPI = {
 
   listWorktrees: (encoded: string) =>
     ipcRenderer.invoke("worktrees:list", encoded),
+  listAllWorktrees: () => ipcRenderer.invoke("worktrees:listAll"),
   createWorktree: (
     encoded: string,
     input: {

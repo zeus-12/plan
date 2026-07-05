@@ -40,6 +40,8 @@ export function NewWorktreeModal({
   const [repoBases, setRepoBases] = useState<Record<string, string>>({});
   const [excluded, setExcluded] = useState<Record<string, boolean>>({});
   const branchRef = useRef<HTMLInputElement>(null);
+  // Once the user edits the base, stop letting the fetched default overwrite it.
+  const baseTouched = useRef(false);
 
   useEffect(() => {
     branchRef.current?.focus();
@@ -49,6 +51,20 @@ export function NewWorktreeModal({
     let alive = true;
     void window.electronAPI.listRepos(projectEncoded).then((r) => {
       if (alive) setRepos(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectEncoded]);
+
+  // Pre-fill the base from THIS project's defaults. The `defaults` prop can lag
+  // when the target project was just selected (its worktree store hasn't
+  // refetched yet), so read fresh by projectEncoded — the source of truth for
+  // the project the worktree is actually being created in.
+  useEffect(() => {
+    let alive = true;
+    void window.electronAPI.getWorktreeDefaults(projectEncoded).then((d) => {
+      if (alive && !baseTouched.current) setBase(d.base ?? "");
     });
     return () => {
       alive = false;
@@ -146,7 +162,10 @@ export function NewWorktreeModal({
               <label className={labelCls}>Base branch</label>
               <input
                 value={base}
-                onChange={(e) => setBase(e.target.value)}
+                onChange={(e) => {
+                  baseTouched.current = true;
+                  setBase(e.target.value);
+                }}
                 placeholder="e.g. main"
                 className={inputCls}
               />

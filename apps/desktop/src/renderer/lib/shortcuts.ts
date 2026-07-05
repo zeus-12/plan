@@ -87,11 +87,6 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         chords: [{ mods: ["meta"], key: "," }],
       },
       {
-        id: "toggleWorktreesRail",
-        label: "Toggle worktrees rail",
-        chords: [{ mods: ["meta"], key: "D" }],
-      },
-      {
         id: "cycleTabs",
         label: "Cycle open tabs (next / prev)",
         chords: [

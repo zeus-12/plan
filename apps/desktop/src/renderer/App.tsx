@@ -19,8 +19,7 @@ import { ProjectWorkspace } from "./components/project-workspace";
 import { runEntriesOf, buildEntriesOf } from "./lib/commands";
 import { Toaster } from "@plan/shared/components/ui/sonner";
 import { SwitcherOverlay } from "./components/switcher-overlay";
-import type { ClaudeConfigScope } from "../shared-types";
-import { WorktreeRail } from "./components/worktree-rail";
+import type { ClaudeConfigScope, WorktreeRecord } from "../shared-types";
 import { UpdateBanner } from "./components/update-banner";
 
 // Modals are only mounted when opened, so lazy-load them — keeps their code
@@ -67,7 +66,7 @@ const ProjectDefaultsModal = lazy(() =>
 );
 import { useConfirm } from "./components/confirm-dialog";
 import { useWorktrees } from "./lib/use-worktrees";
-import { usePersistentNumber } from "./lib/use-persistent-number";
+import { useAllWorktrees } from "./lib/use-all-worktrees";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
 import { openProjectTab, makeChatTab } from "./lib/tabs-store";
 import {
@@ -170,6 +169,7 @@ function Shell() {
     if (added) {
       await refreshProjects();
       setSelectedEncoded(added.encoded);
+      setActiveWorktreeId(null);
     }
   }, [refreshProjects]);
 
@@ -186,6 +186,7 @@ function Shell() {
           (p) => p.encoded !== encoded && !p.archived,
         );
         setSelectedEncoded(fallback ? fallback.encoded : null);
+        setActiveWorktreeId(null);
       }
     },
     [projects, selectedEncoded],
@@ -193,10 +194,14 @@ function Shell() {
 
   const selected = projects.find((p) => p.encoded === selectedEncoded) ?? null;
 
-  // ── Worktrees (scoped to the selected project) ──────────────────────
+  // ── Worktrees ───────────────────────────────────────────────────────
   const { confirm, dialog: confirmDialog } = useConfirm();
+  // The selected project's worktrees + defaults drive the modals and Run/Build
+  // command lists; the merged sidebar nests worktrees for EVERY project, so it
+  // reads the all-projects map instead.
   const worktrees = useWorktrees(selectedEncoded ?? "");
-  // null = the live working copy (the real checkout). Reset on project switch.
+  const allWorktrees = useAllWorktrees();
+  // null = the live working copy (the real checkout).
   const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(null);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
@@ -206,23 +211,58 @@ function Shell() {
   const [addReposWorktreeId, setAddReposWorktreeId] = useState<string | null>(
     null,
   );
-  useEffect(() => {
-    setActiveWorktreeId(null);
-  }, [selectedEncoded]);
+
+  // Flat id → record across all projects, so sidebar actions (PR / remove /
+  // add-repos) and their modals resolve a worktree even when its project isn't
+  // the selected one.
+  const worktreeById = useMemo(() => {
+    const m = new Map<string, WorktreeRecord>();
+    for (const list of allWorktrees.byProject.values())
+      for (const w of list) m.set(w.id, w);
+    return m;
+  }, [allWorktrees.byProject]);
 
   // Switching worktrees remounts the workspace (keyed by encoded), so mark it a
   // transition: React renders the new worktree concurrently while the current
   // one stays interactive, instead of the window freezing mid-switch.
-  const selectWorktree = useCallback((id: string | null) => {
+  // Local = within the selected project (live-copy toggle, ⌘1 switcher).
+  const selectWorktreeLocal = useCallback((id: string | null) => {
     startTransition(() => setActiveWorktreeId(id));
+  }, []);
+  // Cross-project = clicking a worktree under any project in the sidebar. Sets
+  // both project + worktree atomically so neither clobbers the other.
+  const selectWorktree = useCallback(
+    (projectEncoded: string, id: string) => {
+      startTransition(() => {
+        setSelectedEncoded(projectEncoded);
+        setActiveWorktreeId(id);
+      });
+    },
+    [],
+  );
+
+  const handleNewWorktree = useCallback((projectEncoded: string) => {
+    // Select the target project synchronously (not via the transition-wrapped
+    // selectProject) so the modal reads that project's encoded + defaults.
+    setSelectedEncoded(projectEncoded);
+    setActiveWorktreeId(null);
+    setShowNewWorktree(true);
+  }, []);
+
+  const handleOpenProjectDefaults = useCallback((projectEncoded: string) => {
+    setSelectedEncoded(projectEncoded);
+    setActiveWorktreeId(null);
+    setShowDefaults(true);
   }, []);
 
   const activeWorktree =
     worktrees.worktrees.find((w) => w.id === activeWorktreeId) ?? null;
-  const prWorktree =
-    worktrees.worktrees.find((w) => w.id === prWorktreeId) ?? null;
-  const addReposWorktree =
-    worktrees.worktrees.find((w) => w.id === addReposWorktreeId) ?? null;
+  const prWorktree = prWorktreeId
+    ? (worktreeById.get(prWorktreeId) ?? null)
+    : null;
+  const addReposWorktree = addReposWorktreeId
+    ? (worktreeById.get(addReposWorktreeId) ?? null)
+    : null;
 
   // A worktree is just another cwd; the backend primed its `encoded`, so we
   // hand ProjectWorkspace a synthesized project + the worktree's own repos and
@@ -258,7 +298,7 @@ function Shell() {
 
   const handleRemoveWorktree = useCallback(
     async (id: string) => {
-      const wt = worktrees.worktrees.find((w) => w.id === id);
+      const wt = worktreeById.get(id);
       const ok = await confirm({
         title: `Remove worktree "${wt?.name ?? ""}"?`,
         description:
@@ -268,54 +308,11 @@ function Shell() {
       if (!ok) return;
       if (activeWorktreeId === id) setActiveWorktreeId(null);
       await worktrees.remove(id);
+      await allWorktrees.refresh();
     },
-    [worktrees, confirm, activeWorktreeId],
+    [worktrees, worktreeById, allWorktrees, confirm, activeWorktreeId],
   );
 
-  // ⌘E toggles the worktrees rail; persisted like the projects sidebar.
-  const [worktreeRailOpen, setWorktreeRailOpen] = useState<boolean>(() =>
-    typeof window === "undefined"
-      ? true
-      : window.localStorage.getItem("plan.worktreeRail.open") !== "false",
-  );
-  useEffect(() => {
-    window.localStorage.setItem(
-      "plan.worktreeRail.open",
-      String(worktreeRailOpen),
-    );
-  }, [worktreeRailOpen]);
-
-  // Drag-to-resize, mirroring the projects sidebar's handle. Width persists so a
-  // user's drag sticks across reloads; `resizing` drops the width transition so
-  // the column tracks the cursor instead of lagging behind it.
-  const [worktreeRailWidth, setWorktreeRailWidth] = usePersistentNumber(
-    "plan.worktreeRail.width",
-    224,
-  );
-  const [worktreeRailResizing, setWorktreeRailResizing] = useState(false);
-  const startWorktreeRailResize = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      setWorktreeRailResizing(true);
-      const startX = e.clientX;
-      const startW = worktreeRailWidth;
-      const onMove = (ev: PointerEvent) => {
-        const next = Math.min(
-          Math.max(startW + (ev.clientX - startX), 200),
-          420,
-        );
-        setWorktreeRailWidth(next);
-      };
-      const onUp = () => {
-        setWorktreeRailResizing(false);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-    },
-    [worktreeRailWidth, setWorktreeRailWidth],
-  );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
@@ -331,13 +328,6 @@ function Shell() {
         e.preventDefault();
         setShortcutsOpen(true);
         return;
-      }
-      // ⌘D → toggle the worktrees rail. Fires even when a text input or the
-      // Lexical chat composer is focused: ⌘D types nothing, so there's no
-      // conflict, and bailing on focused inputs made the shortcut feel broken.
-      if (e.key.toLowerCase() === "d") {
-        e.preventDefault();
-        setWorktreeRailOpen((v) => !v);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -371,7 +361,7 @@ function Shell() {
     triggerCode: "Digit1",
     items: worktreeItems,
     currentIndex: worktreeIndex,
-    onCommit: (it) => selectWorktree(it.id),
+    onCommit: (it) => selectWorktreeLocal(it.id),
   });
 
   // Sessions dashboard: a control-center for every live Claude pty.
@@ -451,7 +441,11 @@ function Shell() {
   // project stays interactive instead of the window freezing until the new one
   // is ready (the "Cmd+` hangs / had to alt-tab" symptom).
   const selectProject = useCallback((encoded: string | null) => {
-    startTransition(() => setSelectedEncoded(encoded));
+    startTransition(() => {
+      setSelectedEncoded(encoded);
+      // Selecting a project lands on its live working copy.
+      setActiveWorktreeId(null);
+    });
   }, []);
 
   const projectIndex = Math.max(
@@ -476,63 +470,22 @@ function Shell() {
       <ProjectSidebar
         projects={projects}
         reposByProject={reposByProject}
-        selected={selectedEncoded}
-        onSelect={selectProject}
+        worktreesByProject={allWorktrees.byProject}
+        selectedProject={selectedEncoded}
+        activeWorktreeId={activeWorktreeId}
+        onSelectProject={selectProject}
+        onSelectWorktree={selectWorktree}
+        onNewWorktree={handleNewWorktree}
+        onOpenProjectDefaults={handleOpenProjectDefaults}
+        onRemoveWorktree={handleRemoveWorktree}
+        onCreatePr={setPrWorktreeId}
+        onAddRepos={setAddReposWorktreeId}
         onAddProject={handleAddProject}
         onSetArchived={handleSetArchived}
         onOpenDashboard={() => setDashboardOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenClaudeConfig={() => setClaudeConfigScope("project")}
       />
-      {selected && (
-        <div
-          data-state={worktreeRailOpen ? "expanded" : "collapsed"}
-          className={
-            "relative flex h-full shrink-0 flex-col overflow-hidden bg-[var(--bg-surface)] ease-out" +
-            // No width transition while dragging — it would lag the handle.
-            (worktreeRailResizing ? "" : " transition-[width] duration-200") +
-            (worktreeRailOpen ? " border-r border-[var(--border)]" : "")
-          }
-          style={{ width: worktreeRailOpen ? worktreeRailWidth : 0 }}
-        >
-          {/* Inner sits at the rail's natural width; the outer column clips it
-              as the width animates, so it slides like the other sidebars. */}
-          <div
-            className="flex h-full flex-col"
-            style={{ width: worktreeRailWidth }}
-          >
-            <WorktreeRail
-              trafficLightInset={!projectsSidebar.open}
-              projectName={projectShortName(selected)}
-              liveBranch={
-                reposByProject.get(selected.encoded)?.[0]?.branch ?? null
-              }
-              worktrees={worktrees.worktrees}
-              activeWorktreeId={activeWorktreeId}
-              onSelectLive={() => selectWorktree(null)}
-              onSelectWorktree={selectWorktree}
-              onNew={() => setShowNewWorktree(true)}
-              onRemove={handleRemoveWorktree}
-              onAddRepos={setAddReposWorktreeId}
-              onCreatePr={setPrWorktreeId}
-              onOpenSettings={() => setShowDefaults(true)}
-              projectRepoCount={
-                reposByProject.get(selected.encoded)?.length ?? 0
-              }
-            />
-          </div>
-          {worktreeRailOpen && (
-            <div
-              onPointerDown={startWorktreeRailResize}
-              title="Drag to resize"
-              className={
-                "absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize transition-colors hover:bg-[var(--border-strong)]" +
-                (worktreeRailResizing ? " bg-[var(--accent)]" : "")
-              }
-            />
-          )}
-        </div>
-      )}
       <main className="flex min-w-0 flex-1 flex-col">
         {effectiveProject ? (
           <ProjectWorkspace
@@ -609,7 +562,8 @@ function Shell() {
             projectEncoded={selected.encoded}
             onCreate={async (input) => {
               const rec = await worktrees.create(input);
-              selectWorktree(rec.id);
+              await allWorktrees.refresh();
+              selectWorktreeLocal(rec.id);
             }}
             onClose={() => setShowNewWorktree(false)}
           />
@@ -621,11 +575,15 @@ function Shell() {
             onClose={() => setPrWorktreeId(null)}
           />
         )}
-        {addReposWorktree && selected && (
+        {addReposWorktree && (
           <AddReposModal
             worktree={addReposWorktree}
-            projectEncoded={selected.encoded}
-            onAdd={(input) => worktrees.addRepos(addReposWorktree.id, input)}
+            projectEncoded={addReposWorktree.projectEncoded}
+            onAdd={async (input) => {
+              const rec = await worktrees.addRepos(addReposWorktree.id, input);
+              await allWorktrees.refresh();
+              return rec;
+            }}
             onClose={() => setAddReposWorktreeId(null)}
           />
         )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { GitBranch, Plus, Settings as SettingsGear } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import {
   Sidebar,
@@ -32,7 +33,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@plan/shared/components/ui/alert-dialog";
-import type { ProjectEntry } from "../../shared-types";
+import type {
+  DiscoveredRepo,
+  ProjectEntry,
+  WorktreeRecord,
+} from "../../shared-types";
 import { relativeTime } from "../lib/time";
 import {
   buildProjectTree,
@@ -42,9 +47,24 @@ import {
 
 interface Props {
   projects: ProjectEntry[];
-  reposByProject: Map<string, import("../../shared-types").DiscoveredRepo[]>;
-  selected: string | null;
-  onSelect: (encoded: string) => void;
+  reposByProject: Map<string, DiscoveredRepo[]>;
+  /** Each project's worktrees, keyed by the project's encoded cwd. */
+  worktreesByProject: Map<string, WorktreeRecord[]>;
+  /** The selected project's encoded cwd (the live working copy's project). */
+  selectedProject: string | null;
+  /** The active worktree within the selected project; null = live copy. */
+  activeWorktreeId: string | null;
+  /** Select a project's live working copy. */
+  onSelectProject: (encoded: string) => void;
+  /** Select a worktree within a project. */
+  onSelectWorktree: (projectEncoded: string, worktreeId: string) => void;
+  /** Create a new worktree in the given project. */
+  onNewWorktree: (projectEncoded: string) => void;
+  /** Open the worktree-creation defaults for the given project. */
+  onOpenProjectDefaults: (projectEncoded: string) => void;
+  onRemoveWorktree: (worktreeId: string) => void;
+  onCreatePr: (worktreeId: string) => void;
+  onAddRepos: (worktreeId: string) => void;
   onAddProject: () => void;
   onSetArchived: (encoded: string, archived: boolean) => Promise<void> | void;
   onOpenDashboard: () => void;
@@ -54,6 +74,7 @@ interface Props {
 }
 
 const LEAF_HEIGHT = 50;
+const WORKTREE_HEIGHT = 40;
 const GROUP_HEIGHT = 36;
 const EXPANDED_STORAGE = "plan.projectSidebar.expandedGroups";
 
@@ -193,8 +214,16 @@ function TrashIcon() {
 export function ProjectSidebar({
   projects,
   reposByProject,
-  selected,
-  onSelect,
+  worktreesByProject,
+  selectedProject,
+  activeWorktreeId,
+  onSelectProject,
+  onSelectWorktree,
+  onNewWorktree,
+  onOpenProjectDefaults,
+  onRemoveWorktree,
+  onCreatePr,
+  onAddRepos,
   onAddProject,
   onSetArchived,
   onOpenDashboard,
@@ -202,6 +231,7 @@ export function ProjectSidebar({
   onOpenClaudeConfig,
 }: Props) {
   const sidebar = useSidebar();
+  const selected = selectedProject;
   // Pick a representative branch per project: first repo's branch.
   // (Multi-repo projects don't worktree-group, so this is the right label.)
   const branches = useMemo(() => {
@@ -238,25 +268,25 @@ export function ProjectSidebar({
     [active, reposByProject],
   );
 
-  // Auto-expand the group containing the selected project so it's visible.
+  // Auto-expand so the active selection is visible: the group containing the
+  // selected project, and the project itself when a worktree of it is active.
   useEffect(() => {
     if (!selected) return;
+    const toAdd: string[] = [];
+    if (activeWorktreeId && !expanded.has(selected)) toAdd.push(selected);
     for (const n of tree) {
       if (n.kind !== "group") continue;
-      if (
-        n.children.some((c) => c.encoded === selected) &&
-        !expanded.has(n.key)
-      ) {
-        setExpanded((prev) => {
-          const next = new Set(prev);
-          next.add(n.key);
-          persistExpanded(next);
-          return next;
-        });
-        return;
-      }
+      if (n.children.some((c) => c.encoded === selected) && !expanded.has(n.key))
+        toAdd.push(n.key);
     }
-  }, [selected, tree, expanded]);
+    if (toAdd.length === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const k of toAdd) next.add(k);
+      persistExpanded(next);
+      return next;
+    });
+  }, [selected, activeWorktreeId, tree, expanded]);
 
   // Leave the archived view automatically once it's empty (e.g. last unarchive).
   useEffect(() => {
@@ -265,10 +295,16 @@ export function ProjectSidebar({
 
   const rows: Row[] = useMemo(() => {
     if (archivedView) {
-      return archived.map((p) => ({ kind: "leaf", project: p, depth: 0 }));
+      return archived.map((p) => ({
+        kind: "project" as const,
+        project: p,
+        depth: 0,
+        worktrees: [],
+        expanded: false,
+      }));
     }
-    return flattenTree(tree, expanded);
-  }, [archivedView, archived, tree, expanded]);
+    return flattenTree(tree, expanded, worktreesByProject);
+  }, [archivedView, archived, tree, expanded, worktreesByProject]);
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
@@ -287,6 +323,7 @@ export function ProjectSidebar({
       const r = rows[i];
       if (!r) return LEAF_HEIGHT;
       if (r.kind === "group-header") return GROUP_HEIGHT;
+      if (r.kind === "worktree") return WORKTREE_HEIGHT;
       return LEAF_HEIGHT;
     },
     overscan: 8,
@@ -445,53 +482,193 @@ export function ProjectSidebar({
                   );
                 }
 
+                if (row.kind === "worktree") {
+                  const w = row.worktree;
+                  const wp = row.project;
+                  const isActive =
+                    wp.encoded === selected && w.id === activeWorktreeId;
+                  const branch = w.repos[0]?.branch ?? "";
+                  const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
+                  const canAddRepos = w.repos.length < repoCount;
+                  return (
+                    <ContextMenu key={`wt:${w.id}`}>
+                      <ContextMenuTrigger asChild>
+                        <div
+                          className={cn(
+                            "group absolute left-0 top-0 flex w-full items-center gap-2 border-l-2 pr-2 transition-colors",
+                            isActive
+                              ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
+                              : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
+                          )}
+                          style={{
+                            transform,
+                            height: WORKTREE_HEIGHT,
+                            paddingLeft: 12 + row.depth * 16,
+                          }}
+                        >
+                          <button
+                            onClick={() => onSelectWorktree(wp.encoded, w.id)}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            <GitBranch
+                              size={12}
+                              className="shrink-0 text-[var(--text-tertiary)]"
+                            />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span
+                                className={cn(
+                                  "truncate font-[family-name:var(--font-mono)] text-xs",
+                                  isActive
+                                    ? "text-[var(--text)]"
+                                    : "text-[var(--text-secondary)]",
+                                )}
+                              >
+                                {w.name}
+                              </span>
+                              {(branch || w.repos.length > 1) && (
+                                <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                  {branch}
+                                  {w.repos.length > 1
+                                    ? ` · ${w.repos.length} repos`
+                                    : ""}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem onSelect={() => onCreatePr(w.id)}>
+                          Create pull request…
+                        </ContextMenuItem>
+                        {canAddRepos && (
+                          <ContextMenuItem onSelect={() => onAddRepos(w.id)}>
+                            Add repos…
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem
+                          destructive
+                          onSelect={() => onRemoveWorktree(w.id)}
+                        >
+                          Remove worktree…
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                }
+
                 const p = row.project;
-                const isSelected = p.encoded === selected;
+                const isLiveActive =
+                  p.encoded === selected && activeWorktreeId === null;
                 const shortName =
                   p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
+                const branch = branches.get(p.encoded);
+                const hasWorktrees = row.worktrees.length > 0;
                 return (
                   <ContextMenu key={p.encoded}>
                     <ContextMenuTrigger asChild>
-                      <button
-                        onClick={() => onSelect(p.encoded)}
-                        title={p.cwd}
+                      <div
                         className={cn(
-                          "absolute left-0 top-0 flex w-full flex-col justify-center gap-0.5 border-l-2 pr-3 text-left transition-colors",
+                          "group absolute left-0 top-0 flex w-full items-center border-l-2 pr-2 transition-colors",
                           p.archived && "opacity-60",
-                          isSelected
+                          isLiveActive
                             ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
                             : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
                         )}
                         style={{
                           transform,
                           height: LEAF_HEIGHT,
-                          paddingLeft: row.depth > 0 ? 28 : 12,
+                          paddingLeft: row.depth > 0 ? 16 : 4,
                         }}
                       >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-xs",
-                              isSelected
-                                ? "text-[var(--text)]"
-                                : "text-[var(--text-secondary)]",
-                            )}
+                        {hasWorktrees ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleGroup(p.encoded);
+                            }}
+                            aria-label={row.expanded ? "Collapse" : "Expand"}
+                            className="flex h-6 w-4 shrink-0 items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text)]"
                           >
-                            {shortName}
-                          </span>
-                          {branches.get(p.encoded) && (
-                            <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] max-w-[80px]">
-                              {branches.get(p.encoded)}
+                            <span
+                              className={cn(
+                                "inline-block text-[9px] transition-transform",
+                                row.expanded && "rotate-90",
+                              )}
+                            >
+                              ▶
                             </span>
-                          )}
-                        </div>
-                        <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                          {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
-                          {p.cwd}
-                        </span>
-                      </button>
+                          </button>
+                        ) : (
+                          <span className="w-4 shrink-0" />
+                        )}
+                        <button
+                          onClick={() => onSelectProject(p.encoded)}
+                          title={p.cwd}
+                          className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-xs",
+                                isLiveActive
+                                  ? "text-[var(--text)]"
+                                  : "text-[var(--text-secondary)]",
+                              )}
+                            >
+                              {shortName}
+                            </span>
+                            {!row.expanded && hasWorktrees && (
+                              <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                {row.worktrees.length}
+                              </span>
+                            )}
+                            {branch && (
+                              <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] max-w-[80px]">
+                                {branch}
+                              </span>
+                            )}
+                          </div>
+                          <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                            {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
+                            {p.cwd}
+                          </span>
+                        </button>
+                        {!p.archived && (
+                          <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                            <button
+                              onClick={() => onOpenProjectDefaults(p.encoded)}
+                              title="Project defaults"
+                              className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                            >
+                              <SettingsGear size={13} />
+                            </button>
+                            <button
+                              onClick={() => onNewWorktree(p.encoded)}
+                              title="New worktree"
+                              className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
+                      {!p.archived && (
+                        <>
+                          <ContextMenuItem
+                            onSelect={() => onNewWorktree(p.encoded)}
+                          >
+                            New worktree…
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => onOpenProjectDefaults(p.encoded)}
+                          >
+                            Project defaults…
+                          </ContextMenuItem>
+                        </>
+                      )}
                       {p.archived ? (
                         <ContextMenuItem
                           onSelect={() =>

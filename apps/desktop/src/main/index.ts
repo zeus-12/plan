@@ -96,6 +96,7 @@ import {
   createWorktree,
   removeWorktree,
   listWorktrees,
+  listAllWorktrees,
   createWorktreePr,
   addReposToWorktree,
   type CreateWorktreeInput,
@@ -611,6 +612,7 @@ function registerIpc() {
   ipcMain.handle("worktrees:list", async (_e, encoded: string) =>
     listWorktrees(encoded),
   );
+  ipcMain.handle("worktrees:listAll", async () => listAllWorktrees());
   ipcMain.handle(
     "worktrees:create",
     async (_e, encoded: string, input: CreateWorktreeInput) =>

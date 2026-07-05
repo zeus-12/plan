@@ -36,10 +36,31 @@ export function ProjectDefaultsModal({
   );
   const [busy, setBusy] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
+  // Fields the user has edited — the fresh fetch below won't overwrite them.
+  const baseTouched = useRef(false);
+  const setupTouched = useRef(false);
+  // Source of truth for THIS project's defaults, read fresh by `encoded`. The
+  // `defaults` prop can lag when the project was just selected; saving would
+  // then spread a stale project's run/build commands into this one. Fetching by
+  // encoded avoids clobbering the target project's other fields.
+  const [liveDefaults, setLiveDefaults] = useState<ProjectDefaults>(defaults);
 
   useEffect(() => {
     window.electronAPI.listRepos(encoded).then(setRepos);
     firstRef.current?.focus();
+  }, [encoded]);
+
+  useEffect(() => {
+    let alive = true;
+    void window.electronAPI.getWorktreeDefaults(encoded).then((d) => {
+      if (!alive) return;
+      setLiveDefaults(d);
+      if (!baseTouched.current) setBase(d.base ?? "");
+      if (!setupTouched.current) setSetup(d.setup ?? {});
+    });
+    return () => {
+      alive = false;
+    };
   }, [encoded]);
 
   const save = async () => {
@@ -50,7 +71,7 @@ export function ProjectDefaultsModal({
     // Spread existing defaults so the project-level run command (set in the Run
     // terminal's own modal) and any legacy fields aren't clobbered here.
     await onSave({
-      ...defaults,
+      ...liveDefaults,
       base: base.trim() || undefined,
       setup: prune(setup),
     });
@@ -85,7 +106,10 @@ export function ProjectDefaultsModal({
             <input
               ref={firstRef}
               value={base}
-              onChange={(e) => setBase(e.target.value)}
+              onChange={(e) => {
+                baseTouched.current = true;
+                setBase(e.target.value);
+              }}
               placeholder="main"
               className={inputCls}
             />
@@ -109,9 +133,10 @@ export function ProjectDefaultsModal({
                     </label>
                     <input
                       value={setup[key] ?? ""}
-                      onChange={(e) =>
-                        setSetup((s) => ({ ...s, [key]: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        setupTouched.current = true;
+                        setSetup((s) => ({ ...s, [key]: e.target.value }));
+                      }}
                       placeholder="npm install"
                       className={inputCls}
                     />

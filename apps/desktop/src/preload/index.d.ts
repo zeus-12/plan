@@ -40,6 +40,7 @@ interface ElectronAPI {
   listRepos: (encoded: string) => Promise<DiscoveredRepo[]>;
 
   listWorktrees: (encoded: string) => Promise<WorktreeRecord[]>;
+  listAllWorktrees: () => Promise<WorktreeRecord[]>;
   createWorktree: (
     encoded: string,
     input: CreateWorktreeInput,

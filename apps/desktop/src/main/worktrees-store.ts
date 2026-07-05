@@ -101,6 +101,11 @@ export async function listWorktreeRecords(
   return data.worktrees.filter((w) => w.projectEncoded === projectEncoded);
 }
 
+export async function listAllWorktreeRecords(): Promise<WorktreeRecord[]> {
+  const data = await load();
+  return [...data.worktrees];
+}
+
 export async function getWorktreeRecord(
   id: string,
 ): Promise<WorktreeRecord | null> {
