@@ -330,7 +330,7 @@ function formatClockTime(ts: string): string {
 }
 
 /** How tall (px) a user bubble grows before it clips behind a "Show more". */
-const USER_MESSAGE_MAX_H = 260;
+const USER_MESSAGE_MAX_H = 390;
 
 /**
  * User-bubble body that clips past a max height and reveals a bottom-left
