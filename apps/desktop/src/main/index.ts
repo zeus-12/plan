@@ -16,6 +16,7 @@ import {
   listProjects,
   resolveProjectCwd,
   primeProjectCwd,
+  moveSessionTranscript,
   CLAUDE_PROJECTS_DIR,
 } from "./claude-projects";
 import {
@@ -509,6 +510,18 @@ function registerIpc() {
     async (_e, sessionId: string, name: string) => {
       await setSessionName(sessionId, name);
       return { ok: true };
+    },
+  );
+
+  ipcMain.handle(
+    "session:move",
+    async (
+      _e,
+      sessionId: string,
+      fromEncoded: string,
+      toEncoded: string,
+    ): Promise<void> => {
+      await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
     },
   );
 

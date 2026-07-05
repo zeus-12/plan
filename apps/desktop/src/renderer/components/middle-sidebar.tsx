@@ -63,6 +63,7 @@ interface Props {
   onSelectSession: (id: string) => void;
   onSetSessionArchived: (sessionId: string, archived: boolean) => void;
   onRenameSession: (sessionId: string, currentTitle: string) => void;
+  onMoveSession?: (sessionId: string, title: string) => void;
   onNewChat: () => void;
   sessionsLoading: boolean;
 
@@ -178,6 +179,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onSelectSession,
   onSetSessionArchived,
   onRenameSession,
+  onMoveSession,
   onNewChat,
   sessionsLoading,
   projectFiles,
@@ -407,6 +409,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               onSelect={onSelectSession}
               onSetArchived={onSetSessionArchived}
               onRename={onRenameSession}
+              onMoveSession={onMoveSession}
               onNewChat={onNewChat}
               loading={sessionsLoading}
             />

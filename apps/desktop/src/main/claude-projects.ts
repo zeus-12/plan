@@ -1,8 +1,38 @@
-import { readdir, stat, readFile } from "fs/promises";
+import { readdir, stat, readFile, mkdir, rename, access } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 
 export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+
+/**
+ * Physically relocate a session's transcript from one project dir to another —
+ * the on-disk half of "move chat to worktree". Claude keys a session's dir by
+ * the cwd it ran in, so moving the `<sessionId>.jsonl` into the target's
+ * encoded dir + resuming there (`claude --resume`) re-homes the conversation in
+ * the new worktree without copying any of the working-tree code (verified: new
+ * turns anchor to the launch cwd; prior turns keep their historical cwd).
+ *
+ * A brand-new chat may not have written a transcript yet — nothing to move, and
+ * `--session-id` in the new cwd will create it there — so a missing source is a
+ * no-op, not an error.
+ */
+export async function moveSessionTranscript(
+  sessionId: string,
+  fromEncoded: string,
+  toEncoded: string,
+): Promise<void> {
+  if (fromEncoded === toEncoded) return;
+  const src = join(CLAUDE_PROJECTS_DIR, fromEncoded, `${sessionId}.jsonl`);
+  try {
+    await access(src);
+  } catch {
+    return; // transcript not materialized yet — nothing to relocate
+  }
+  const destDir = join(CLAUDE_PROJECTS_DIR, toEncoded);
+  await mkdir(destDir, { recursive: true });
+  // Same filesystem (both under ~/.claude), so rename is atomic and cheap.
+  await rename(src, join(destDir, `${sessionId}.jsonl`));
+}
 
 export interface ProjectEntry {
   encoded: string;

@@ -64,11 +64,23 @@ const ProjectDefaultsModal = lazy(() =>
     default: m.ProjectDefaultsModal,
   })),
 );
+const MoveSessionModal = lazy(() =>
+  import("./components/move-session-modal").then((m) => ({
+    default: m.MoveSessionModal,
+  })),
+);
 import { useConfirm } from "./components/confirm-dialog";
 import { useWorktrees } from "./lib/use-worktrees";
 import { useAllWorktrees } from "./lib/use-all-worktrees";
 import { useTabSwitcher } from "./lib/use-tab-switcher";
-import { openProjectTab, makeChatTab } from "./lib/tabs-store";
+import {
+  openProjectTab,
+  closeProjectTab,
+  makeChatTab,
+  chatTabId,
+} from "./lib/tabs-store";
+import { forgetNewSession } from "./lib/new-session-ids";
+import { pushToast } from "./lib/toast-store";
 import {
   getMruScopeVersion,
   orderByMru,
@@ -254,6 +266,18 @@ function Shell() {
     setActiveWorktreeId(null);
     setShowDefaults(true);
   }, []);
+
+  // ── Move a chat session to another worktree ─────────────────────────
+  // The session being moved always lives at the currently-mounted encoded
+  // (effectiveProject.encoded); its project is `selectedEncoded`.
+  const [moveSession, setMoveSession] = useState<{
+    sessionId: string;
+    title: string;
+    fromEncoded: string;
+  } | null>(null);
+  // When true, the New-worktree modal is open to receive a moved session: on
+  // create we relocate the chat into it instead of just selecting it.
+  const [pendingMoveOnCreate, setPendingMoveOnCreate] = useState(false);
 
   const activeWorktree =
     worktrees.worktrees.find((w) => w.id === activeWorktreeId) ?? null;
@@ -448,6 +472,73 @@ function Shell() {
     });
   }, []);
 
+  const handleRequestMoveSession = useCallback(
+    (sessionId: string, title: string) => {
+      if (!effectiveProject) return;
+      setMoveSession({ sessionId, title, fromEncoded: effectiveProject.encoded });
+    },
+    [effectiveProject],
+  );
+
+  // Where a session can move: the project's other worktrees + its live copy,
+  // minus wherever the session currently lives.
+  const moveTargets = useMemo(() => {
+    if (!moveSession || !selected) return [];
+    const from = moveSession.fromEncoded;
+    const out: {
+      key: string;
+      label: string;
+      sub?: string;
+      encoded: string;
+      worktreeId: string | null;
+    }[] = [];
+    if (selected.encoded !== from) {
+      out.push({
+        key: "__live__",
+        label: projectShortName(selected),
+        sub: "working copy",
+        encoded: selected.encoded,
+        worktreeId: null,
+      });
+    }
+    for (const w of worktrees.worktrees) {
+      if (w.encoded === from) continue;
+      out.push({
+        key: w.id,
+        label: w.name,
+        sub: w.repos[0]?.branch ?? undefined,
+        encoded: w.encoded,
+        worktreeId: w.id,
+      });
+    }
+    return out;
+  }, [moveSession, selected, worktrees.worktrees]);
+
+  // Relocate the chat: kill the old pty, move the transcript on disk, re-home
+  // its tab, and follow it. `forgetNewSession` ensures it resumes (not
+  // re-creates) in the new cwd. Verified: new turns anchor to the new worktree.
+  const performMove = useCallback(
+    async (toEncoded: string, toWorktreeId: string | null) => {
+      const pending = moveSession;
+      if (!pending || !selectedEncoded) return;
+      const { sessionId, fromEncoded, title } = pending;
+      window.electronAPI.terminalKill(`chat:${fromEncoded}:${sessionId}`);
+      await window.electronAPI.moveSession(sessionId, fromEncoded, toEncoded);
+      forgetNewSession(sessionId);
+      closeProjectTab(fromEncoded, chatTabId(sessionId));
+      openProjectTab(toEncoded, makeChatTab(sessionId));
+      if (toWorktreeId) selectWorktree(selectedEncoded, toWorktreeId);
+      else selectProject(selectedEncoded);
+      setMoveSession(null);
+      pushToast({
+        title: `Moved "${title}"`,
+        description:
+          "The chat now lives in the target worktree. Code it wrote stays on the original branch.",
+      });
+    },
+    [moveSession, selectedEncoded, selectWorktree, selectProject],
+  );
+
   const projectIndex = Math.max(
     0,
     projectsByMru.findIndex((p) => p.encoded === selectedEncoded),
@@ -514,6 +605,7 @@ function Shell() {
                 buildCommand: undefined,
               })
             }
+            onMoveSession={handleRequestMoveSession}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -563,9 +655,34 @@ function Shell() {
             onCreate={async (input) => {
               const rec = await worktrees.create(input);
               await allWorktrees.refresh();
-              selectWorktreeLocal(rec.id);
+              // Opened from "Move to worktree → New worktree…": relocate the
+              // chat into the fresh worktree instead of just selecting it.
+              if (pendingMoveOnCreate && moveSession) {
+                await performMove(rec.encoded, rec.id);
+              } else {
+                selectWorktreeLocal(rec.id);
+              }
             }}
-            onClose={() => setShowNewWorktree(false)}
+            onClose={() => {
+              setShowNewWorktree(false);
+              // Abandon a move-in-progress if the user cancelled worktree creation.
+              if (pendingMoveOnCreate) {
+                setPendingMoveOnCreate(false);
+                setMoveSession(null);
+              }
+            }}
+          />
+        )}
+        {moveSession && !showNewWorktree && (
+          <MoveSessionModal
+            sessionTitle={moveSession.title}
+            targets={moveTargets}
+            onPick={(encoded, worktreeId) => void performMove(encoded, worktreeId)}
+            onNewWorktree={() => {
+              setPendingMoveOnCreate(true);
+              setShowNewWorktree(true);
+            }}
+            onClose={() => setMoveSession(null)}
           />
         )}
         {prWorktree && (

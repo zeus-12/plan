@@ -30,6 +30,11 @@ interface ElectronAPI {
     encoded: string,
     sessionId: string,
   ) => Promise<ParsedSession | null>;
+  moveSession: (
+    sessionId: string,
+    fromEncoded: string,
+    toEncoded: string,
+  ) => Promise<void>;
   getDiff: (encoded: string, subPath?: string) => Promise<GitDiffResult>;
   getFileContents: (
     encoded: string,

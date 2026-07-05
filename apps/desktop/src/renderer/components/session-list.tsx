@@ -34,6 +34,8 @@ interface Props {
   onSelect: (sessionId: string) => void;
   onSetArchived: (sessionId: string, archived: boolean) => void;
   onRename: (sessionId: string, currentTitle: string) => void;
+  /** Move a chat to another worktree (or the live copy). Omitted = no targets. */
+  onMoveSession?: (sessionId: string, title: string) => void;
   onNewChat: () => void;
   loading?: boolean;
 }
@@ -45,6 +47,7 @@ export function SessionList({
   onSelect,
   onSetArchived,
   onRename,
+  onMoveSession,
   onNewChat,
   loading,
 }: Props) {
@@ -131,6 +134,7 @@ export function SessionList({
                 onSelect={onSelect}
                 onRename={onRename}
                 onSetArchived={onSetArchived}
+                onMoveSession={onMoveSession}
               />
             ))}
           </div>
@@ -189,6 +193,7 @@ const SessionRow = memo(function SessionRow({
   onSelect,
   onRename,
   onSetArchived,
+  onMoveSession,
 }: {
   session: SessionListItem;
   isSelected: boolean;
@@ -196,6 +201,7 @@ const SessionRow = memo(function SessionRow({
   onSelect: (sessionId: string) => void;
   onRename: (sessionId: string, currentTitle: string) => void;
   onSetArchived: (sessionId: string, archived: boolean) => void;
+  onMoveSession?: (sessionId: string, title: string) => void;
 }) {
   const working = useTerminalWorking(termId);
   return (
@@ -234,6 +240,15 @@ const SessionRow = memo(function SessionRow({
         <ContextMenuItem onSelect={() => onRename(s.sessionId, s.title ?? "")}>
           Rename…
         </ContextMenuItem>
+        {onMoveSession && (
+          <ContextMenuItem
+            onSelect={() =>
+              onMoveSession(s.sessionId, s.title ?? "Untitled session")
+            }
+          >
+            Move to worktree…
+          </ContextMenuItem>
+        )}
         {s.archived ? (
           <ContextMenuItem onSelect={() => onSetArchived(s.sessionId, false)}>
             Unarchive

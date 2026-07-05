@@ -83,13 +83,7 @@ import {
   setCachedTranscripts,
 } from "../lib/session-cache";
 import { osNotify, pushToast } from "../lib/toast-store";
-
-/**
- * Sessions created from the UI this run (via `claude --session-id <uuid>`).
- * Their JSONL doesn't exist until the first exchange, so selection and the
- * first terminal spawn need to treat them specially.
- */
-const NEW_SESSION_IDS = new Set<string>();
+import { markNewSession, isNewSession } from "../lib/new-session-ids";
 
 // EXPERIMENTAL input-box/menu detection: when true, fires a toast + devtools log
 // on every detected state change so the heuristic's accuracy can be validated.
@@ -120,6 +114,11 @@ interface Props {
   /** Persist the Run / Build command lists to the project (parent-keyed defaults). */
   onSaveRun: (entries: CommandEntry[]) => Promise<void> | void;
   onSaveBuild: (entries: CommandEntry[]) => Promise<void> | void;
+  /**
+   * Move a chat session out of this view into another worktree (or the live
+   * copy). Omitted when there's nowhere to move it (project has no worktrees).
+   */
+  onMoveSession?: (sessionId: string, title: string) => void;
 }
 
 function WorkspaceHeader({
@@ -385,6 +384,7 @@ export function ProjectWorkspace({
   isWorktree,
   onSaveRun,
   onSaveBuild,
+  onMoveSession,
 }: Props) {
   // Auto-mode is an app-wide preference (Settings dialog); it applies to every
   // project's Claude sessions.
@@ -1469,7 +1469,7 @@ export function ProjectWorkspace({
         return (
           sessions.find((s) => s.sessionId === t.sessionId)?.title ??
           transcripts.get(t.sessionId)?.meta.title ??
-          (NEW_SESSION_IDS.has(t.sessionId) ? "New chat" : "Chat")
+          (isNewSession(t.sessionId) ? "New chat" : "Chat")
         );
       }
       return t.path.split("/").pop() || t.path;
@@ -1514,7 +1514,7 @@ export function ProjectWorkspace({
     // Brand-new chats start claude with a pre-chosen session id (nothing to
     // resume yet); existing ones resume their transcript.
     const flags = globalAutoMode ? " --permission-mode auto" : "";
-    return NEW_SESSION_IDS.has(sid)
+    return isNewSession(sid)
       ? `claude --session-id ${sid}${flags}`
       : `claude --resume ${sid}${flags}`;
   };
@@ -1669,7 +1669,7 @@ export function ProjectWorkspace({
   // appears with the first exchange.
   const handleNewChat = useCallback(() => {
     const sid = crypto.randomUUID();
-    NEW_SESSION_IDS.add(sid);
+    markNewSession(sid);
     openChatTab(sid);
     ensureOpened(`${chatPrefix}${sid}`);
     setTab("chat");
@@ -2683,7 +2683,7 @@ export function ProjectWorkspace({
                           annotations={chatAnnotations}
                           working={active ? chatWorking : false}
                           terminalReady={active ? chatTerminalReady : false}
-                          isNew={NEW_SESSION_IDS.has(t.sessionId)}
+                          isNew={isNewSession(t.sessionId)}
                           onAddAnnotation={addChatAnnotation}
                           onUpdateAnnotation={updateChatAnnotation}
                           onRemoveAnnotation={removeChatAnnotation}
@@ -2720,7 +2720,7 @@ export function ProjectWorkspace({
                       onSend={handleSendChat}
                       blocked={awaitingSelection}
                       onBlocked={() => revealChatTerminal(selectedSessionId)}
-                      autoFocus={NEW_SESSION_IDS.has(selectedSessionId)}
+                      autoFocus={isNewSession(selectedSessionId)}
                       onFocusChange={setChatInputFocused}
                       onAddToChatUndo={handleUndoAddToChat}
                     />
@@ -2824,6 +2824,7 @@ export function ProjectWorkspace({
           onSelectSession={handleSelectSession}
           onSetSessionArchived={handleSetSessionArchived}
           onRenameSession={handleRenameRequest}
+          onMoveSession={onMoveSession}
           onNewChat={handleNewChat}
           sessionsLoading={sessionsLoading}
           projectFiles={projectFiles}
