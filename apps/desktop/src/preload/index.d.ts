@@ -30,6 +30,11 @@ interface ElectronAPI {
     encoded: string,
     sessionId: string,
   ) => Promise<ParsedSession | null>;
+  moveSession: (
+    sessionId: string,
+    fromEncoded: string,
+    toEncoded: string,
+  ) => Promise<void>;
   getDiff: (encoded: string, subPath?: string) => Promise<GitDiffResult>;
   getFileContents: (
     encoded: string,
@@ -40,6 +45,7 @@ interface ElectronAPI {
   listRepos: (encoded: string) => Promise<DiscoveredRepo[]>;
 
   listWorktrees: (encoded: string) => Promise<WorktreeRecord[]>;
+  listAllWorktrees: () => Promise<WorktreeRecord[]>;
   createWorktree: (
     encoded: string,
     input: CreateWorktreeInput,

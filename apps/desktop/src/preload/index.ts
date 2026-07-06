@@ -9,6 +9,8 @@ const electronAPI = {
     ipcRenderer.invoke("projects:listSessions", encoded),
   readSession: (encoded: string, sessionId: string) =>
     ipcRenderer.invoke("session:read", encoded, sessionId),
+  moveSession: (sessionId: string, fromEncoded: string, toEncoded: string) =>
+    ipcRenderer.invoke("session:move", sessionId, fromEncoded, toEncoded),
   getDiff: (encoded: string, subPath: string = "") =>
     ipcRenderer.invoke("project:diff", encoded, subPath),
   getFileContents: (
@@ -28,6 +30,7 @@ const electronAPI = {
 
   listWorktrees: (encoded: string) =>
     ipcRenderer.invoke("worktrees:list", encoded),
+  listAllWorktrees: () => ipcRenderer.invoke("worktrees:listAll"),
   createWorktree: (
     encoded: string,
     input: {

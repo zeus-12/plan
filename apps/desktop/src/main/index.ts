@@ -16,6 +16,7 @@ import {
   listProjects,
   resolveProjectCwd,
   primeProjectCwd,
+  moveSessionTranscript,
   CLAUDE_PROJECTS_DIR,
 } from "./claude-projects";
 import {
@@ -96,6 +97,7 @@ import {
   createWorktree,
   removeWorktree,
   listWorktrees,
+  listAllWorktrees,
   createWorktreePr,
   addReposToWorktree,
   type CreateWorktreeInput,
@@ -512,6 +514,18 @@ function registerIpc() {
   );
 
   ipcMain.handle(
+    "session:move",
+    async (
+      _e,
+      sessionId: string,
+      fromEncoded: string,
+      toEncoded: string,
+    ): Promise<void> => {
+      await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
+    },
+  );
+
+  ipcMain.handle(
     "session:read",
     async (
       _e,
@@ -611,6 +625,7 @@ function registerIpc() {
   ipcMain.handle("worktrees:list", async (_e, encoded: string) =>
     listWorktrees(encoded),
   );
+  ipcMain.handle("worktrees:listAll", async () => listAllWorktrees());
   ipcMain.handle(
     "worktrees:create",
     async (_e, encoded: string, input: CreateWorktreeInput) =>

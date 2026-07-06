@@ -28,6 +28,7 @@ import {
   listWorktreeRecords,
   updateWorktreeRecord,
   worktreeNameTaken,
+  listAllWorktreeRecords,
   type WorktreeRecord,
   type WorktreeRepoRecord,
 } from "./worktrees-store";
@@ -477,6 +478,17 @@ export async function listWorktrees(
 ): Promise<WorktreeRecord[]> {
   const records = await listWorktreeRecords(encoded);
   // Re-seed the cwd cache after a restart so content ops resolve immediately.
+  for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
+  return records;
+}
+
+/**
+ * Every worktree across all projects, for the merged project sidebar (which
+ * nests each project's worktrees beneath it). Primes the cwd cache for all so
+ * their content/git/pty ops resolve immediately after a restart.
+ */
+export async function listAllWorktrees(): Promise<WorktreeRecord[]> {
+  const records = await listAllWorktreeRecords();
   for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
   return records;
 }

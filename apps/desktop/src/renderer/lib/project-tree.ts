@@ -1,4 +1,8 @@
-import type { DiscoveredRepo, ProjectEntry } from "../../shared-types";
+import type {
+  DiscoveredRepo,
+  ProjectEntry,
+  WorktreeRecord,
+} from "../../shared-types";
 
 /**
  * A "primary repo" for a project = the first repo discovered there. If the
@@ -100,23 +104,53 @@ function nodeMtime(n: ProjectNode): number {
 
 export type VisibleItem =
   | { kind: "group-header"; node: ProjectGroupNode; expanded: boolean }
-  | { kind: "leaf"; project: ProjectEntry; depth: number };
+  | {
+      kind: "project";
+      project: ProjectEntry;
+      depth: number;
+      worktrees: WorktreeRecord[];
+      expanded: boolean;
+    }
+  | {
+      kind: "worktree";
+      worktree: WorktreeRecord;
+      project: ProjectEntry;
+      depth: number;
+    };
 
+/**
+ * Flatten the tree into rows for the virtualizer. Each project row carries its
+ * worktrees; when a project is expanded (its `encoded` is in `expanded`) the
+ * worktrees follow it one level deeper. Group headers and project rows share
+ * the one `expanded` set — their keys (a `cd::` prefix vs an encoded cwd) never
+ * collide.
+ */
 export function flattenTree(
   tree: ProjectNode[],
   expanded: Set<string>,
+  worktreesByProject: Map<string, WorktreeRecord[]>,
 ): VisibleItem[] {
   const out: VisibleItem[] = [];
+
+  const pushProject = (project: ProjectEntry, depth: number) => {
+    const worktrees = worktreesByProject.get(project.encoded) ?? [];
+    const isOpen = expanded.has(project.encoded);
+    out.push({ kind: "project", project, depth, worktrees, expanded: isOpen });
+    if (isOpen) {
+      for (const w of worktrees) {
+        out.push({ kind: "worktree", worktree: w, project, depth: depth + 1 });
+      }
+    }
+  };
+
   for (const n of tree) {
     if (n.kind === "project") {
-      out.push({ kind: "leaf", project: n.project, depth: 0 });
+      pushProject(n.project, 0);
     } else {
       const isOpen = expanded.has(n.key);
       out.push({ kind: "group-header", node: n, expanded: isOpen });
       if (isOpen) {
-        for (const child of n.children) {
-          out.push({ kind: "leaf", project: child, depth: 1 });
-        }
+        for (const child of n.children) pushProject(child, 1);
       }
     }
   }

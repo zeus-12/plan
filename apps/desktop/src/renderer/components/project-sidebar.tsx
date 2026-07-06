@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  ChevronRight,
+  GitBranch,
+  Plus,
+  Settings as SettingsGear,
+} from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import {
   Sidebar,
@@ -32,7 +38,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@plan/shared/components/ui/alert-dialog";
-import type { ProjectEntry } from "../../shared-types";
+import type {
+  DiscoveredRepo,
+  ProjectEntry,
+  WorktreeRecord,
+} from "../../shared-types";
 import { relativeTime } from "../lib/time";
 import {
   buildProjectTree,
@@ -42,9 +52,24 @@ import {
 
 interface Props {
   projects: ProjectEntry[];
-  reposByProject: Map<string, import("../../shared-types").DiscoveredRepo[]>;
-  selected: string | null;
-  onSelect: (encoded: string) => void;
+  reposByProject: Map<string, DiscoveredRepo[]>;
+  /** Each project's worktrees, keyed by the project's encoded cwd. */
+  worktreesByProject: Map<string, WorktreeRecord[]>;
+  /** The selected project's encoded cwd (the live working copy's project). */
+  selectedProject: string | null;
+  /** The active worktree within the selected project; null = live copy. */
+  activeWorktreeId: string | null;
+  /** Select a project's live working copy. */
+  onSelectProject: (encoded: string) => void;
+  /** Select a worktree within a project. */
+  onSelectWorktree: (projectEncoded: string, worktreeId: string) => void;
+  /** Create a new worktree in the given project. */
+  onNewWorktree: (projectEncoded: string) => void;
+  /** Open the worktree-creation defaults for the given project. */
+  onOpenProjectDefaults: (projectEncoded: string) => void;
+  onRemoveWorktree: (worktreeId: string) => void;
+  onCreatePr: (worktreeId: string) => void;
+  onAddRepos: (worktreeId: string) => void;
   onAddProject: () => void;
   onSetArchived: (encoded: string, archived: boolean) => Promise<void> | void;
   onOpenDashboard: () => void;
@@ -54,7 +79,12 @@ interface Props {
 }
 
 const LEAF_HEIGHT = 50;
+const WORKTREE_HEIGHT = 34;
 const GROUP_HEIGHT = 36;
+// Empty space above each top-level entry (project / group header) so one
+// project's block — itself plus its nested worktrees — reads as separate from
+// the next. Rendered as transparent padding above the row, never highlighted.
+const GROUP_GAP = 6;
 const EXPANDED_STORAGE = "plan.projectSidebar.expandedGroups";
 
 function loadExpanded(): Set<string> {
@@ -193,8 +223,16 @@ function TrashIcon() {
 export function ProjectSidebar({
   projects,
   reposByProject,
-  selected,
-  onSelect,
+  worktreesByProject,
+  selectedProject,
+  activeWorktreeId,
+  onSelectProject,
+  onSelectWorktree,
+  onNewWorktree,
+  onOpenProjectDefaults,
+  onRemoveWorktree,
+  onCreatePr,
+  onAddRepos,
   onAddProject,
   onSetArchived,
   onOpenDashboard,
@@ -202,6 +240,7 @@ export function ProjectSidebar({
   onOpenClaudeConfig,
 }: Props) {
   const sidebar = useSidebar();
+  const selected = selectedProject;
   // Pick a representative branch per project: first repo's branch.
   // (Multi-repo projects don't worktree-group, so this is the right label.)
   const branches = useMemo(() => {
@@ -238,25 +277,28 @@ export function ProjectSidebar({
     [active, reposByProject],
   );
 
-  // Auto-expand the group containing the selected project so it's visible.
+  // Auto-expand so the active selection is visible: the group containing the
+  // selected project, and the project itself when a worktree of it is active.
   useEffect(() => {
     if (!selected) return;
+    const toAdd: string[] = [];
+    if (activeWorktreeId && !expanded.has(selected)) toAdd.push(selected);
     for (const n of tree) {
       if (n.kind !== "group") continue;
       if (
         n.children.some((c) => c.encoded === selected) &&
         !expanded.has(n.key)
-      ) {
-        setExpanded((prev) => {
-          const next = new Set(prev);
-          next.add(n.key);
-          persistExpanded(next);
-          return next;
-        });
-        return;
-      }
+      )
+        toAdd.push(n.key);
     }
-  }, [selected, tree, expanded]);
+    if (toAdd.length === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const k of toAdd) next.add(k);
+      persistExpanded(next);
+      return next;
+    });
+  }, [selected, activeWorktreeId, tree, expanded]);
 
   // Leave the archived view automatically once it's empty (e.g. last unarchive).
   useEffect(() => {
@@ -265,10 +307,16 @@ export function ProjectSidebar({
 
   const rows: Row[] = useMemo(() => {
     if (archivedView) {
-      return archived.map((p) => ({ kind: "leaf", project: p, depth: 0 }));
+      return archived.map((p) => ({
+        kind: "project" as const,
+        project: p,
+        depth: 0,
+        worktrees: [],
+        expanded: false,
+      }));
     }
-    return flattenTree(tree, expanded);
-  }, [archivedView, archived, tree, expanded]);
+    return flattenTree(tree, expanded, worktreesByProject);
+  }, [archivedView, archived, tree, expanded, worktreesByProject]);
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
@@ -280,14 +328,24 @@ export function ProjectSidebar({
     });
   };
 
+  // A top-level entry (a group header, or a depth-0 project) gets a gap above
+  // it — except the very first row, which sits flush to the top.
+  const gapFor = (i: number, r: Row) =>
+    i > 0 &&
+    (r.kind === "group-header" || (r.kind === "project" && r.depth === 0))
+      ? GROUP_GAP
+      : 0;
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (i) => {
       const r = rows[i];
       if (!r) return LEAF_HEIGHT;
-      if (r.kind === "group-header") return GROUP_HEIGHT;
-      return LEAF_HEIGHT;
+      const gap = gapFor(i, r);
+      if (r.kind === "group-header") return GROUP_HEIGHT + gap;
+      if (r.kind === "worktree") return WORKTREE_HEIGHT;
+      return LEAF_HEIGHT + gap;
     },
     overscan: 8,
   });
@@ -419,79 +477,261 @@ export function ProjectSidebar({
                 const row = rows[vi.index];
                 const transform = `translateY(${vi.start}px)`;
 
+                const gap = gapFor(vi.index, row);
+
                 if (row.kind === "group-header") {
                   return (
-                    <button
+                    <div
                       key={row.node.key}
-                      onClick={() => toggleGroup(row.node.key)}
-                      className="absolute left-0 top-0 flex w-full items-center gap-2 px-3 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
-                      style={{ transform, height: GROUP_HEIGHT }}
+                      className="absolute left-0 top-0 w-full"
+                      style={{
+                        transform,
+                        height: GROUP_HEIGHT + gap,
+                        paddingTop: gap,
+                      }}
                     >
-                      <span
-                        className={cn(
-                          "inline-block text-[9px] text-[var(--text-tertiary)] transition-transform",
-                          row.expanded && "rotate-90",
-                        )}
+                      <button
+                        onClick={() => toggleGroup(row.node.key)}
+                        className="flex h-full w-full items-center gap-1.5 px-2.5 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
                       >
-                        ▶
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">
-                        {row.node.name}
-                      </span>
-                      <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                        {row.node.children.length}
-                      </span>
-                    </button>
+                        <ChevronRight
+                          size={14}
+                          className={cn(
+                            "shrink-0 text-[var(--text-tertiary)] transition-transform duration-150",
+                            row.expanded && "rotate-90",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {row.node.name}
+                        </span>
+                        <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                          {row.node.children.length}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (row.kind === "worktree") {
+                  const w = row.worktree;
+                  const wp = row.project;
+                  const isActive =
+                    wp.encoded === selected && w.id === activeWorktreeId;
+                  const branch = w.repos[0]?.branch ?? "";
+                  const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
+                  const canAddRepos = w.repos.length < repoCount;
+                  // The branch usually equals the worktree name (the name
+                  // slugifies into it), so only surface it when it diverges.
+                  // Same for the repo count — one line unless there's more to say.
+                  const sub = [
+                    branch && branch !== w.name ? branch : "",
+                    w.repos.length > 1 ? `${w.repos.length} repos` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  // Vertical guide tying worktrees to their parent project —
+                  // aligned to the parent's chevron centre. Consecutive worktree
+                  // rows draw contiguous segments, forming one connecting line.
+                  const guideX = (row.depth - 1 > 0 ? 18 : 6) + 10;
+                  return (
+                    <ContextMenu key={`wt:${w.id}`}>
+                      <ContextMenuTrigger asChild>
+                        <div
+                          className={cn(
+                            "group absolute left-0 top-0 flex w-full items-center gap-2 pr-2 transition-colors",
+                            isActive
+                              ? "bg-[var(--bg-surface-hover)]"
+                              : "hover:bg-[var(--bg-surface-hover)]",
+                          )}
+                          style={{
+                            transform,
+                            height: WORKTREE_HEIGHT,
+                            paddingLeft: guideX + 8,
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute bottom-0 top-0 w-px bg-[var(--border)]"
+                            style={{ left: guideX }}
+                          />
+                          <button
+                            onClick={() => onSelectWorktree(wp.encoded, w.id)}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            <GitBranch
+                              size={13}
+                              className="shrink-0 text-[var(--text-tertiary)]"
+                            />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span
+                                className={cn(
+                                  "truncate font-[family-name:var(--font-mono)] text-[13px]",
+                                  isActive
+                                    ? "text-[var(--text)]"
+                                    : "text-[var(--text-secondary)]",
+                                )}
+                              >
+                                {w.name}
+                              </span>
+                              {sub && (
+                                <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                  {sub}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem onSelect={() => onCreatePr(w.id)}>
+                          Create pull request…
+                        </ContextMenuItem>
+                        {canAddRepos && (
+                          <ContextMenuItem onSelect={() => onAddRepos(w.id)}>
+                            Add repos…
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem
+                          destructive
+                          onSelect={() => onRemoveWorktree(w.id)}
+                        >
+                          Remove worktree…
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 }
 
                 const p = row.project;
-                const isSelected = p.encoded === selected;
+                const isLiveActive =
+                  p.encoded === selected && activeWorktreeId === null;
                 const shortName =
                   p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
+                const branch = branches.get(p.encoded);
+                const hasWorktrees = row.worktrees.length > 0;
+                const showCount = !row.expanded && hasWorktrees;
                 return (
                   <ContextMenu key={p.encoded}>
                     <ContextMenuTrigger asChild>
-                      <button
-                        onClick={() => onSelect(p.encoded)}
-                        title={p.cwd}
-                        className={cn(
-                          "absolute left-0 top-0 flex w-full flex-col justify-center gap-0.5 border-l-2 pr-3 text-left transition-colors",
-                          p.archived && "opacity-60",
-                          isSelected
-                            ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                            : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
-                        )}
+                      <div
+                        className="absolute left-0 top-0 w-full"
                         style={{
                           transform,
-                          height: LEAF_HEIGHT,
-                          paddingLeft: row.depth > 0 ? 28 : 12,
+                          height: LEAF_HEIGHT + gap,
+                          paddingTop: gap,
                         }}
                       >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-xs",
-                              isSelected
-                                ? "text-[var(--text)]"
-                                : "text-[var(--text-secondary)]",
-                            )}
-                          >
-                            {shortName}
-                          </span>
-                          {branches.get(p.encoded) && (
-                            <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] max-w-[80px]">
-                              {branches.get(p.encoded)}
-                            </span>
+                        <div
+                          className={cn(
+                            "group flex h-full items-center pr-2.5 transition-colors",
+                            p.archived && "opacity-60",
+                            isLiveActive
+                              ? "bg-[var(--bg-surface-hover)]"
+                              : "hover:bg-[var(--bg-surface-hover)]",
                           )}
+                          style={{
+                            paddingLeft: row.depth > 0 ? 18 : 6,
+                          }}
+                        >
+                          {hasWorktrees ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleGroup(p.encoded);
+                              }}
+                              aria-label={row.expanded ? "Collapse" : "Expand"}
+                              className="flex h-full w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] transition-colors hover:text-[var(--text)]"
+                            >
+                              <ChevronRight
+                                size={14}
+                                className={cn(
+                                  "transition-transform duration-150",
+                                  row.expanded && "rotate-90",
+                                )}
+                              />
+                            </button>
+                          ) : (
+                            <span className="w-5 shrink-0" />
+                          )}
+                          <button
+                            onClick={() => onSelectProject(p.encoded)}
+                            className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pr-2 text-left"
+                          >
+                            <span
+                              className={cn(
+                                "truncate font-[family-name:var(--font-mono)] text-[13px]",
+                                isLiveActive
+                                  ? "text-[var(--text)]"
+                                  : "text-[var(--text-secondary)]",
+                              )}
+                            >
+                              {shortName}
+                            </span>
+                            <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                              {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
+                              {p.cwd}
+                            </span>
+                          </button>
+                          {/* Right slot: metadata at rest, actions on hover. The
+                            actions overlay the metadata (absolute), so the row
+                            never reflows and they never collide with the label. */}
+                          <div className="relative flex min-w-[3.25rem] shrink-0 items-center justify-end">
+                            <div
+                              className={cn(
+                                "flex items-center gap-1.5 transition-opacity",
+                                !p.archived && "group-hover:opacity-0",
+                              )}
+                            >
+                              {showCount && (
+                                <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full border border-[var(--border)] px-1 font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
+                                  {row.worktrees.length}
+                                </span>
+                              )}
+                              {branch && (
+                                <span className="max-w-[92px] truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                  {branch}
+                                </span>
+                              )}
+                            </div>
+                            {!p.archived && (
+                              <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                                <button
+                                  onClick={() =>
+                                    onOpenProjectDefaults(p.encoded)
+                                  }
+                                  title="Project defaults"
+                                  className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                                >
+                                  <SettingsGear size={13} />
+                                </button>
+                                <button
+                                  onClick={() => onNewWorktree(p.encoded)}
+                                  title="New worktree"
+                                  className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                                >
+                                  <Plus size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                          {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
-                          {p.cwd}
-                        </span>
-                      </button>
+                      </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
+                      {!p.archived && (
+                        <>
+                          <ContextMenuItem
+                            onSelect={() => onNewWorktree(p.encoded)}
+                          >
+                            New worktree…
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => onOpenProjectDefaults(p.encoded)}
+                          >
+                            Project defaults…
+                          </ContextMenuItem>
+                        </>
+                      )}
                       {p.archived ? (
                         <ContextMenuItem
                           onSelect={() =>
