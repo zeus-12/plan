@@ -99,7 +99,7 @@ export function MoveSessionModal({
 
         <div className="mt-3 border-t border-[var(--border)] pt-2 text-[11px] text-[var(--text-tertiary)]">
           Only the conversation moves. Any code it already wrote stays on the
-          current branch — stash it manually if you need it in the worktree.
+          current branch.
         </div>
 
         <div className="mt-3 flex justify-end">
