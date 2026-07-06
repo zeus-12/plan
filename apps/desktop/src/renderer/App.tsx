@@ -359,36 +359,6 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Ctrl+1 cycles the live working copy + this project's worktrees, reusing the
-  // same modifier-held switcher as projects (Ctrl+`) and sessions (Ctrl+Tab).
-  const worktreeItems = useMemo(
-    () => [
-      {
-        key: "__live__",
-        id: null as string | null,
-        label: selected ? projectShortName(selected) : "working copy",
-      },
-      ...worktrees.worktrees.map((w) => ({
-        key: w.id,
-        id: w.id as string | null,
-        label: w.name,
-      })),
-    ],
-    [selected, worktrees.worktrees],
-  );
-  const worktreeIndex = Math.max(
-    0,
-    worktreeItems.findIndex((it) => it.id === activeWorktreeId),
-  );
-  const worktreeSwitcher = useTabSwitcher({
-    id: "worktrees",
-    enabled: !!selected && worktreeItems.length > 1,
-    triggerCode: "Digit1",
-    items: worktreeItems,
-    currentIndex: worktreeIndex,
-    onCommit: (it) => selectWorktreeLocal(it.id),
-  });
-
   // Sessions dashboard: a control-center for every live Claude pty.
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -544,17 +514,60 @@ function Shell() {
     [moveSession, selectedEncoded, selectWorktree, selectProject],
   );
 
-  const projectIndex = Math.max(
+  // Ctrl+` cycles EVERYTHING you can navigate to: every project's working copy
+  // plus each of its worktrees, in one flat list. Projects stay MRU-ordered
+  // (recent first) and each project's worktrees nest directly beneath it, so the
+  // switcher reads like a keyboard-driven version of the sidebar tree. A single
+  // Ctrl+` reaches any destination — there's no separate worktree shortcut.
+  const switchTargets = useMemo(() => {
+    const out: {
+      key: string;
+      projectEncoded: string;
+      worktreeId: string | null;
+      label: string;
+      sub?: string;
+      worktree: boolean;
+    }[] = [];
+    for (const p of projectsByMru) {
+      out.push({
+        key: p.encoded,
+        projectEncoded: p.encoded,
+        worktreeId: null,
+        label: projectShortName(p),
+        sub: p.cwd,
+        worktree: false,
+      });
+      for (const w of allWorktrees.byProject.get(p.encoded) ?? []) {
+        out.push({
+          key: w.id,
+          projectEncoded: p.encoded,
+          worktreeId: w.id,
+          label: w.name,
+          sub: w.repos[0]?.branch ?? "worktree",
+          worktree: true,
+        });
+      }
+    }
+    return out;
+  }, [projectsByMru, allWorktrees.byProject]);
+  const currentTargetIndex = Math.max(
     0,
-    projectsByMru.findIndex((p) => p.encoded === selectedEncoded),
+    switchTargets.findIndex(
+      (t) =>
+        t.projectEncoded === selectedEncoded &&
+        t.worktreeId === activeWorktreeId,
+    ),
   );
   const projectSwitcher = useTabSwitcher({
     id: "projects",
-    enabled: projectsByMru.length > 1,
+    enabled: switchTargets.length > 1,
     triggerCode: "Backquote",
-    items: projectsByMru,
-    currentIndex: projectIndex,
-    onCommit: (p) => selectProject(p.encoded),
+    items: switchTargets,
+    currentIndex: currentTargetIndex,
+    onCommit: (t) =>
+      t.worktreeId
+        ? selectWorktree(t.projectEncoded, t.worktreeId)
+        : selectProject(t.projectEncoded),
   });
 
   return (
@@ -720,23 +733,14 @@ function Shell() {
       </Suspense>
       {projectSwitcher.active && (
         <SwitcherOverlay
-          title="Projects"
+          title="Switch to"
           index={projectSwitcher.index}
-          items={projectsByMru.map((p) => ({
-            key: p.encoded,
-            label: projectShortName(p),
-            sub: p.cwd,
-          }))}
-        />
-      )}
-      {worktreeSwitcher.active && (
-        <SwitcherOverlay
-          title="Worktrees"
-          index={worktreeSwitcher.index}
-          items={worktreeItems.map((it) => ({
-            key: it.key,
-            label: it.label,
-            sub: it.id ? "worktree" : "working copy",
+          items={switchTargets.map((t) => ({
+            key: t.key,
+            label: t.label,
+            sub: t.sub,
+            indent: t.worktree ? 1 : 0,
+            worktree: t.worktree,
           }))}
         />
       )}

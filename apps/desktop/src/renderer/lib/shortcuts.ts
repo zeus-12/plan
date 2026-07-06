@@ -96,18 +96,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       },
       {
         id: "cycleProjects",
-        label: "Cycle projects (next / prev)",
+        label: "Cycle projects & worktrees (next / prev)",
         chords: [
           { mods: ["ctrl"], key: "`" },
           { mods: ["ctrl", "shift"], key: "`" },
-        ],
-      },
-      {
-        id: "cycleWorktrees",
-        label: "Cycle worktrees (next / prev)",
-        chords: [
-          { mods: ["ctrl"], key: "1" },
-          { mods: ["ctrl", "shift"], key: "1" },
         ],
       },
     ],

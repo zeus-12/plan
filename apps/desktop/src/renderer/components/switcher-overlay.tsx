@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { GitBranch } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 
 export interface SwitcherItem {
@@ -9,6 +10,10 @@ export interface SwitcherItem {
   divider?: boolean;
   /** Caption shown in the separator, e.g. "Recent chats". */
   dividerLabel?: string;
+  /** Nesting depth — indents the row (e.g. worktrees under their project). */
+  indent?: number;
+  /** A worktree row gets a branch glyph + connector, mirroring the sidebar. */
+  worktree?: boolean;
 }
 
 interface Props {
@@ -56,7 +61,22 @@ export function SwitcherOverlay({ title, items, index }: Props) {
                     "flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
                     active ? "bg-[var(--accent)]" : "bg-transparent",
                   )}
+                  style={
+                    item.indent
+                      ? { marginLeft: `${item.indent * 16}px` }
+                      : undefined
+                  }
                 >
+                  {item.worktree && (
+                    <GitBranch
+                      className={cn(
+                        "size-3 shrink-0",
+                        active
+                          ? "text-[var(--bg)] opacity-70"
+                          : "text-[var(--text-tertiary)]",
+                      )}
+                    />
+                  )}
                   <div className="flex min-w-0 flex-col">
                     <span
                       className={cn(

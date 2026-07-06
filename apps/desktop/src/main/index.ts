@@ -149,23 +149,12 @@ function registerSwitcherShortcuts() {
   const d = globalShortcut.register("Control+~", () =>
     sendSwitcherCycle("Backquote", true),
   );
-  // Worktrees (Ctrl+1). Chromium reserves Ctrl+1‑9 for tab navigation and
-  // swallows them before the page's keydown, so — like Tab/backtick — we tap it
-  // at the OS level and forward. Ctrl+Shift+1 reverses.
-  const e = globalShortcut.register("Control+1", () =>
-    sendSwitcherCycle("Digit1", false),
-  );
-  const f = globalShortcut.register("Control+Shift+1", () =>
-    sendSwitcherCycle("Digit1", true),
-  );
-  switcherRegistered = a || b || c || d || e || f;
+  switcherRegistered = a || b || c || d;
   console.log("[switcher] globalShortcut registered:", {
     ctrlTab: a,
     ctrlShiftTab: b,
     ctrlBacktick: c,
     ctrlTilde: d,
-    ctrl1: e,
-    ctrlShift1: f,
   });
 }
 
@@ -175,8 +164,6 @@ function unregisterSwitcherShortcuts() {
   globalShortcut.unregister("Control+Shift+Tab");
   globalShortcut.unregister("Control+`");
   globalShortcut.unregister("Control+~");
-  globalShortcut.unregister("Control+1");
-  globalShortcut.unregister("Control+Shift+1");
   switcherRegistered = false;
 }
 

@@ -234,7 +234,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   };
 
   // ⌘1‑⌘5 → swap tabs (match the visual order); ⌘⇧F → Search (VS Code binding).
-  // Cmd only (not Ctrl): Ctrl+digit is reserved for the worktree switcher.
+  // Cmd only, not Ctrl — Ctrl+digit stays free of app bindings.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey) return;

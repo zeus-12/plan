@@ -9,8 +9,8 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
  * for that tap. Escape cancels; losing window focus cancels too (so it can't
  * get stuck).
  *
- * Several channels coexist — content-pane tabs (Ctrl+Tab), projects (Ctrl+`)
- * and worktrees (Ctrl+1) — but there
+ * Several channels coexist — content-pane tabs (Ctrl+Tab) and the unified
+ * projects+worktrees switcher (Ctrl+`) — but there
  * is a SINGLE window listener and a SINGLE active-state, so there's no
  * effect-ordering race or stuck-lock between component instances: on the
  * opening keystroke we pick the enabled channel whose trigger key matches.
@@ -98,13 +98,9 @@ function onKeyDown(e: KeyboardEvent) {
   // both deliver the same keystroke.
   // Open/step whichever registered channel claims this key code (Tab, Backquote,
   // Backslash, …). Channel-driven so adding a switcher needs no edit here.
-  // Ctrl drives every channel; Cmd also drives non-Tab channels (e.g. the
-  // Backquote project switcher) since that's the key macOS users reach for —
-  // Tab stays Ctrl-only because Cmd+Tab is the macOS app switcher.
-  // Ctrl drives every channel. Cmd also drives letter/backtick channels (e.g.
-  // the project switcher) since that's the macOS-natural key — but NOT Tab
-  // (Cmd+Tab is the OS app switcher) and NOT digits (Cmd+1‑4 switch sidebar
-  // tabs), so the worktree switcher stays Ctrl-only.
+  // Ctrl drives every channel. Cmd also drives the backtick project+worktree
+  // switcher since that's the macOS-natural key — but NOT Tab (Cmd+Tab is the OS
+  // app switcher) and NOT digits (Cmd+1‑4 switch sidebar tabs).
   const mod =
     e.ctrlKey || (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
   if (mod && !e.altKey && channels.some((c) => c.triggerCode === e.code)) {
