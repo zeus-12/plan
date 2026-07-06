@@ -96,8 +96,14 @@ import {
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
-// Stable getSnapshot for useSyncExternalStore — reads only the "projects" scope.
-const getProjectsMruVersion = () => getMruScopeVersion("projects");
+// The switcher's MRU scope: one flat recency list spanning every navigable
+// destination — each project's working copy AND every worktree. A destination's
+// id is `p:<encoded>` (working copy) or `w:<worktreeId>` (worktree).
+const SWITCH_MRU_SCOPE = "switch";
+const switchTargetId = (encoded: string, worktreeId: string | null) =>
+  worktreeId ? `w:${worktreeId}` : `p:${encoded}`;
+// Stable getSnapshot for useSyncExternalStore — reads only the switcher scope.
+const getSwitchMruVersion = () => getMruScopeVersion(SWITCH_MRU_SCOPE);
 
 function projectShortName(p: ProjectEntry): string {
   return p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
@@ -405,30 +411,27 @@ function Shell() {
     });
   }, [navigateToSession]);
 
-  // Ctrl+` : cycle projects in a modal, commit on Ctrl-release (Shift reverses).
-  // Ordered most-recently-USED first (Alt-Tab style) so the current project
-  // sits at top and the first tap lands on the one you were last in. Before any
-  // project has been used this session it falls back to mtime recency. Archived
-  // projects are excluded — you can't switch to one you've hidden.
+  // Archived projects are excluded from the switcher — you can't switch to one
+  // you've hidden. mtime desc is only the fallback order, before anything has
+  // been used this session; MRU (below) takes over as you navigate.
   const activeProjects = useMemo(
     () =>
       projects.filter((p) => !p.archived).sort((a, b) => b.mtimeMs - a.mtimeMs),
     [projects],
   );
-  // Subscribe to the "projects" scope only — a content-tab or chat switch in
-  // the workspace bumps a different scope and must not re-render App/sidebar.
-  const projectsMruVersion = useSyncExternalStore(
+  // Subscribe to the switcher scope only — a content-tab or chat switch in the
+  // workspace bumps a different scope and must not re-render App/sidebar.
+  const switchMruVersion = useSyncExternalStore(
     subscribeMru,
-    getProjectsMruVersion,
-    getProjectsMruVersion,
+    getSwitchMruVersion,
+    getSwitchMruVersion,
   );
-  const projectsByMru = useMemo(
-    () => orderByMru("projects", activeProjects, (p) => p.encoded),
-    [activeProjects, projectsMruVersion],
-  );
+  // Record the destination you land on — working copy OR worktree — so both
+  // float up the switcher by recency, Alt-Tab style.
   useEffect(() => {
-    if (selectedEncoded) recordUse("projects", selectedEncoded);
-  }, [selectedEncoded]);
+    if (selectedEncoded)
+      recordUse(SWITCH_MRU_SCOPE, switchTargetId(selectedEncoded, activeWorktreeId));
+  }, [selectedEncoded, activeWorktreeId]);
 
   // Switching projects remounts the whole workspace (keyed by encoded) and
   // mounts the target's tabs — a big file's viewer, terminals, etc. Mark it a
@@ -515,12 +518,14 @@ function Shell() {
   );
 
   // Ctrl+` cycles EVERYTHING you can navigate to: every project's working copy
-  // plus each of its worktrees, in one flat list. Projects stay MRU-ordered
-  // (recent first) and each project's worktrees nest directly beneath it, so the
-  // switcher reads like a keyboard-driven version of the sidebar tree. A single
-  // Ctrl+` reaches any destination — there's no separate worktree shortcut.
+  // plus every worktree, in ONE flat most-recently-used list. Any destination
+  // you visit floats to the top, so a single tap-release returns you to where
+  // you just were (Alt-Tab), whether that's a project or a worktree. The branch
+  // glyph + parent-project subtitle keep worktrees identifiable once recency has
+  // detached them from their project. A single Ctrl+` reaches anything.
   const switchTargets = useMemo(() => {
     const out: {
+      id: string;
       key: string;
       projectEncoded: string;
       worktreeId: string | null;
@@ -528,8 +533,9 @@ function Shell() {
       sub?: string;
       worktree: boolean;
     }[] = [];
-    for (const p of projectsByMru) {
+    for (const p of activeProjects) {
       out.push({
+        id: switchTargetId(p.encoded, null),
         key: p.encoded,
         projectEncoded: p.encoded,
         worktreeId: null,
@@ -539,17 +545,20 @@ function Shell() {
       });
       for (const w of allWorktrees.byProject.get(p.encoded) ?? []) {
         out.push({
+          id: switchTargetId(p.encoded, w.id),
           key: w.id,
           projectEncoded: p.encoded,
           worktreeId: w.id,
           label: w.name,
-          sub: w.repos[0]?.branch ?? "worktree",
+          sub: projectShortName(p),
           worktree: true,
         });
       }
     }
-    return out;
-  }, [projectsByMru, allWorktrees.byProject]);
+    return orderByMru(SWITCH_MRU_SCOPE, out, (t) => t.id);
+    // switchMruVersion is a dep: re-sort when the recency order changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjects, allWorktrees.byProject, switchMruVersion]);
   const currentTargetIndex = Math.max(
     0,
     switchTargets.findIndex(
@@ -739,7 +748,6 @@ function Shell() {
             key: t.key,
             label: t.label,
             sub: t.sub,
-            indent: t.worktree ? 1 : 0,
             worktree: t.worktree,
           }))}
         />

@@ -10,9 +10,7 @@ export interface SwitcherItem {
   divider?: boolean;
   /** Caption shown in the separator, e.g. "Recent chats". */
   dividerLabel?: string;
-  /** Nesting depth — indents the row (e.g. worktrees under their project). */
-  indent?: number;
-  /** A worktree row gets a branch glyph + connector, mirroring the sidebar. */
+  /** A worktree row gets a branch glyph, distinguishing it from a project. */
   worktree?: boolean;
 }
 
@@ -61,11 +59,6 @@ export function SwitcherOverlay({ title, items, index }: Props) {
                     "flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
                     active ? "bg-[var(--accent)]" : "bg-transparent",
                   )}
-                  style={
-                    item.indent
-                      ? { marginLeft: `${item.indent * 16}px` }
-                      : undefined
-                  }
                 >
                   {item.worktree && (
                     <GitBranch
