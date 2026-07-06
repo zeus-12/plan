@@ -79,7 +79,7 @@ interface Props {
 }
 
 const LEAF_HEIGHT = 50;
-const WORKTREE_HEIGHT = 40;
+const WORKTREE_HEIGHT = 34;
 const GROUP_HEIGHT = 36;
 const EXPANDED_STORAGE = "plan.projectSidebar.expandedGroups";
 
@@ -494,6 +494,15 @@ export function ProjectSidebar({
                   const branch = w.repos[0]?.branch ?? "";
                   const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
                   const canAddRepos = w.repos.length < repoCount;
+                  // The branch usually equals the worktree name (the name
+                  // slugifies into it), so only surface it when it diverges.
+                  // Same for the repo count — one line unless there's more to say.
+                  const sub = [
+                    branch && branch !== w.name ? branch : "",
+                    w.repos.length > 1 ? `${w.repos.length} repos` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
                   return (
                     <ContextMenu key={`wt:${w.id}`}>
                       <ContextMenuTrigger asChild>
@@ -529,12 +538,9 @@ export function ProjectSidebar({
                               >
                                 {w.name}
                               </span>
-                              {(branch || w.repos.length > 1) && (
+                              {sub && (
                                 <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                                  {branch}
-                                  {w.repos.length > 1
-                                    ? ` · ${w.repos.length} repos`
-                                    : ""}
+                                  {sub}
                                 </span>
                               )}
                             </span>
