@@ -204,6 +204,27 @@ function FileDiffViewerImpl({
     return () => window.removeEventListener("keydown", handler);
   }, [active, undoLastHunk]);
 
+  // ⌥Z — toggle line wrap. Match `e.code` (not `e.key`): Option+letter emits a
+  // special glyph on macOS ("Ω" for z), so the layout-independent physical code
+  // is the only reliable signal.
+  useEffect(() => {
+    if (!active) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        e.code === "KeyZ"
+      ) {
+        e.preventDefault();
+        updateSettings({ lineWrap: !settings.lineWrap });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, settings.lineWrap, updateSettings]);
+
   const [language, setLanguage] = useState("auto");
 
   // Format toggle state: lives only in-memory; never written to disk.

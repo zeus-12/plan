@@ -222,6 +222,27 @@ export default function DocPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [mode, createDoc]);
 
+  // ⌥Z toggles line wrap in the doc view. Match `e.code` (not `e.key`):
+  // Option+letter emits a special glyph on macOS ("Ω" for z), so the
+  // layout-independent physical code is the only reliable signal.
+  useEffect(() => {
+    if (mode !== "view") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        e.code === "KeyZ"
+      ) {
+        e.preventDefault();
+        updateDocSettings({ lineWrap: !docSettings.lineWrap });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode, docSettings.lineWrap, updateDocSettings]);
+
   const startNew = useCallback(() => {
     setMode("compose");
     setText("");

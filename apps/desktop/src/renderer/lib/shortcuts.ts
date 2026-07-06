@@ -222,6 +222,11 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         when: "file view",
       },
       {
+        id: "toggleLineWrap",
+        label: "Toggle line wrap",
+        chords: [{ mods: ["alt"], key: "Z" }],
+      },
+      {
         id: "cycleDiff",
         label: "Cycle file ⇄ unstaged ⇄ staged",
         chords: [{ mods: ["meta", "shift"], key: "D" }],

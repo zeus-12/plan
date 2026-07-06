@@ -1075,6 +1075,27 @@ function FileViewerImpl({
     return () => window.removeEventListener("keydown", handler);
   }, [active, searchable, foldEngine, text, language]);
 
+  // ⌥Z — toggle line wrap. Match `e.code` (not `e.key`): Option+letter emits a
+  // special glyph on macOS ("Ω" for z), so the layout-independent physical code
+  // is the only reliable signal.
+  useEffect(() => {
+    if (!active) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        e.code === "KeyZ"
+      ) {
+        e.preventDefault();
+        lineWrapSetting.set(!lineWrapEnabled);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, lineWrapEnabled]);
+
   const symbolFuse = useMemo(
     () =>
       new Fuse(symbols, {
