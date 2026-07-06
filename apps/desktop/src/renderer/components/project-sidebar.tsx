@@ -655,7 +655,7 @@ export function ProjectSidebar({
                           )}
                           <button
                             onClick={() => onSelectProject(p.encoded)}
-                            className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pr-2 text-left"
+                            className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pl-px pr-2 text-left"
                           >
                             <span
                               className={cn(
