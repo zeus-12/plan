@@ -226,6 +226,25 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
           if (e.type === "keydown") term.clear();
           return false;
         }
+        // ⌘C copies the selection, but xterm pads every row to the full
+        // terminal width and the prompt leaves blank rows below it — so the
+        // raw selection carries a block of spaces and empty lines after the
+        // real text. Strip only that trailing run (\s+$ = spaces + newlines at
+        // the very end); interior blank lines are left untouched. Ctrl-C is
+        // deliberately excluded so it stays SIGINT.
+        if (
+          e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          e.key.toLowerCase() === "c" &&
+          term.hasSelection()
+        ) {
+          if (e.type === "keydown") {
+            const text = term.getSelection().replace(/\s+$/, "");
+            if (text) void navigator.clipboard.writeText(text);
+          }
+          return false;
+        }
         // ⌘W closes this terminal when it's the focused one (scratch shells only;
         // the agent terminal passes no onRequestClose). Swallow it so it neither
         // reaches the shell nor triggers a window close. stopPropagation is
