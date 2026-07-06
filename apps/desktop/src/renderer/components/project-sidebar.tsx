@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { GitBranch, Plus, Settings as SettingsGear } from "lucide-react";
+import {
+  ChevronRight,
+  GitBranch,
+  Plus,
+  Settings as SettingsGear,
+} from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import {
   Sidebar,
@@ -461,17 +466,16 @@ export function ProjectSidebar({
                     <button
                       key={row.node.key}
                       onClick={() => toggleGroup(row.node.key)}
-                      className="absolute left-0 top-0 flex w-full items-center gap-2 px-3 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                      className="absolute left-0 top-0 flex w-full items-center gap-1.5 px-2.5 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
                       style={{ transform, height: GROUP_HEIGHT }}
                     >
-                      <span
+                      <ChevronRight
+                        size={14}
                         className={cn(
-                          "inline-block text-[9px] text-[var(--text-tertiary)] transition-transform",
+                          "shrink-0 text-[var(--text-tertiary)] transition-transform duration-150",
                           row.expanded && "rotate-90",
                         )}
-                      >
-                        ▶
-                      </span>
+                      />
                       <span className="min-w-0 flex-1 truncate">
                         {row.node.name}
                       </span>
@@ -511,13 +515,13 @@ export function ProjectSidebar({
                             className="flex min-w-0 flex-1 items-center gap-2 text-left"
                           >
                             <GitBranch
-                              size={12}
+                              size={13}
                               className="shrink-0 text-[var(--text-tertiary)]"
                             />
                             <span className="flex min-w-0 flex-1 flex-col">
                               <span
                                 className={cn(
-                                  "truncate font-[family-name:var(--font-mono)] text-xs",
+                                  "truncate font-[family-name:var(--font-mono)] text-[13px]",
                                   isActive
                                     ? "text-[var(--text)]"
                                     : "text-[var(--text-secondary)]",
@@ -564,12 +568,13 @@ export function ProjectSidebar({
                   p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
                 const branch = branches.get(p.encoded);
                 const hasWorktrees = row.worktrees.length > 0;
+                const showCount = !row.expanded && hasWorktrees;
                 return (
                   <ContextMenu key={p.encoded}>
                     <ContextMenuTrigger asChild>
                       <div
                         className={cn(
-                          "group absolute left-0 top-0 flex w-full items-center border-l-2 pr-2 transition-colors",
+                          "group absolute left-0 top-0 flex w-full items-center border-l-2 pr-2.5 transition-colors",
                           p.archived && "opacity-60",
                           isLiveActive
                             ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
@@ -578,7 +583,7 @@ export function ProjectSidebar({
                         style={{
                           transform,
                           height: LEAF_HEIGHT,
-                          paddingLeft: row.depth > 0 ? 16 : 4,
+                          paddingLeft: row.depth > 0 ? 14 : 2,
                         }}
                       >
                         {hasWorktrees ? (
@@ -588,70 +593,78 @@ export function ProjectSidebar({
                               toggleGroup(p.encoded);
                             }}
                             aria-label={row.expanded ? "Collapse" : "Expand"}
-                            className="flex h-6 w-4 shrink-0 items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text)]"
+                            className="flex h-full w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] transition-colors hover:text-[var(--text)]"
                           >
-                            <span
+                            <ChevronRight
+                              size={14}
                               className={cn(
-                                "inline-block text-[9px] transition-transform",
+                                "transition-transform duration-150",
                                 row.expanded && "rotate-90",
                               )}
-                            >
-                              ▶
-                            </span>
+                            />
                           </button>
                         ) : (
-                          <span className="w-4 shrink-0" />
+                          <span className="w-5 shrink-0" />
                         )}
                         <button
                           onClick={() => onSelectProject(p.encoded)}
-                          title={p.cwd}
-                          className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 text-left"
+                          className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pr-2 text-left"
                         >
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={cn(
-                                "min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-xs",
-                                isLiveActive
-                                  ? "text-[var(--text)]"
-                                  : "text-[var(--text-secondary)]",
-                              )}
-                            >
-                              {shortName}
-                            </span>
-                            {!row.expanded && hasWorktrees && (
-                              <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                                {row.worktrees.length}
-                              </span>
+                          <span
+                            className={cn(
+                              "truncate font-[family-name:var(--font-mono)] text-[13px]",
+                              isLiveActive
+                                ? "text-[var(--text)]"
+                                : "text-[var(--text-secondary)]",
                             )}
-                            {branch && (
-                              <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)] max-w-[80px]">
-                                {branch}
-                              </span>
-                            )}
-                          </div>
+                          >
+                            {shortName}
+                          </span>
                           <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                             {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
                             {p.cwd}
                           </span>
                         </button>
-                        {!p.archived && (
-                          <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                            <button
-                              onClick={() => onOpenProjectDefaults(p.encoded)}
-                              title="Project defaults"
-                              className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
-                            >
-                              <SettingsGear size={13} />
-                            </button>
-                            <button
-                              onClick={() => onNewWorktree(p.encoded)}
-                              title="New worktree"
-                              className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
-                            >
-                              <Plus size={14} />
-                            </button>
+                        {/* Right slot: metadata at rest, actions on hover. The
+                            actions overlay the metadata (absolute), so the row
+                            never reflows and they never collide with the label. */}
+                        <div className="relative flex min-w-[3.25rem] shrink-0 items-center justify-end">
+                          <div
+                            className={cn(
+                              "flex items-center gap-1.5 transition-opacity",
+                              !p.archived && "group-hover:opacity-0",
+                            )}
+                          >
+                            {showCount && (
+                              <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full border border-[var(--border)] px-1 font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
+                                {row.worktrees.length}
+                              </span>
+                            )}
+                            {branch && (
+                              <span className="max-w-[92px] truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                {branch}
+                              </span>
+                            )}
                           </div>
-                        )}
+                          {!p.archived && (
+                            <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                onClick={() => onOpenProjectDefaults(p.encoded)}
+                                title="Project defaults"
+                                className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                              >
+                                <SettingsGear size={13} />
+                              </button>
+                              <button
+                                onClick={() => onNewWorktree(p.encoded)}
+                                title="New worktree"
+                                className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                              >
+                                <Plus size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
