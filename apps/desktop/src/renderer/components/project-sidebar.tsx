@@ -81,6 +81,10 @@ interface Props {
 const LEAF_HEIGHT = 50;
 const WORKTREE_HEIGHT = 34;
 const GROUP_HEIGHT = 36;
+// Empty space above each top-level entry (project / group header) so one
+// project's block — itself plus its nested worktrees — reads as separate from
+// the next. Rendered as transparent padding above the row, never highlighted.
+const GROUP_GAP = 6;
 const EXPANDED_STORAGE = "plan.projectSidebar.expandedGroups";
 
 function loadExpanded(): Set<string> {
@@ -281,7 +285,10 @@ export function ProjectSidebar({
     if (activeWorktreeId && !expanded.has(selected)) toAdd.push(selected);
     for (const n of tree) {
       if (n.kind !== "group") continue;
-      if (n.children.some((c) => c.encoded === selected) && !expanded.has(n.key))
+      if (
+        n.children.some((c) => c.encoded === selected) &&
+        !expanded.has(n.key)
+      )
         toAdd.push(n.key);
     }
     if (toAdd.length === 0) return;
@@ -321,15 +328,24 @@ export function ProjectSidebar({
     });
   };
 
+  // A top-level entry (a group header, or a depth-0 project) gets a gap above
+  // it — except the very first row, which sits flush to the top.
+  const gapFor = (i: number, r: Row) =>
+    i > 0 &&
+    (r.kind === "group-header" || (r.kind === "project" && r.depth === 0))
+      ? GROUP_GAP
+      : 0;
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (i) => {
       const r = rows[i];
       if (!r) return LEAF_HEIGHT;
-      if (r.kind === "group-header") return GROUP_HEIGHT;
+      const gap = gapFor(i, r);
+      if (r.kind === "group-header") return GROUP_HEIGHT + gap;
       if (r.kind === "worktree") return WORKTREE_HEIGHT;
-      return LEAF_HEIGHT;
+      return LEAF_HEIGHT + gap;
     },
     overscan: 8,
   });
@@ -461,28 +477,38 @@ export function ProjectSidebar({
                 const row = rows[vi.index];
                 const transform = `translateY(${vi.start}px)`;
 
+                const gap = gapFor(vi.index, row);
+
                 if (row.kind === "group-header") {
                   return (
-                    <button
+                    <div
                       key={row.node.key}
-                      onClick={() => toggleGroup(row.node.key)}
-                      className="absolute left-0 top-0 flex w-full items-center gap-1.5 px-2.5 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
-                      style={{ transform, height: GROUP_HEIGHT }}
+                      className="absolute left-0 top-0 w-full"
+                      style={{
+                        transform,
+                        height: GROUP_HEIGHT + gap,
+                        paddingTop: gap,
+                      }}
                     >
-                      <ChevronRight
-                        size={14}
-                        className={cn(
-                          "shrink-0 text-[var(--text-tertiary)] transition-transform duration-150",
-                          row.expanded && "rotate-90",
-                        )}
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        {row.node.name}
-                      </span>
-                      <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                        {row.node.children.length}
-                      </span>
-                    </button>
+                      <button
+                        onClick={() => toggleGroup(row.node.key)}
+                        className="flex h-full w-full items-center gap-1.5 px-2.5 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                      >
+                        <ChevronRight
+                          size={14}
+                          className={cn(
+                            "shrink-0 text-[var(--text-tertiary)] transition-transform duration-150",
+                            row.expanded && "rotate-90",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {row.node.name}
+                        </span>
+                        <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                          {row.node.children.length}
+                        </span>
+                      </button>
+                    </div>
                   );
                 }
 
@@ -503,22 +529,31 @@ export function ProjectSidebar({
                   ]
                     .filter(Boolean)
                     .join(" · ");
+                  // Vertical guide tying worktrees to their parent project —
+                  // aligned to the parent's chevron centre. Consecutive worktree
+                  // rows draw contiguous segments, forming one connecting line.
+                  const guideX = (row.depth - 1 > 0 ? 18 : 6) + 10;
                   return (
                     <ContextMenu key={`wt:${w.id}`}>
                       <ContextMenuTrigger asChild>
                         <div
                           className={cn(
-                            "group absolute left-0 top-0 flex w-full items-center gap-2 border-l-2 pr-2 transition-colors",
+                            "group absolute left-0 top-0 flex w-full items-center gap-2 pr-2 transition-colors",
                             isActive
-                              ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                              : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
+                              ? "bg-[var(--bg-surface-hover)]"
+                              : "hover:bg-[var(--bg-surface-hover)]",
                           )}
                           style={{
                             transform,
                             height: WORKTREE_HEIGHT,
-                            paddingLeft: 12 + row.depth * 16,
+                            paddingLeft: guideX + 8,
                           }}
                         >
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute bottom-0 top-0 w-px bg-[var(--border)]"
+                            style={{ left: guideX }}
+                          />
                           <button
                             onClick={() => onSelectWorktree(wp.encoded, w.id)}
                             className="flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -579,97 +614,106 @@ export function ProjectSidebar({
                   <ContextMenu key={p.encoded}>
                     <ContextMenuTrigger asChild>
                       <div
-                        className={cn(
-                          "group absolute left-0 top-0 flex w-full items-center border-l-2 pr-2.5 transition-colors",
-                          p.archived && "opacity-60",
-                          isLiveActive
-                            ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                            : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
-                        )}
+                        className="absolute left-0 top-0 w-full"
                         style={{
                           transform,
-                          height: LEAF_HEIGHT,
-                          paddingLeft: row.depth > 0 ? 14 : 2,
+                          height: LEAF_HEIGHT + gap,
+                          paddingTop: gap,
                         }}
                       >
-                        {hasWorktrees ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleGroup(p.encoded);
-                            }}
-                            aria-label={row.expanded ? "Collapse" : "Expand"}
-                            className="flex h-full w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] transition-colors hover:text-[var(--text)]"
-                          >
-                            <ChevronRight
-                              size={14}
-                              className={cn(
-                                "transition-transform duration-150",
-                                row.expanded && "rotate-90",
-                              )}
-                            />
-                          </button>
-                        ) : (
-                          <span className="w-5 shrink-0" />
-                        )}
-                        <button
-                          onClick={() => onSelectProject(p.encoded)}
-                          className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pr-2 text-left"
+                        <div
+                          className={cn(
+                            "group flex h-full items-center pr-2.5 transition-colors",
+                            p.archived && "opacity-60",
+                            isLiveActive
+                              ? "bg-[var(--bg-surface-hover)]"
+                              : "hover:bg-[var(--bg-surface-hover)]",
+                          )}
+                          style={{
+                            paddingLeft: row.depth > 0 ? 18 : 6,
+                          }}
                         >
-                          <span
-                            className={cn(
-                              "truncate font-[family-name:var(--font-mono)] text-[13px]",
-                              isLiveActive
-                                ? "text-[var(--text)]"
-                                : "text-[var(--text-secondary)]",
-                            )}
+                          {hasWorktrees ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleGroup(p.encoded);
+                              }}
+                              aria-label={row.expanded ? "Collapse" : "Expand"}
+                              className="flex h-full w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] transition-colors hover:text-[var(--text)]"
+                            >
+                              <ChevronRight
+                                size={14}
+                                className={cn(
+                                  "transition-transform duration-150",
+                                  row.expanded && "rotate-90",
+                                )}
+                              />
+                            </button>
+                          ) : (
+                            <span className="w-5 shrink-0" />
+                          )}
+                          <button
+                            onClick={() => onSelectProject(p.encoded)}
+                            className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pr-2 text-left"
                           >
-                            {shortName}
-                          </span>
-                          <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                            {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
-                            {p.cwd}
-                          </span>
-                        </button>
-                        {/* Right slot: metadata at rest, actions on hover. The
+                            <span
+                              className={cn(
+                                "truncate font-[family-name:var(--font-mono)] text-[13px]",
+                                isLiveActive
+                                  ? "text-[var(--text)]"
+                                  : "text-[var(--text-secondary)]",
+                              )}
+                            >
+                              {shortName}
+                            </span>
+                            <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                              {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
+                              {p.cwd}
+                            </span>
+                          </button>
+                          {/* Right slot: metadata at rest, actions on hover. The
                             actions overlay the metadata (absolute), so the row
                             never reflows and they never collide with the label. */}
-                        <div className="relative flex min-w-[3.25rem] shrink-0 items-center justify-end">
-                          <div
-                            className={cn(
-                              "flex items-center gap-1.5 transition-opacity",
-                              !p.archived && "group-hover:opacity-0",
-                            )}
-                          >
-                            {showCount && (
-                              <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full border border-[var(--border)] px-1 font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
-                                {row.worktrees.length}
-                              </span>
-                            )}
-                            {branch && (
-                              <span className="max-w-[92px] truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                                {branch}
-                              </span>
+                          <div className="relative flex min-w-[3.25rem] shrink-0 items-center justify-end">
+                            <div
+                              className={cn(
+                                "flex items-center gap-1.5 transition-opacity",
+                                !p.archived && "group-hover:opacity-0",
+                              )}
+                            >
+                              {showCount && (
+                                <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full border border-[var(--border)] px-1 font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
+                                  {row.worktrees.length}
+                                </span>
+                              )}
+                              {branch && (
+                                <span className="max-w-[92px] truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                  {branch}
+                                </span>
+                              )}
+                            </div>
+                            {!p.archived && (
+                              <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                                <button
+                                  onClick={() =>
+                                    onOpenProjectDefaults(p.encoded)
+                                  }
+                                  title="Project defaults"
+                                  className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                                >
+                                  <SettingsGear size={13} />
+                                </button>
+                                <button
+                                  onClick={() => onNewWorktree(p.encoded)}
+                                  title="New worktree"
+                                  className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
+                                >
+                                  <Plus size={14} />
+                                </button>
+                              </div>
                             )}
                           </div>
-                          {!p.archived && (
-                            <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                              <button
-                                onClick={() => onOpenProjectDefaults(p.encoded)}
-                                title="Project defaults"
-                                className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
-                              >
-                                <SettingsGear size={13} />
-                              </button>
-                              <button
-                                onClick={() => onNewWorktree(p.encoded)}
-                                title="New worktree"
-                                className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
-                              >
-                                <Plus size={14} />
-                              </button>
-                            </div>
-                          )}
                         </div>
                       </div>
                     </ContextMenuTrigger>
