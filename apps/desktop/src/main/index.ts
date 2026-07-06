@@ -74,6 +74,7 @@ import {
   busyTerminalIds,
   resizeTerminal,
   killTerminal,
+  killTerminalAndWait,
   killAllTerminals,
   listTerminals,
   type TerminalChunk,
@@ -521,6 +522,11 @@ function registerIpc() {
       fromEncoded: string,
       toEncoded: string,
     ): Promise<void> => {
+      // Kill the source chat's `claude` and WAIT for it to exit before moving
+      // the transcript. A live `claude` writes to a path derived from its cwd,
+      // so if it outlives the rename it re-creates a metadata stub at the old
+      // path — the session then lingers (message-less) in the source worktree.
+      await killTerminalAndWait(`chat:${fromEncoded}:${sessionId}`);
       await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
     },
   );

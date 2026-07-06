@@ -407,6 +407,40 @@ export function killTerminal(id: string) {
   sessions.delete(id);
 }
 
+/**
+ * Kill a terminal and resolve only once its child process has actually exited
+ * (or a timeout elapses). Needed before relocating a chat's transcript: a live
+ * `claude` writes to a path derived from its cwd, so if it outlives the move it
+ * re-creates a stub at the OLD path. Awaiting the real exit closes that race.
+ */
+export function killTerminalAndWait(
+  id: string,
+  timeoutMs = 4000,
+): Promise<void> {
+  const s = sessions.get(id);
+  if (!s) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    try {
+      s.pty.onExit(() => {
+        clearTimeout(timer);
+        finish();
+      });
+    } catch {
+      clearTimeout(timer);
+      finish();
+      return;
+    }
+    killTerminal(id);
+  });
+}
+
 export function killAllTerminals() {
   for (const enc of [...sessions.keys()]) killTerminal(enc);
 }

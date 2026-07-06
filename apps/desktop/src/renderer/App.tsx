@@ -80,6 +80,7 @@ import {
   chatTabId,
 } from "./lib/tabs-store";
 import { forgetNewSession } from "./lib/new-session-ids";
+import { removeCachedSession } from "./lib/session-cache";
 import { pushToast } from "./lib/toast-store";
 import {
   getMruScopeVersion,
@@ -522,9 +523,13 @@ function Shell() {
       const pending = moveSession;
       if (!pending || !selectedEncoded) return;
       const { sessionId, fromEncoded, title } = pending;
-      window.electronAPI.terminalKill(`chat:${fromEncoded}:${sessionId}`);
+      // Main kills the source chat's pty and WAITS for it to exit before moving
+      // the transcript (see session:move), so no live `claude` re-creates a stub
+      // at the old path. Don't pre-kill here — that's the race we're fixing.
       await window.electronAPI.moveSession(sessionId, fromEncoded, toEncoded);
       forgetNewSession(sessionId);
+      // Drop it from the source's cached list so it doesn't linger there.
+      removeCachedSession(fromEncoded, sessionId);
       closeProjectTab(fromEncoded, chatTabId(sessionId));
       openProjectTab(toEncoded, makeChatTab(sessionId));
       if (toWorktreeId) selectWorktree(selectedEncoded, toWorktreeId);

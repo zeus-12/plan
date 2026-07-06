@@ -42,6 +42,18 @@ export function setCachedSessions(
   entry(encoded).sessions = sessions;
 }
 
+/**
+ * Drop one session from a worktree's cached list + transcripts — used after
+ * moving a chat out of it, so the source view (which seeds from this cache on
+ * remount) doesn't briefly show the now-relocated session.
+ */
+export function removeCachedSession(encoded: string, sessionId: string): void {
+  const c = cache.get(encoded);
+  if (!c) return;
+  c.sessions = c.sessions.filter((s) => s.sessionId !== sessionId);
+  c.transcripts.delete(sessionId);
+}
+
 /** Last-known transcripts for open chat tabs (empty Map if none cached). */
 export function getCachedTranscripts(
   encoded: string,
