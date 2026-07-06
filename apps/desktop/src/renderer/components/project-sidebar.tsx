@@ -546,7 +546,7 @@ export function ProjectSidebar({
                           style={{
                             transform,
                             height: WORKTREE_HEIGHT,
-                            paddingLeft: guideX + 8,
+                            paddingLeft: guideX + 18,
                           }}
                         >
                           <span
