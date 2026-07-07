@@ -121,6 +121,20 @@ function onKeyUp(e: KeyboardEvent) {
     close(true);
 }
 
+/** Mouse hover in the overlay moves the highlight, like a keyboard step. */
+export function switcherHover(index: number) {
+  if (!active || active.index === index) return;
+  active = { id: active.id, index };
+  emit();
+}
+
+/** Mouse click in the overlay commits that item immediately. */
+export function switcherCommit(index: number) {
+  if (!active) return;
+  active = { id: active.id, index };
+  close(true);
+}
+
 function install() {
   if (installed || typeof window === "undefined") return;
   installed = true;

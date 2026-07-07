@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { GitBranch } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
+import { switcherCommit, switcherHover } from "../lib/use-tab-switcher";
 
 export interface SwitcherItem {
   key: string;
@@ -22,9 +23,10 @@ interface Props {
 }
 
 /**
- * Centered Ctrl+Tab switcher modal. Purely presentational — the cycling and
- * commit lifecycle live in useTabSwitcher; this just shows the list and which
- * row is highlighted, keeping it scrolled into view.
+ * Centered Ctrl+Tab switcher modal. The cycling and commit lifecycle live in
+ * useTabSwitcher; this shows the list, keeps the highlighted row scrolled into
+ * view, and feeds mouse hover/click back into the switcher (hover moves the
+ * highlight, click commits).
  */
 export function SwitcherOverlay({ title, items, index }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
@@ -33,7 +35,13 @@ export function SwitcherOverlay({ title, items, index }: Props) {
   }, [index]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30">
+    // The modal is open while Ctrl is held, and on macOS Ctrl+click is the
+    // context-menu gesture (which suppresses `click`) — so rows commit on
+    // mousedown and the contextmenu event is swallowed here.
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30"
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div className="flex max-h-[70vh] w-[min(420px,80vw)] flex-col overflow-hidden rounded-xl border border-[var(--popover-border)] bg-[var(--popover-bg)] shadow-2xl">
         <div className="shrink-0 border-b border-[var(--border)] px-4 py-2.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
           {title}
@@ -55,8 +63,16 @@ export function SwitcherOverlay({ title, items, index }: Props) {
                 )}
                 <div
                   ref={active ? activeRef : undefined}
+                  // mousemove, not mouseenter: keyboard steps scroll the list,
+                  // and a row sliding under a stationary pointer must not
+                  // steal the highlight.
+                  onMouseMove={() => switcherHover(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    switcherCommit(i);
+                  }}
                   className={cn(
-                    "flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
+                    "flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
                     active ? "bg-[var(--accent)]" : "bg-transparent",
                   )}
                 >
