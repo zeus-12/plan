@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { SWITCHER_FORWARDED_CODES } from "../../shared-types";
 
 /**
  * macOS/Windows-style modifier-held switcher, centralized.
@@ -41,7 +42,18 @@ let active: { id: string; index: number } | null = null;
 // still queued in the IPC pipe when you release would otherwise land AFTER the
 // commit-and-close and re-open a modal that nothing can now close (stuck until
 // Escape/click).
+//
+// The renderer's only window into modifier state is the events it observes, so
+// every key/pointer event mirrors its Ctrl/Cmd flags here (syncMod) rather
+// than selectively arming/clearing. Known limit: gaining focus with Ctrl
+// already held (e.g. via the OS app switcher) leaves this false until the
+// first observed event, so that gesture's first tap may no-op — accepted over
+// trusting stale IPC, which is what caused stuck-open modals.
 let modDown = false;
+
+function syncMod(e: { ctrlKey: boolean; metaKey: boolean }) {
+  modDown = e.ctrlKey || e.metaKey;
+}
 let installed = false;
 const listeners = new Set<() => void>();
 
@@ -64,12 +76,14 @@ function close(commit: boolean) {
 }
 
 // Trigger codes that MAIN forwards over IPC (see before-input-event in
-// main/index.ts). For these, the native page keydown is preventDefault-ed but
-// deliberately NOT cycled — the IPC forward is the single cycle driver, so one
-// keystroke can never step twice (native + IPC race). Timing-based dedupe was
-// tried and skipped items whenever the IPC hop exceeded the window. A channel
-// on a code outside this set cycles from its native keydown instead.
-const MAIN_FORWARDED_CODES = new Set(["Tab", "Backquote"]);
+// main/index.ts; the list itself lives in shared-types so both sides compile
+// against the same contract). For these, the native page keydown is
+// preventDefault-ed but deliberately NOT cycled — the IPC forward is the
+// single cycle driver, so one keystroke can never step twice (native + IPC
+// race). Timing-based dedupe was tried and skipped items whenever the IPC hop
+// exceeded the window. A channel on a code outside this set cycles from its
+// native keydown instead.
+const MAIN_FORWARDED_CODES = new Set<string>(SWITCHER_FORWARDED_CODES);
 
 // Rate cap for hold-to-cycle: the OS key-repeat stream (forwarded keyDown per
 // repeat) steps at most once per window, so very fast repeat settings don't
@@ -115,10 +129,9 @@ function cycle(code: string, dir: 1 | -1) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  // Any keydown while Ctrl/Cmd is held proves the modifier is down — including
-  // the lone Ctrl keydown that precedes the trigger, which is what arms the very
-  // first (async, IPC-delivered) cycle of the gesture.
-  if (e.ctrlKey || e.metaKey) modDown = true;
+  // The lone Ctrl keydown that precedes the trigger arms modDown, which the
+  // first (async, IPC-delivered) cycle of the gesture is gated on.
+  syncMod(e);
   // Renderer-side path: suppress the combo's default (a ` or Tab reaching an
   // input/terminal) for whichever registered channel claims this key code.
   // Cycling for main-forwarded codes happens ONLY via the IPC path (see
@@ -142,7 +155,7 @@ function onKeyDown(e: KeyboardEvent) {
 // Releasing the held modifier commits instantly, like the OS app switcher.
 // (Shift is excluded — it only sets the step direction.)
 function onKeyUp(e: KeyboardEvent) {
-  if (e.key === "Control" || e.key === "Meta") modDown = false;
+  syncMod(e);
   if (active && (e.key === "Control" || e.key === "Meta" || e.key === "Alt"))
     close(true);
 }
@@ -168,8 +181,12 @@ function install() {
   // terminal pane), so a focused input can't swallow the switcher combo.
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("keyup", onKeyUp, true);
+  // Pointer events carry modifier flags too — this catches Ctrl already held
+  // when the window is focused by click, where no keydown will ever arrive.
+  window.addEventListener("pointerdown", syncMod, true);
   // Safety net: if the window loses focus mid-gesture we may never see the Ctrl
-  // keyup, so cancel rather than leave the modal stuck open.
+  // keyup, so cancel rather than leave the modal stuck open. No event flags to
+  // mirror here — force the invariant directly.
   window.addEventListener("blur", () => {
     modDown = false;
     if (active) close(false);

@@ -31,7 +31,7 @@ import {
 } from "./manual-projects";
 import { readClaudeConfig, writeClaudeConfig } from "./claude-config";
 import { readScratch, writeScratch, type ScratchData } from "./scratch-store";
-import type { ProjectEntry } from "../shared-types";
+import type { ProjectEntry, SwitcherForwardedCode } from "../shared-types";
 import {
   setCallbacks,
   startWatching,
@@ -120,6 +120,21 @@ function sendSwitcherCycle(key: string, shift: boolean) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("switcher:cycle", { key, shift });
 }
+
+// Which modifiers arm each forwarded switcher trigger. Keyed by the shared
+// SWITCHER_FORWARDED_CODES union, so forwarding a new code here without the
+// renderer knowing (or vice versa) is a compile error, not a silent
+// double-step. Tab stays Ctrl-only because Cmd+Tab is the macOS app switcher
+// and must not be hijacked; Backquote accepts Ctrl or Cmd because Cmd+` is the
+// key macOS users reach for, and overriding the OS "cycle windows" shortcut is
+// harmless in a single-window app.
+const switcherModifierOk: Record<
+  SwitcherForwardedCode,
+  (input: Electron.Input) => boolean
+> = {
+  Tab: (input) => input.control && !input.meta,
+  Backquote: (input) => input.control || input.meta,
+};
 
 function buildMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -229,15 +244,10 @@ function createMainWindow(): BrowserWindow {
   // the key is released.
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || input.alt) return;
-    // Ctrl+Tab cycles sessions — Tab stays Ctrl-only because Cmd+Tab is the
-    // macOS app switcher and must not be hijacked. Projects cycle on Ctrl+` OR
-    // Cmd+`: we accept Cmd because that's the key macOS users reach for, and
-    // overriding the OS "cycle windows" shortcut is harmless in a single-window
-    // app.
-    const isTab = input.code === "Tab" && input.control && !input.meta;
-    const isBackquote =
-      input.code === "Backquote" && (input.control || input.meta);
-    if (isTab || isBackquote) {
+    const modifierOk = Object.hasOwn(switcherModifierOk, input.code)
+      ? switcherModifierOk[input.code as SwitcherForwardedCode]
+      : undefined;
+    if (modifierOk?.(input)) {
       // Do NOT event.preventDefault() here. On macOS, preventing this keyDown
       // stops Chromium from delivering ANY subsequent keyUps to the app — main
       // and renderer alike — including the Control release that commits the
@@ -245,8 +255,8 @@ function createMainWindow(): BrowserWindow {
       // arriving while every keyUp vanished). Forward-only is safe: the
       // renderer preventDefaults these combos in its capture-phase keydown and
       // cycles ONLY from this forward (never from the native keydown — see
-      // MAIN_FORWARDED_CODES in use-tab-switcher.ts), so a keystroke that
-      // reaches both paths still steps exactly once.
+      // SWITCHER_FORWARDED_CODES usage in use-tab-switcher.ts), so a keystroke
+      // that reaches both paths still steps exactly once.
       sendSwitcherCycle(input.code, input.shift);
     }
   });

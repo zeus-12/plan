@@ -349,3 +349,15 @@ export interface ClaudeConfigBundle {
   project: ClaudeConfigFile[];
   memory: ClaudeConfigFile[];
 }
+
+/**
+ * Switcher trigger codes that MAIN forwards to the renderer as
+ * "switcher:cycle" IPC (from before-input-event). Single source of truth for
+ * both sides of the contract: main derives its forwarding rules from this
+ * list (a Record keyed by SwitcherForwardedCode — adding a code here without
+ * a rule is a compile error), and the renderer suppresses native-keydown
+ * cycling for exactly these codes so main's forward is the ONLY cycle driver.
+ * One keystroke must never step twice.
+ */
+export const SWITCHER_FORWARDED_CODES = ["Tab", "Backquote"] as const;
+export type SwitcherForwardedCode = (typeof SWITCHER_FORWARDED_CODES)[number];
