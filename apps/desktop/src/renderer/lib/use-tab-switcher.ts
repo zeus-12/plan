@@ -63,11 +63,17 @@ function close(commit: boolean) {
   emit();
 }
 
-// A keystroke can arrive twice — once from the renderer keydown and once from
-// main's IPC forward (which exists because Chromium swallows Ctrl+Tab before
-// the page sees it). Coalesce bursts so a single keystroke steps exactly once.
-// This same throttle caps the hold-to-repeat rate: when the trigger key is held,
-// the OS emits a fast key-repeat stream and we step at most once per window.
+// Trigger codes that MAIN forwards over IPC (see before-input-event in
+// main/index.ts). For these, the native page keydown is preventDefault-ed but
+// deliberately NOT cycled — the IPC forward is the single cycle driver, so one
+// keystroke can never step twice (native + IPC race). Timing-based dedupe was
+// tried and skipped items whenever the IPC hop exceeded the window. A channel
+// on a code outside this set cycles from its native keydown instead.
+const MAIN_FORWARDED_CODES = new Set(["Tab", "Backquote"]);
+
+// Rate cap for hold-to-cycle: the OS key-repeat stream (forwarded keyDown per
+// repeat) steps at most once per window, so very fast repeat settings don't
+// blur past items.
 const REPEAT_THROTTLE_MS = 40;
 let lastCycleAt = 0;
 
@@ -113,12 +119,10 @@ function onKeyDown(e: KeyboardEvent) {
   // the lone Ctrl keydown that precedes the trigger, which is what arms the very
   // first (async, IPC-delivered) cycle of the gesture.
   if (e.ctrlKey || e.metaKey) modDown = true;
-  // Renderer-side path. Chromium swallows plain Ctrl+Tab so this mostly catches
-  // Ctrl+Shift+Tab and the Ctrl+` (Backquote) project combos; the main-process
-  // IPC forward (see install) covers the swallowed Ctrl+Tab. cycle() dedupes if
-  // both deliver the same keystroke.
-  // Open/step whichever registered channel claims this key code (Tab, Backquote,
-  // Backslash, …). Channel-driven so adding a switcher needs no edit here.
+  // Renderer-side path: suppress the combo's default (a ` or Tab reaching an
+  // input/terminal) for whichever registered channel claims this key code.
+  // Cycling for main-forwarded codes happens ONLY via the IPC path (see
+  // MAIN_FORWARDED_CODES); other codes cycle from this native keydown.
   // Ctrl drives every channel. Cmd also drives the backtick project+worktree
   // switcher since that's the macOS-natural key — but NOT Tab (Cmd+Tab is the OS
   // app switcher) and NOT digits (Cmd+1‑4 switch sidebar tabs).
@@ -126,7 +130,7 @@ function onKeyDown(e: KeyboardEvent) {
     e.ctrlKey || (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
   if (mod && !e.altKey && channels.some((c) => c.triggerCode === e.code)) {
     e.preventDefault();
-    cycle(e.code, e.shiftKey ? -1 : 1);
+    if (!MAIN_FORWARDED_CODES.has(e.code)) cycle(e.code, e.shiftKey ? -1 : 1);
     return;
   }
   if (active && e.key === "Escape") {

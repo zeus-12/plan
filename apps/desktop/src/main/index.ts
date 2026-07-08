@@ -243,9 +243,10 @@ function createMainWindow(): BrowserWindow {
       // and renderer alike — including the Control release that commits the
       // switcher, which then hangs open (observed empirically; keyDowns kept
       // arriving while every keyUp vanished). Forward-only is safe: the
-      // renderer preventDefaults these combos in its capture-phase keydown, and
-      // the switcher's cycle() throttle dedupes this IPC against the native
-      // keydown when the page receives both.
+      // renderer preventDefaults these combos in its capture-phase keydown and
+      // cycles ONLY from this forward (never from the native keydown — see
+      // MAIN_FORWARDED_CODES in use-tab-switcher.ts), so a keystroke that
+      // reaches both paths still steps exactly once.
       sendSwitcherCycle(input.code, input.shift);
     }
   });
