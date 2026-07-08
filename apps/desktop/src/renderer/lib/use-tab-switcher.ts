@@ -34,6 +34,14 @@ interface Channel {
 
 let channels: Channel[] = [];
 let active: { id: string; index: number } | null = null;
+// Is a switcher-opening modifier (Ctrl or Cmd) currently held? A switcher may
+// only exist while its modifier is down, so cycle() ignores anything that
+// arrives once it's up. This matters because opening is async (an IPC forward
+// from main) while committing is the sync Ctrl keyup: a trailing OS key-repeat
+// still queued in the IPC pipe when you release would otherwise land AFTER the
+// commit-and-close and re-open a modal that nothing can now close (stuck until
+// Escape/click).
+let modDown = false;
 let installed = false;
 const listeners = new Set<() => void>();
 
@@ -69,6 +77,10 @@ let lastCycleAt = 0;
  * Shift) and applies to every tap, so a held gesture can mix directions.
  */
 function cycle(code: string, dir: 1 | -1) {
+  // No switcher activity without its modifier held. Filters stale trailing
+  // key-repeats that arrive over IPC just after the modifier was released,
+  // which would otherwise re-open a modal that already committed and closed.
+  if (!modDown) return;
   const now = performance.now();
   if (now - lastCycleAt < REPEAT_THROTTLE_MS) return;
   lastCycleAt = now;
@@ -97,6 +109,10 @@ function cycle(code: string, dir: 1 | -1) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  // Any keydown while Ctrl/Cmd is held proves the modifier is down — including
+  // the lone Ctrl keydown that precedes the trigger, which is what arms the very
+  // first (async, IPC-delivered) cycle of the gesture.
+  if (e.ctrlKey || e.metaKey) modDown = true;
   // Renderer-side path. Chromium swallows plain Ctrl+Tab so this mostly catches
   // Ctrl+Shift+Tab and the Ctrl+` (Backquote) project combos; the main-process
   // IPC forward (see install) covers the swallowed Ctrl+Tab. cycle() dedupes if
@@ -122,6 +138,7 @@ function onKeyDown(e: KeyboardEvent) {
 // Releasing the held modifier commits instantly, like the OS app switcher.
 // (Shift is excluded — it only sets the step direction.)
 function onKeyUp(e: KeyboardEvent) {
+  if (e.key === "Control" || e.key === "Meta") modDown = false;
   if (active && (e.key === "Control" || e.key === "Meta" || e.key === "Alt"))
     close(true);
 }
@@ -150,6 +167,7 @@ function install() {
   // Safety net: if the window loses focus mid-gesture we may never see the Ctrl
   // keyup, so cancel rather than leave the modal stuck open.
   window.addEventListener("blur", () => {
+    modDown = false;
     if (active) close(false);
   });
   // Cycling is driven from main via IPC — Chromium swallows Ctrl+Tab before the

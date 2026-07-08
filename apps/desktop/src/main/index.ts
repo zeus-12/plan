@@ -219,15 +219,14 @@ function createMainWindow(): BrowserWindow {
   // Chromium swallows plain Ctrl+Tab before the page's keydown sees it, and a
   // macOS menu accelerator for Tab is unreliable (often consumed by AppKit
   // without firing). before-input-event is the dependable interception point:
-  // it fires before the page, so we cancel the keystroke and forward a cycle to
-  // the renderer, which owns the modal and commits when the user releases Ctrl.
+  // it fires before the page, so we forward a cycle to the renderer, which owns
+  // the modal and commits when the user releases Ctrl.
   //
-  // We deliberately do NOT swallow this with globalShortcut: a global hotkey
-  // fires once per physical press and never repeats, so holding the key can't
-  // cycle. before-input-event, by contrast, receives the OS key-repeat stream
-  // (repeated keyDowns while held) — so holding the trigger auto-cycles, and it
-  // stops the instant the key is released. keyUp/keyDown filtering below means
-  // only the repeating keyDowns step; the modal still commits on Ctrl release.
+  // We deliberately do NOT use globalShortcut here: a global hotkey fires once
+  // per physical press and never repeats, so holding the key couldn't cycle.
+  // before-input-event receives the OS key-repeat stream (repeated keyDowns
+  // while held) — so holding the trigger auto-cycles, and it stops the instant
+  // the key is released.
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || input.alt) return;
     // Ctrl+Tab cycles sessions — Tab stays Ctrl-only because Cmd+Tab is the
@@ -239,7 +238,14 @@ function createMainWindow(): BrowserWindow {
     const isBackquote =
       input.code === "Backquote" && (input.control || input.meta);
     if (isTab || isBackquote) {
-      event.preventDefault();
+      // Do NOT event.preventDefault() here. On macOS, preventing this keyDown
+      // stops Chromium from delivering ANY subsequent keyUps to the app — main
+      // and renderer alike — including the Control release that commits the
+      // switcher, which then hangs open (observed empirically; keyDowns kept
+      // arriving while every keyUp vanished). Forward-only is safe: the
+      // renderer preventDefaults these combos in its capture-phase keydown, and
+      // the switcher's cycle() throttle dedupes this IPC against the native
+      // keydown when the page receives both.
       sendSwitcherCycle(input.code, input.shift);
     }
   });
