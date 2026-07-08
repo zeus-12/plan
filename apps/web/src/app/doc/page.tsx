@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,6 +14,7 @@ import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
 import { DocView } from "@plan/shared/components/doc-view";
 import { SettingsPopover } from "@plan/shared/components/settings-popover";
 import { Button } from "@plan/shared/components/ui/button";
+import { Toaster, toast } from "@plan/shared/components/ui/sonner";
 import { detectLanguage } from "@plan/shared/lib/highlight";
 import { FONT_SIZE_OPTIONS, type FontSize } from "@plan/shared/lib/settings";
 import { useDocSettings } from "@plan/shared/lib/doc-settings";
@@ -26,6 +28,21 @@ import { SectionNav } from "@/components/section-nav";
 
 const HASH_PREFIX = "#c=";
 const AUTHOR_KEY = "plan-doc-author";
+const DEVICE_KEY = "plan-doc-device";
+
+/**
+ * Stable per-browser id, minted on first use. Comments are stamped with it so
+ * a name typed later can be assigned to this device's earlier comments.
+ */
+function getDeviceId(): string | null {
+  if (typeof window === "undefined") return null;
+  let id = window.localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    window.localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
 
 function SunIcon() {
   return (
@@ -110,6 +127,7 @@ export default function DocPage() {
   const [copied, setCopied] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [docSettings, updateDocSettings] = useDocSettings();
+  const authorInputRef = useRef<HTMLInputElement>(null);
 
   // Restore from the URL hash on mount.
   useEffect(() => {
@@ -154,6 +172,18 @@ export default function DocPage() {
     setAuthor(v);
     if (typeof window !== "undefined")
       window.localStorage.setItem(AUTHOR_KEY, v);
+    // Re-attribute this device's earlier comments, so naming yourself after
+    // commenting (even right before sharing) still labels everything you wrote.
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const name = v.trim() || undefined;
+    setComments((prev) =>
+      prev.some((c) => c.deviceId === deviceId && c.author !== name)
+        ? prev.map((c) =>
+            c.deviceId === deviceId ? { ...c, author: name } : c,
+          )
+        : prev,
+    );
   }, []);
 
   const addComment = useCallback(
@@ -167,6 +197,7 @@ export default function DocPage() {
           quote,
           body,
           author: author.trim() || undefined,
+          deviceId: getDeviceId() ?? undefined,
           createdAt: Date.now(),
         },
       ]);
@@ -180,6 +211,13 @@ export default function DocPage() {
 
   const handleShare = useCallback(async () => {
     if (typeof window === "undefined") return;
+    if (!author.trim()) {
+      toast("Please add your name before sharing", {
+        description: "Comments in the shared doc are attributed to it.",
+      });
+      authorInputRef.current?.focus();
+      return;
+    }
     const encoded = encodeDocState({
       text,
       language: language === "auto" ? undefined : language,
@@ -193,7 +231,7 @@ export default function DocPage() {
     } catch {
       // Clipboard may be blocked; the address bar is updated regardless.
     }
-  }, [text, language, comments]);
+  }, [author, text, language, comments]);
 
   const handleCopyText = useCallback(async () => {
     try {
@@ -262,6 +300,7 @@ export default function DocPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-[1800px] px-6 py-8">
+      <Toaster position="bottom-right" />
       <header className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="font-[family-name:var(--font-mono)] text-base font-semibold tracking-tight text-[var(--text)]">
@@ -324,16 +363,6 @@ export default function DocPage() {
               ]}
             />
           )}
-          {mode === "view" && (
-            <input
-              value={author}
-              onChange={(e) => handleAuthorChange(e.target.value)}
-              placeholder="Your name"
-              className="h-6 w-28 rounded-md border bg-transparent px-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
-              style={{ borderColor: "var(--border)" }}
-              title="Comments you add are attributed to this name"
-            />
-          )}
           {mode === "compose" ? (
             <Button size="sm" onClick={createDoc} disabled={!hasContent}>
               Create doc
@@ -347,7 +376,25 @@ export default function DocPage() {
               <Button variant="outline" size="sm" onClick={handleCopyText}>
                 {copiedText ? "Copied!" : "Copy text"}
               </Button>
-              <Button variant="outline" size="sm" onClick={handleShare}>
+              <input
+                ref={authorInputRef}
+                value={author}
+                onChange={(e) => handleAuthorChange(e.target.value)}
+                placeholder="Your name"
+                className="h-6 w-28 rounded-md border bg-transparent px-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
+                style={{ borderColor: "var(--border)" }}
+                title="Comments you add are attributed to this name"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleShare}
+                aria-disabled={!author.trim()}
+                className={!author.trim() ? "opacity-50" : undefined}
+                title={
+                  !author.trim() ? "Add your name to share" : undefined
+                }
+              >
                 {copied ? "Link copied!" : "Share"}
               </Button>
               <Button variant="ghost" size="sm" onClick={startNew}>

@@ -18,6 +18,12 @@ export interface DocComment {
   body: string;
   /** Self-claimed display name of the commenter (no real identity/auth). */
   author?: string;
+  /**
+   * Random UUID identifying the browser the comment was written in (stored in
+   * localStorage). Lets a later name change re-attribute that device's earlier
+   * comments — it is not an identity, just "same browser as".
+   */
+  deviceId?: string;
   /** Epoch ms when the comment was created. */
   createdAt?: number;
 }
@@ -38,6 +44,7 @@ interface WireComment {
   q: string;
   b: string;
   a?: string;
+  d?: string;
   t?: number;
 }
 
@@ -55,6 +62,7 @@ export function encodeDocState(state: DocState): string {
         q: c.quote,
         b: c.body,
         a: c.author,
+        d: c.deviceId,
         t: c.createdAt,
       }),
     ),
@@ -106,6 +114,7 @@ export function decodeDocState(encoded: string): DocState | null {
               quote: typeof c.q === "string" ? c.q : "",
               body: c.b,
               author: typeof c.a === "string" ? c.a : undefined,
+              deviceId: typeof c.d === "string" ? c.d : undefined,
               createdAt: typeof c.t === "number" ? c.t : undefined,
             },
           ];
