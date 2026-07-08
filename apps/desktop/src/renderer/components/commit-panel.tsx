@@ -67,13 +67,17 @@ export function CommitPanel({
         )}
       />
       <div className="mt-1.5 flex items-center justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
           {error ? (
-            <span className="text-[var(--removed-text)]">{error}</span>
+            <span className="truncate text-[var(--removed-text)]">{error}</span>
           ) : (
             <>
-              {branch ? `⎇ ${branch} · ` : ""}
-              {stagedCount} staged
+              {branch && (
+                <span className="min-w-0 truncate rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 leading-none text-[var(--text-secondary)]">
+                  {branch}
+                </span>
+              )}
+              <span className="shrink-0">{stagedCount} staged</span>
             </>
           )}
         </span>

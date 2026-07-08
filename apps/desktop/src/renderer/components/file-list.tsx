@@ -28,6 +28,8 @@ export interface RepoFileGroup {
   subPath: string;
   /** Display name (e.g. "myapp" or "packages/api"). */
   repoName: string;
+  /** Checked-out branch, if known (null on detached HEAD). */
+  branch: string | null;
   staged: FileEntry[];
   unstaged: FileEntry[];
   diffAvailable: boolean;
@@ -573,6 +575,13 @@ export function FileList({
                   <span className="truncate font-semibold">
                     {row.group.repoName}
                   </span>
+                  {/* Same bordered pill as the workspace header; truncates
+                      well before the repo name does. */}
+                  {row.group.branch && (
+                    <span className="min-w-0 shrink-[4] truncate rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--text-secondary)]">
+                      {row.group.branch}
+                    </span>
+                  )}
                 </div>
                 <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
                   {total}
