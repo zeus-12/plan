@@ -336,9 +336,26 @@ export function ProjectSidebar({
       ? GROUP_GAP
       : 0;
 
+  // Identity-keyed rows, memoized on `rows`: the virtualizer only recomputes
+  // row offsets when `count` or `getItemKey` changes — NOT when `estimateSize`
+  // changes. A same-length rows change (e.g. the MRU re-sort moving a project
+  // block past another) would otherwise keep stale per-index heights and
+  // render overlapping rows until something altered the count.
+  const rowKey = useCallback(
+    (i: number) => {
+      const r = rows[i];
+      if (!r) return i;
+      if (r.kind === "group-header") return `g:${r.node.key}`;
+      if (r.kind === "worktree") return `wt:${r.worktree.id}`;
+      return `p:${r.project.encoded}`;
+    },
+    [rows],
+  );
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
+    getItemKey: rowKey,
     estimateSize: (i) => {
       const r = rows[i];
       if (!r) return LEAF_HEIGHT;
