@@ -35,6 +35,7 @@ interface Segment {
   italic?: boolean;
   bold?: boolean;
   commentIds: string[];
+  pending: boolean;
 }
 
 /** Within-line highlight interval carrying the comment ids that cover it. */
@@ -42,6 +43,7 @@ interface LineRange {
   start: number;
   end: number;
   ids: string[];
+  pending?: boolean;
 }
 
 function buildSegments(
@@ -74,6 +76,7 @@ function buildSegments(
       italic: tok?.italic,
       bold: tok?.bold,
       commentIds: covering.flatMap((r) => r.ids),
+      pending: covering.some((r) => r.pending),
     });
   }
   return segments;
@@ -202,6 +205,11 @@ export function DocView({
     onCreate,
   });
 
+  // The popover steals focus when it opens, which collapses the native
+  // selection — so while a comment is pending we draw our own highlight over
+  // the selected range, like the desktop surfaces do.
+  const pendingRange = pending?.data ?? null;
+
   // Reserve `digits` worth of ch for the number PLUS the px-3 padding. The box
   // is border-box, so width must include padding or the number overflows into
   // the code cell (the tabular digits collide with line 1's text).
@@ -224,10 +232,24 @@ export function DocView({
           container scrolls horizontally; min-w-full keeps short docs full. */}
       <div className={`py-2 ${lineWrap ? "" : "w-max min-w-full"}`}>
         {lines.map((lineText, i) => {
+          const ls = lineStarts[i];
+          const le = ls + lineText.length;
+          let ranges = rangesByLine.get(i) ?? [];
+          if (pendingRange && pendingRange.start < le && pendingRange.end > ls) {
+            ranges = [
+              ...ranges,
+              {
+                start: Math.max(pendingRange.start, ls) - ls,
+                end: Math.min(pendingRange.end, le) - ls,
+                ids: [],
+                pending: true,
+              },
+            ];
+          }
           const segments = buildSegments(
             lineText,
             perLineTokens[i] ?? [],
-            rangesByLine.get(i) ?? [],
+            ranges,
           );
           return (
             <div key={i} className="flex">
@@ -270,11 +292,12 @@ export function DocView({
                             fontStyle: seg.italic ? "italic" : undefined,
                             fontWeight: seg.bold ? 600 : undefined,
                             cursor: commented ? "pointer" : undefined,
-                            background: isActive
-                              ? "var(--selection-bg)"
-                              : commented
-                                ? "color-mix(in srgb, var(--accent) 14%, transparent)"
-                                : undefined,
+                            background:
+                              seg.pending || isActive
+                                ? "var(--selection-bg)"
+                                : commented
+                                  ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                                  : undefined,
                             borderBottom: commented
                               ? "1.5px solid var(--accent)"
                               : undefined,
