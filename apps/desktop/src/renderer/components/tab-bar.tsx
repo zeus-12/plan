@@ -1,4 +1,5 @@
 import { forwardRef, memo, useEffect, useRef, type ReactNode } from "react";
+import { NotebookPen } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import { FileIcon } from "./file-icon";
 import { WorkingIcon } from "./working-icon";
@@ -56,6 +57,8 @@ function tabIcon(tab: Tab): ReactNode {
       return <DiffIcon />;
     case "file":
       return <FileIcon name={basename(tab.path)} />;
+    case "scratch":
+      return <NotebookPen size={13} className="shrink-0" />;
   }
 }
 

@@ -195,6 +195,13 @@ const electronAPI = {
   checkForUpdate: () => ipcRenderer.invoke("updates:check"),
   openUpdateDownload: (url: string) =>
     ipcRenderer.invoke("updates:openDownload", url),
+
+  // Per-worktree scratchpad (durable notepad, persisted to ~/.plan)
+  readScratch: (encoded: string) => ipcRenderer.invoke("scratch:read", encoded),
+  writeScratch: (
+    encoded: string,
+    data: { content: string; language: string },
+  ) => ipcRenderer.invoke("scratch:write", encoded, data),
 };
 
 contextBridge.exposeInMainWorld("electronAPI", electronAPI);

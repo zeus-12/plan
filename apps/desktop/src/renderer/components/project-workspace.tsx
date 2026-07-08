@@ -57,10 +57,12 @@ import {
   makeChatTab,
   makeDiffTab,
   makeFileTab,
+  makeScratchTab,
   chatTabId,
   type Tab,
 } from "../lib/tabs-store";
 import { TabBar } from "./tab-bar";
+import { ScratchEditor } from "./scratch-editor";
 import { isWorking, useTerminalWorking } from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
@@ -125,10 +127,13 @@ function WorkspaceHeader({
   project,
   projectsSidebarOpen,
   branch,
+  repoLabel,
 }: {
   project: ProjectEntry;
   projectsSidebarOpen: boolean;
   branch: string | null;
+  /** Set in multi-repo projects to say which repo the branch belongs to. */
+  repoLabel: string | null;
 }) {
   const middle = useSidebar();
   const shortName = project.cwd.split("/").filter(Boolean).pop() ?? project.cwd;
@@ -151,6 +156,12 @@ function WorkspaceHeader({
         </span>
         {branch && (
           <span className="shrink-0 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] leading-none text-[var(--text-secondary)]">
+            {repoLabel && (
+              <>
+                {repoLabel}
+                <span className="text-[var(--text-tertiary)]"> · </span>
+              </>
+            )}
             {branch}
           </span>
         )}
@@ -389,8 +400,6 @@ export function ProjectWorkspace({
   // Auto-mode is an app-wide preference (Settings dialog); it applies to every
   // project's Claude sessions.
   const [globalAutoMode] = useAutoModeEnabled();
-  // Headline branch: when a project has multiple repos we just show the first.
-  const branch = repos[0]?.branch ?? null;
   // VSCode model: `tab` chooses which LIST shows in the right sidebar. The main
   // content pane is a set of open tabs (chat / diff / file), scoped to this
   // worktree and persisted — see tabs-store. Everything the content pane needs
@@ -411,6 +420,29 @@ export function ProjectWorkspace({
         : activeTab?.kind === "file"
           ? "files"
           : null;
+  // Header branch pill. A single-repo project always shows its branch. A
+  // multi-repo project shows a branch only when the active tab pins a file to
+  // one specific repo — never an arbitrary repo's branch.
+  const headerRepo = useMemo(() => {
+    if (repos.length === 1) return repos[0];
+    if (activeTab?.kind === "diff") {
+      return repos.find((r) => r.subPath === activeTab.subPath) ?? null;
+    }
+    if (activeTab?.kind === "file") {
+      // File paths are project-relative; the repo owning the file is the one
+      // whose subPath is the longest prefix (nested repos beat the root repo).
+      let best: DiscoveredRepo | null = null;
+      for (const r of repos) {
+        const inRepo =
+          r.subPath === "" || activeTab.path.startsWith(`${r.subPath}/`);
+        if (inRepo && (!best || r.subPath.length > best.subPath.length)) {
+          best = r;
+        }
+      }
+      return best;
+    }
+    return null;
+  }, [repos, activeTab]);
   // The pending-comments composer floats over file/diff content as a header-only
   // bar (minimized) and expands on chat. Auto-minimize fires ONLY on the
   // chat→file edge: switching between files preserves a manual expand, and
@@ -567,6 +599,7 @@ export function ProjectWorkspace({
         return {
           subPath: repo.subPath,
           repoName: repoDisplayName(repo, project.cwd),
+          branch: repo.branch,
           staged: [],
           unstaged: [],
           diffAvailable: true,
@@ -592,6 +625,7 @@ export function ProjectWorkspace({
       return {
         subPath: repo.subPath,
         repoName: repoDisplayName(repo, project.cwd),
+        branch: repo.branch,
         staged,
         unstaged,
         diffAvailable: state.diffAvailable,
@@ -1472,6 +1506,7 @@ export function ProjectWorkspace({
           (isNewSession(t.sessionId) ? "New chat" : "Chat")
         );
       }
+      if (t.kind === "scratch") return "Scratchpad";
       return t.path.split("/").pop() || t.path;
     },
     [sessions, transcripts],
@@ -2183,6 +2218,23 @@ export function ProjectWorkspace({
     return () => window.removeEventListener("keydown", handler);
   }, [chatTerminalReady, handleResumeChat]);
 
+  // ⌘⇧S opens (or focuses) the scratchpad tab.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "s"
+      ) {
+        e.preventDefault();
+        openTab(makeScratchTab());
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openTab]);
+
   // ⌘N starts a new chat in this project.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -2231,7 +2283,8 @@ export function ProjectWorkspace({
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "d")
         return;
-      if (!activeTab || activeTab.kind === "chat") return;
+      if (!activeTab || activeTab.kind === "chat" || activeTab.kind === "scratch")
+        return;
       e.preventDefault();
 
       // Resolve the repo (subPath) + repo-relative path + which stages are
@@ -2490,11 +2543,13 @@ export function ProjectWorkspace({
               sub:
                 t.kind === "chat"
                   ? "Chat"
-                  : t.kind === "diff"
-                    ? t.staged
-                      ? "Diff · staged"
-                      : "Diff"
-                    : t.path,
+                  : t.kind === "scratch"
+                    ? "Scratchpad"
+                    : t.kind === "diff"
+                      ? t.staged
+                        ? "Diff · staged"
+                        : "Diff"
+                      : t.path,
             };
           })}
         />
@@ -2511,7 +2566,12 @@ export function ProjectWorkspace({
           <WorkspaceHeader
             project={project}
             projectsSidebarOpen={projectsSidebarOpen}
-            branch={branch}
+            branch={headerRepo?.branch ?? null}
+            repoLabel={
+              headerRepo && repos.length > 1
+                ? repoDisplayName(headerRepo, project.cwd)
+                : null
+            }
           />
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col">
@@ -2574,6 +2634,26 @@ export function ProjectWorkspace({
                       onUpdateAnnotation={updateProjectFileAnnotation}
                       onRemoveAnnotation={removeProjectFileAnnotation}
                     />
+                  ) : null,
+                )}
+
+                {/* Scratchpad — a per-worktree singleton tab. Kept mounted (like
+                    the others) so its undo history and cursor survive switching
+                    away and back. */}
+                {tabs.map((t) =>
+                  t.kind === "scratch" ? (
+                    <div
+                      key={t.id}
+                      className={cn(
+                        "absolute inset-0 min-h-0",
+                        t.id !== activeId && "hidden",
+                      )}
+                    >
+                      <ScratchEditor
+                        encoded={project.encoded}
+                        active={t.id === activeId}
+                      />
+                    </div>
                   ) : null,
                 )}
 
@@ -2845,6 +2925,7 @@ export function ProjectWorkspace({
           buildEntries={buildEntries}
           onConfigureRun={() => setRunConfigOpen(true)}
           onConfigureBuild={() => setBuildConfigOpen(true)}
+          onOpenScratch={() => openTab(makeScratchTab())}
         />
       </div>
     </SidebarProvider>

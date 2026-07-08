@@ -178,6 +178,16 @@ interface ElectronAPI {
   checkForUpdate: () => Promise<UpdateInfo | null>;
   /** Opens the release download page in the user's browser. */
   openUpdateDownload: (url: string) => Promise<void>;
+
+  /** Read a worktree's scratchpad, or null if it was never written. */
+  readScratch: (
+    encoded: string,
+  ) => Promise<{ content: string; language: string } | null>;
+  /** Persist a worktree's scratchpad content + chosen language. */
+  writeScratch: (
+    encoded: string,
+    data: { content: string; language: string },
+  ) => Promise<void>;
 }
 
 declare global {

@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from "react";
+import { NotebookPen } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -95,6 +96,8 @@ interface Props {
   /** Open the Run / Build command-config modals. */
   onConfigureRun: () => void;
   onConfigureBuild: () => void;
+  /** Open the per-worktree scratchpad as a tab in the center content pane. */
+  onOpenScratch: () => void;
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -197,6 +200,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   buildEntries,
   onConfigureRun,
   onConfigureBuild,
+  onOpenScratch,
 }: Props) {
   const sidebar = useSidebar();
   // Minimise the embedded terminal pane while keeping the tab strip visible.
@@ -312,13 +316,23 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         className="flex min-h-0 flex-1 flex-col"
       >
         <SidebarHeader className="h-[44px] justify-center px-3 pt-2 pb-2 [-webkit-app-region:drag]">
-          <div className="[-webkit-app-region:no-drag]">
+          <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
             <TabsList>
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="diffs">Diffs</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="search">Search</TabsTrigger>
             </TabsList>
+            {/* Detached from the tab group: opens the scratchpad as a center-pane
+                tab rather than switching this sidebar's view. */}
+            <button
+              onClick={onOpenScratch}
+              title="Open scratchpad"
+              aria-label="Open scratchpad"
+              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+            >
+              <NotebookPen size={15} />
+            </button>
           </div>
         </SidebarHeader>
 

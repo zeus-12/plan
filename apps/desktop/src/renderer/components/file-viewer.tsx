@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { NotebookPen } from "lucide-react";
 import {
   codeBracketPositions,
   highlightPerLine,
@@ -94,14 +95,13 @@ const EMPTY_PER_LINE: SyntaxToken[][] = [];
 const POPOVER_VIEWPORT_PAD = 380;
 
 /**
- * Editor surface: render the file in a real (read-only) caret/keyboard editor
- * — a transparent textarea overlaid on the highlighted layer — so the file
- * behaves like a VS Code pane (blinking caret, arrow-key navigation,
- * shift+arrow selection). Flip {@link ALLOW_TYPING} to make it editable later.
+ * Editor surface: a transparent textarea overlaid on the highlighted layer, so
+ * the file behaves like a VS Code pane (blinking caret, arrow-key navigation,
+ * shift+arrow selection). Typing is enabled per-instance — a `buffer` prop makes
+ * it a real editor (the scratchpad); a plain file keeps it read-only (caret +
+ * selection only, mutations cancelled). See `allowTyping`.
  */
 const ENABLE_EDITOR_CARET = true;
-/** When false the editor surface is read-only (caret + selection, no typing). */
-const ALLOW_TYPING = false;
 /**
  * Above this many lines the editor surface (which can't virtualize — the
  * textarea must hold the whole file) is skipped in favor of the virtualized
@@ -154,6 +154,31 @@ interface Props {
     /** Also drop a focused caret on the line (Cmd-P "path:line" jump). */
     focusCaret?: boolean;
   } | null;
+  /**
+   * When set, the viewer is an EDITABLE in-memory buffer instead of a file read
+   * from disk: it never touches `path` on disk, drives its content from
+   * `value`/`onChange`, and enables typing. Everything else — highlighting, line
+   * numbers, folding, wrap, sticky scroll, find — is the same surface. This is
+   * how the scratchpad reuses FileViewer; it's also the seam for making real
+   * files editable later. Folding/wrap still suspend the caret overlay (a flat
+   * textarea can't mirror that geometry), so editing pauses while folded/wrapped.
+   */
+  buffer?: EditableBuffer;
+}
+
+export interface EditableBuffer {
+  value: string;
+  onChange: (value: string) => void;
+  /** Explicit language (no path-based detection for an in-memory buffer). */
+  language: string;
+  onLanguageChange: (language: string) => void;
+  /** Header title shown in place of the filename. */
+  title: string;
+  /** Options for the header language picker. */
+  languages: readonly { id: string; label: string }[];
+  /** ⌘S / "Format" action; omit to hide the button. */
+  onFormat?: () => void;
+  canFormat?: boolean;
 }
 
 interface Loaded {
@@ -322,9 +347,13 @@ function FileViewerImpl({
   onRemoveAnnotation,
   active,
   revealTarget,
+  buffer,
 }: Props) {
   const [data, setData] = useState<Loaded | null>(null);
-  const [status, setStatus] = useState<"loading" | "ok" | "missing">("loading");
+  // An in-memory buffer is "ok" immediately — there's nothing to read from disk.
+  const [status, setStatus] = useState<"loading" | "ok" | "missing">(
+    buffer ? "ok" : "loading",
+  );
   const [editing, setEditing] = useState<EditingComment | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imgBroken, setImgBroken] = useState(false);
@@ -344,12 +373,25 @@ function FileViewerImpl({
   // Sticky scroll: pin enclosing scope headers at the top as you scroll.
   const stickyEnabled = stickyScrollSetting.use();
   const bracketEnabled = bracketColorSetting.use();
-  const lineWrapEnabled = lineWrapSetting.use();
+  // Line wrap. A file uses the shared, persisted setting; an editable buffer
+  // keeps its OWN wrap (default off) instead — otherwise a globally-on wrap would
+  // silently disable editing (the flat caret textarea can't mirror wrapped rows,
+  // so wrap forces the read-only view). Editing is the whole point of a buffer,
+  // so it must not inherit a setting that turns it off.
+  const globalLineWrap = lineWrapSetting.use();
+  const [bufferWrap, setBufferWrap] = useState(false);
+  const lineWrapEnabled = buffer ? bufferWrap : globalLineWrap;
+  const setLineWrap = (v: boolean) =>
+    buffer ? setBufferWrap(v) : lineWrapSetting.set(v);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Scroll viewport height, tracked so we can reserve empty space below the last
   // line (VS Code "scroll beyond last line"): the final line can scroll up to the
   // top of the viewport instead of being pinned to the bottom edge.
   const [viewportH, setViewportH] = useState(0);
+  // Scroll viewport width — the editable overlay stretches to at least this so
+  // clicking in the blank space to the right of a short line still lands a caret
+  // on that line (the textarea, not dead space, is under the cursor there).
+  const [viewportW, setViewportW] = useState(0);
   const settingsRef = useRef<HTMLDivElement>(null);
   // A line to drop the editor caret on after the next reveal scroll settles
   // (set by go-to-symbol so the cursor lands on the jumped-to line).
@@ -372,6 +414,8 @@ function FileViewerImpl({
   const revision = useWorktreeRevision(encoded);
 
   useEffect(() => {
+    // In-memory buffer: nothing on disk to read — the content is the prop.
+    if (buffer) return;
     let cancelled = false;
     setStatus("loading");
     setData(null);
@@ -410,8 +454,15 @@ function FileViewerImpl({
     };
   }, [encoded, path, isImage, revision]);
 
-  const language = useMemo(() => languageFromPath(path) ?? "plaintext", [path]);
-  const text = data?.text ?? "";
+  const language = buffer
+    ? buffer.language
+    : (languageFromPath(path) ?? "plaintext");
+  const text = buffer ? buffer.value : (data?.text ?? "");
+  // Renderable text content — a loaded non-binary file, or an in-memory buffer.
+  // Replaces the raw `!!data && !data.binary` checks so the buffer path lights up
+  // highlighting / editing / find the same way a file does.
+  const isTextContent = buffer ? true : !!data && !data.binary;
+  const allowTyping = !!buffer;
 
   // In-view find (⌘F). Surface paints `find.matches` and scrolls `find.current`.
   const find = useTextFind(text);
@@ -505,17 +556,40 @@ function FileViewerImpl({
   // colors so a huge file never freezes the pane. `highlightStale` keeps stale
   // tokens (from the previous file) off the new lines during the lagging frame.
   const deferredText = useDeferredValue(text);
+  // While the text is mid-change we render plain (skip the two synchronous Shiki
+  // tokenizations — syntax + bracket colors), then color on the low-priority
+  // render once `deferredText` catches up. A read-only file only needs this above
+  // the sync cap; an editable buffer needs it on EVERY keystroke, else tokenizing
+  // the whole doc per keypress makes typing lag even at 50 lines.
   const highlightStale =
-    text.length > SYNC_HIGHLIGHT_MAX_CHARS && deferredText !== text;
+    deferredText !== text &&
+    (!!buffer || text.length > SYNC_HIGHLIGHT_MAX_CHARS);
   const perLine = useMemo(
-    () =>
-      data && !data.binary && !highlightStale
-        ? highlightPerLine(text, language)
-        : EMPTY_PER_LINE,
+    () => {
+      if (!isTextContent) return EMPTY_PER_LINE;
+      // Buffer (incremental edits): tokenize the DEFERRED text. Keystrokes never
+      // block on tokenization (it runs on the low-priority render), and the
+      // colors from the last settled text stay painted while typing — no flash to
+      // plain black between keystrokes. A file switch instead blanks via
+      // highlightStale so the previous file's colors never paint the new one.
+      if (buffer) return highlightPerLine(deferredText, language);
+      return highlightStale
+        ? EMPTY_PER_LINE
+        : highlightPerLine(text, language);
+    },
     // shikiReady / shikiTheme are deps so colors appear once the highlighter
     // finishes loading and re-tokenize when the theme changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, text, highlightStale, language, shikiReady, shikiTheme],
+    [
+      buffer,
+      data,
+      text,
+      deferredText,
+      highlightStale,
+      language,
+      shikiReady,
+      shikiTheme,
+    ],
   );
 
   // Bracket-pair colours per line. Real brackets are identified by the
@@ -525,17 +599,24 @@ function FileViewerImpl({
   // scope-aware tokenization), matching the syntax-highlight size gate.
   const EMPTY_BRACKETS = useMemo(() => new Map<number, BracketMark[]>(), []);
   const bracketByLine = useMemo(
-    () =>
-      bracketEnabled && shikiReady && !!data && !data.binary && !highlightStale
-        ? bracketColorsByLine(codeBracketPositions(text, language))
-        : EMPTY_BRACKETS,
-    // Mirrors the highlight gate: computed whenever syntax tokens are (no size
-    // cap; for big files it defers a frame alongside highlighting via
-    // highlightStale). shikiTheme dep re-tokenizes on theme change.
+    () => {
+      if (!bracketEnabled || !shikiReady || !isTextContent) return EMPTY_BRACKETS;
+      // Same deferred-vs-blank split as perLine, so bracket colors also persist
+      // while typing a buffer instead of flashing off.
+      if (buffer)
+        return bracketColorsByLine(
+          codeBracketPositions(deferredText, language),
+        );
+      return highlightStale
+        ? EMPTY_BRACKETS
+        : bracketColorsByLine(codeBracketPositions(text, language));
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       bracketEnabled,
+      buffer,
       text,
+      deferredText,
       language,
       shikiReady,
       shikiTheme,
@@ -577,6 +658,86 @@ function FileViewerImpl({
     [lineStarts],
   );
 
+  // ── Fold-aware editing (buffer only) ───────────────────────────────────────
+  // A textarea can't hide rows, so when a buffer has folds the overlay shows only
+  // the VISIBLE lines (`displayText`) — which lines up 1:1 with the rendered
+  // layer — and every edit is spliced back into the full text by offset, leaving
+  // the folded lines untouched. With no folds, `displayText` IS the full text and
+  // `commit` is a plain passthrough, so the unfolded path is unchanged.
+  const folded = !!buffer && visibleLineIndices.length < lines.length;
+  const displayText = useMemo(
+    () => (folded ? visibleLineIndices.map((i) => lines[i]).join("\n") : text),
+    [folded, visibleLineIndices, lines, text],
+  );
+  // Start offset of each visible line within `displayText`.
+  const displayLineStarts = useMemo(() => {
+    const arr = new Array<number>(visibleLineIndices.length);
+    let acc = 0;
+    for (let p = 0; p < visibleLineIndices.length; p++) {
+      arr[p] = acc;
+      acc += lines[visibleLineIndices[p]].length + 1;
+    }
+    return arr;
+  }, [visibleLineIndices, lines]);
+  // (row, col) of a displayText offset — the row is also its visual line.
+  const displayRowCol = useCallback(
+    (dOff: number): { row: number; col: number } => {
+      let lo = 0;
+      let hi = displayLineStarts.length - 1;
+      let row = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (displayLineStarts[mid] <= dOff) {
+          row = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return { row, col: dOff - displayLineStarts[row] };
+    },
+    [displayLineStarts],
+  );
+  // Map a displayText offset to the equivalent offset in the full text.
+  const displayToFull = useCallback(
+    (dOff: number): number => {
+      const { row, col } = displayRowCol(dOff);
+      const absLine = visibleLineIndices[row] ?? lines.length - 1;
+      return (lineStarts[absLine] ?? text.length) + col;
+    },
+    [displayRowCol, visibleLineIndices, lineStarts, lines.length, text.length],
+  );
+  // Commit an edited displayText: with no folds, straight through; with folds,
+  // diff the single contiguous change (common prefix/suffix) and splice it into
+  // the full text at the mapped offsets — folded content is preserved verbatim.
+  const commit = useCallback(
+    (nextDisplay: string) => {
+      if (!buffer) return;
+      if (!folded) {
+        buffer.onChange(nextDisplay);
+        return;
+      }
+      const old = displayText;
+      const minLen = Math.min(old.length, nextDisplay.length);
+      let p = 0;
+      while (p < minLen && old.charCodeAt(p) === nextDisplay.charCodeAt(p)) p++;
+      let sfx = 0;
+      while (
+        sfx < old.length - p &&
+        sfx < nextDisplay.length - p &&
+        old.charCodeAt(old.length - 1 - sfx) ===
+          nextDisplay.charCodeAt(nextDisplay.length - 1 - sfx)
+      )
+        sfx++;
+      const fp = displayToFull(p);
+      const fe = displayToFull(old.length - sfx);
+      buffer.onChange(
+        text.slice(0, fp) +
+          nextDisplay.slice(p, nextDisplay.length - sfx) +
+          text.slice(fe),
+      );
+    },
+    [buffer, folded, displayText, displayToFull, text],
+  );
+
   // The caret overlay is a single full-height textarea holding the whole file,
   // so its lines must stay pixel-aligned with the rendered layer. Folding hides
   // lines from the rendered layer (which the textarea can't mirror), so we
@@ -585,15 +746,20 @@ function FileViewerImpl({
   // Line wrap turns rows into variable-height blocks the single `pre`/`wrap=off`
   // textarea can't mirror, so we suspend the overlay there too and let native
   // DOM selection take over.
+  // A read-only file suspends the caret overlay under wrap or folding (the
+  // wrap=off / flat textarea can't mirror wrapped or hidden rows) and falls back
+  // to DOM selection. An editable buffer can't do that — you must be able to type
+  // — so it KEEPS the overlay in both cases: it soft-wraps to the layer's width,
+  // and when folded the overlay holds only the visible lines (`displayText`) with
+  // edits mapped back into the full text, so folded content stays intact.
   const editorMode =
     ENABLE_EDITOR_CARET &&
     status === "ok" &&
     !isImage &&
-    !!data &&
-    !data.binary &&
+    isTextContent &&
     lines.length <= EDITOR_MAX_LINES &&
-    liveCollapsed.size === 0 &&
-    !lineWrapEnabled;
+    (liveCollapsed.size === 0 || !!buffer) &&
+    (!lineWrapEnabled || !!buffer);
 
   // The comment anchored at each line's first row (for the gutter marker).
   const firstOf = useMemo(() => {
@@ -695,22 +861,32 @@ function FileViewerImpl({
     (offset: number) => {
       const parent = parentRef.current;
       if (!parent) return;
-      const ln = lineOfOffset(offset);
-      const top = ln * LINE_HEIGHT;
+      // The `offset` is in the textarea's own space — which for a buffer is
+      // `displayText` (visible rows only). So the caret's VISUAL row is its
+      // display row; for a file it's the (unfolded) full line.
+      let row: number;
+      let col: number;
+      if (buffer) {
+        ({ row, col } = displayRowCol(offset));
+      } else {
+        const ln = lineOfOffset(offset);
+        row = ln;
+        col = offset - lineStarts[ln];
+      }
+      const top = row * LINE_HEIGHT;
       const bottom = top + LINE_HEIGHT;
       if (top < parent.scrollTop) parent.scrollTop = top;
       else if (bottom > parent.scrollTop + parent.clientHeight)
         parent.scrollTop = bottom - parent.clientHeight;
       // Keep the caret horizontally in view too. The gutter is sticky over the
       // left edge, so the usable left boundary is gutterWidthPx, not 0.
-      const col = offset - lineStarts[ln];
       const caretX = gutterWidthPx + CONTENT_PAD_LEFT + col * charWidth;
       if (caretX < parent.scrollLeft + gutterWidthPx)
         parent.scrollLeft = caretX - gutterWidthPx;
       else if (caretX > parent.scrollLeft + parent.clientWidth)
         parent.scrollLeft = caretX - parent.clientWidth;
     },
-    [lineOfOffset, lineStarts, gutterWidthPx, charWidth],
+    [buffer, displayRowCol, lineOfOffset, lineStarts, gutterWidthPx, charWidth],
   );
 
   // Read the textarea's current selection into our state (drives the visible
@@ -909,7 +1085,11 @@ function FileViewerImpl({
     const el = parentRef.current;
     if (!el) return;
     setViewportH(el.clientHeight);
-    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    setViewportW(el.clientWidth);
+    const ro = new ResizeObserver(() => {
+      setViewportH(el.clientHeight);
+      setViewportW(el.clientWidth);
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, [status, isImage, data]);
@@ -919,11 +1099,17 @@ function FileViewerImpl({
   // so the file section's own background shows through — no separate surface.
   const scrollBeyondEnd = Math.max(0, viewportH - LINE_HEIGHT);
 
+  // A small breathing margin above the first line — but only for the editable
+  // buffer (the scratchpad), not files. `paddingStart` offsets every row, so the
+  // overlay textarea is nudged down by the same amount (see its `top`).
+  const bufferTopPad = buffer ? 8 : 0;
+
   const virtualizer = useVirtualizer({
     count: visibleLineIndices.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => LINE_HEIGHT,
     overscan: 30,
+    paddingStart: bufferTopPad,
     paddingEnd: scrollBeyondEnd,
   });
 
@@ -932,6 +1118,31 @@ function FileViewerImpl({
   useEffect(() => {
     virtualizer.measure();
   }, [lineWrapEnabled, virtualizer]);
+
+  // Re-measure when the tab becomes visible again. While hidden (display:none)
+  // the scroll element has 0 height and the virtualizer's range/sizes go stale;
+  // without this the layer can render overlapping rows and the scroll extent is
+  // wrong (the "combined text / can't scroll up" bug after switching tabs).
+  useEffect(() => {
+    if (active) virtualizer.measure();
+  }, [active, virtualizer]);
+
+  // Auto-focus the buffer editor when it first opens, caret at the end (last
+  // line) so you can type immediately — line 1 when empty. Runs once; the
+  // scratchpad wrapper only mounts this once its content has loaded.
+  const didAutoFocus = useRef(false);
+  useEffect(() => {
+    if (!buffer || !active || !editorMode || didAutoFocus.current) return;
+    didAutoFocus.current = true;
+    requestAnimationFrame(() => {
+      const t = textareaRef.current;
+      if (!t) return;
+      t.focus({ preventScroll: true });
+      const end = t.value.length;
+      t.setSelectionRange(end, end);
+      ensureCaretVisible(end);
+    });
+  }, [buffer, active, editorMode, ensureCaretVisible]);
 
   // Sticky scope headers: the fold regions enclosing the topmost visible line
   // whose own start has already scrolled above the viewport. Outermost-first,
@@ -1028,7 +1239,7 @@ function FileViewerImpl({
   }, [pendingScrollLine, visibleLineIndices]);
 
   // ⌘F opens the find widget for the visible file, seeded with any selection.
-  const searchable = status === "ok" && !isImage && !!data && !data.binary;
+  const searchable = status === "ok" && !isImage && isTextContent;
   useEffect(() => {
     if (!active || !searchable) return;
     const handler = (e: KeyboardEvent) => {
@@ -1089,7 +1300,7 @@ function FileViewerImpl({
         e.code === "KeyZ"
       ) {
         e.preventDefault();
-        lineWrapSetting.set(!lineWrapEnabled);
+        setLineWrap(!lineWrapEnabled);
       }
     };
     window.addEventListener("keydown", handler);
@@ -1219,7 +1430,146 @@ function FileViewerImpl({
     );
   }
 
-  const newCommentPopover = editorMode
+  // Editor keystrokes for an in-memory buffer: format, smart indent, bracket
+  // auto-pairing, and word / next-occurrence selection. Files never reach here
+  // (buffer is undefined), so this leaves the read-only caret untouched.
+  const onEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!buffer) return;
+    const ta = e.currentTarget;
+    const s = ta.selectionStart;
+    const en = ta.selectionEnd;
+    const mod = e.metaKey || e.ctrlKey;
+    // The textarea's offsets and value are in `displayText` space (= full text
+    // unless folded, when it's the visible lines only). `commit` maps edits back
+    // into the full text; `doc` is what the handler reasons over.
+    const doc = displayText;
+    const caretTo = (pos: number) =>
+      requestAnimationFrame(() => ta.setSelectionRange(pos, pos));
+    const replace = (from: number, to: number, ins: string, caret: number) => {
+      commit(doc.slice(0, from) + ins + doc.slice(to));
+      caretTo(caret);
+    };
+
+    // ⌘S → format.
+    if (mod && !e.shiftKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      buffer.onFormat?.();
+      return;
+    }
+
+    // ⌘D → select the word under the caret; with a selection already, jump to
+    // the next occurrence (wrapping). A textarea has ONE selection, so this is
+    // select-word / find-next — it can't stack multiple cursors like VS Code.
+    if (mod && !e.shiftKey && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      if (s === en) {
+        const isW = (c?: string) => !!c && /\w/.test(c);
+        let a = s;
+        let b = en;
+        while (a > 0 && isW(doc[a - 1])) a--;
+        while (b < doc.length && isW(doc[b])) b++;
+        if (b > a) ta.setSelectionRange(a, b);
+      } else {
+        const sel = doc.slice(s, en);
+        let idx = doc.indexOf(sel, en);
+        if (idx < 0) idx = doc.indexOf(sel);
+        if (idx >= 0) {
+          ta.setSelectionRange(idx, idx + sel.length);
+          requestAnimationFrame(() => ensureCaretVisible(idx + sel.length));
+        }
+      }
+      return;
+    }
+
+    // Leave every other modifier combo (undo/copy/paste/select-all/…) to the OS.
+    if (mod) return;
+
+    const before = doc.slice(0, s);
+    const after = doc.slice(en);
+    const prev = before.slice(-1);
+    const next = after.slice(0, 1);
+
+    // Tab → two spaces.
+    if (e.key === "Tab") {
+      e.preventDefault();
+      replace(s, en, "  ", s + 2);
+      return;
+    }
+
+    // Enter → carry the current line's indent; between an open/close pair, open
+    // a blank indented line with the closer dropped onto the line below.
+    if (e.key === "Enter") {
+      const lineStart = before.lastIndexOf("\n") + 1;
+      const indent = (before.slice(lineStart).match(/^[ \t]*/) ?? [""])[0];
+      const pair =
+        (prev === "{" && next === "}") ||
+        (prev === "[" && next === "]") ||
+        (prev === "(" && next === ")");
+      e.preventDefault();
+      if (pair && s === en) {
+        const inner = indent + "  ";
+        replace(s, en, "\n" + inner + "\n" + indent, s + 1 + inner.length);
+      } else {
+        const extra = /[{[(]$/.test(before) ? "  " : "";
+        replace(
+          s,
+          en,
+          "\n" + indent + extra,
+          s + 1 + indent.length + extra.length,
+        );
+      }
+      return;
+    }
+
+    const OPEN: Record<string, string> = {
+      "{": "}",
+      "[": "]",
+      "(": ")",
+      '"': '"',
+      "'": "'",
+      "`": "`",
+    };
+
+    // With a selection: wrap it in the pair (surround, don't replace) and keep
+    // the same text selected inside — e.g. select `foo`, press " → `"foo"`.
+    if (s !== en && OPEN[e.key]) {
+      e.preventDefault();
+      const sel = doc.slice(s, en);
+      commit(doc.slice(0, s) + e.key + sel + OPEN[e.key] + doc.slice(en));
+      requestAnimationFrame(() => ta.setSelectionRange(s + 1, en + 1));
+      return;
+    }
+
+    // Auto-close brackets / quotes (collapsed caret only).
+    if (s === en && OPEN[e.key]) {
+      const quote = e.key === '"' || e.key === "'" || e.key === "`";
+      // Skip quote-pairing next to a word char (likely an apostrophe / closer).
+      if (!(quote && (/\w/.test(prev) || next === e.key))) {
+        e.preventDefault();
+        replace(s, en, e.key + OPEN[e.key], s + 1);
+        return;
+      }
+    }
+
+    // Type over an auto-inserted closer instead of doubling it.
+    if (s === en && next === e.key && ")]}\"'`".includes(e.key)) {
+      e.preventDefault();
+      caretTo(s + 1);
+      return;
+    }
+
+    // Backspace between an empty pair deletes both halves.
+    if (e.key === "Backspace" && s === en && next && OPEN[prev] === next) {
+      e.preventDefault();
+      replace(s - 1, en + 1, "", s - 1);
+      return;
+    }
+  };
+
+  const newCommentPopover = buffer
+    ? // Scratch buffers have no comment system — never offer the popover.
+      null
+    : editorMode
     ? editorPopover && editorSel && editorSel.start !== editorSel.end
       ? {
           position: editorPopover,
@@ -1259,14 +1609,58 @@ function FileViewerImpl({
       </span>
 
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px]">
-        <FileIcon name={basename(path)} />
-        <span className="truncate text-[var(--text)]">{basename(path)}</span>
-        <span className="truncate text-[var(--text-tertiary)]">{path}</span>
+        {buffer ? (
+          <>
+            <NotebookPen
+              size={13}
+              className="shrink-0 text-[var(--text-tertiary)]"
+            />
+            <span className="text-[var(--text)]">{buffer.title}</span>
+          </>
+        ) : (
+          <>
+            <FileIcon name={basename(path)} />
+            <span className="truncate text-[var(--text)]">
+              {basename(path)}
+            </span>
+            <span className="truncate text-[var(--text-tertiary)]">{path}</span>
+          </>
+        )}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {data?.truncated && (
             <span className="text-[var(--text-tertiary)]">truncated</span>
           )}
-          {!isImage && text.length > 0 && (
+          {buffer && (
+            <>
+              <select
+                value={buffer.language}
+                onChange={(e) => buffer.onLanguageChange(e.target.value)}
+                title="Language (used for Format)"
+                className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              >
+                {buffer.languages.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              {buffer.onFormat && (
+                <button
+                  onClick={buffer.onFormat}
+                  disabled={!buffer.canFormat}
+                  title={
+                    buffer.canFormat
+                      ? "Format (⌘S)"
+                      : "No formatter for this language"
+                  }
+                  className="flex h-7 items-center rounded-md border border-[var(--border)] px-2 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--text-tertiary)]"
+                >
+                  Format
+                </button>
+              )}
+            </>
+          )}
+          {!buffer && !isImage && text.length > 0 && (
             <button
               onClick={() =>
                 window.open(
@@ -1303,7 +1697,7 @@ function FileViewerImpl({
                     {
                       label: "Line wrap",
                       on: lineWrapEnabled,
-                      set: lineWrapSetting.set,
+                      set: setLineWrap,
                     },
                     {
                       label: "Sticky scroll",
@@ -1450,39 +1844,76 @@ function FileViewerImpl({
               {editorMode && (
                 <textarea
                   ref={textareaRef}
-                  className="file-editor-input absolute bottom-0 top-0 resize-none border-0 bg-transparent p-0 text-[13px] leading-[20px] outline-none"
+                  className="file-editor-input absolute bottom-0 resize-none border-0 bg-transparent p-0 text-[13px] leading-[20px] outline-none"
+                  // A full-height overlay must never scroll ITSELF — the parent is
+                  // the only scroller. If the browser nudges it (caret follow on a
+                  // stale layout), its text slides out from under the highlighted
+                  // layer (the "combined text" overlap). Pin it back to 0.
+                  onScroll={(e) => {
+                    if (e.currentTarget.scrollTop !== 0)
+                      e.currentTarget.scrollTop = 0;
+                    if (e.currentTarget.scrollLeft !== 0)
+                      e.currentTarget.scrollLeft = 0;
+                  }}
                   style={{
+                    top: bufferTopPad,
                     left: gutterWidthPx,
-                    // Span the full content width (not the viewport) so the
-                    // transparent textarea scrolls in lockstep with the highlighted
-                    // layer — pinning to `right: 0` clipped it at the viewport and
-                    // desynced selection on lines wider than the screen.
-                    width: editorContentWidth,
-                    paddingLeft: CONTENT_PAD_LEFT,
+                    // No-wrap: span the full content width (not the viewport) so the
+                    // textarea scrolls in lockstep with the highlighted layer —
+                    // pinning to right:0 would clip it and desync selection on long
+                    // lines. Wrap (buffer only): pin to right:0 and match the layer's
+                    // pl-3/pr-6 padding so it soft-wraps at the exact same column,
+                    // keeping the caret aligned with the wrapped rows.
+                    ...(lineWrapEnabled
+                      ? {
+                          right: 0,
+                          paddingLeft: CONTENT_PAD_LEFT,
+                          paddingRight: 24,
+                          whiteSpace: "pre-wrap",
+                          overflowWrap: "break-word",
+                        }
+                      : {
+                          // At least fill the viewport (minus the gutter) so a
+                          // click in the empty space past a short line still hits
+                          // the textarea and drops a caret on that line; grow
+                          // wider than the viewport for long lines (h-scroll).
+                          width: Math.max(
+                            editorContentWidth,
+                            viewportW - gutterWidthPx,
+                          ),
+                          paddingLeft: CONTENT_PAD_LEFT,
+                          whiteSpace: "pre",
+                        }),
                     fontFamily: "var(--font-mono)",
                     color: "transparent",
                     caretColor: "var(--text)",
-                    whiteSpace: "pre",
                     overflow: "hidden",
                   }}
-                  value={text}
-                  wrap="off"
+                  // `displayText` is the full text unless folded, when it's just
+                  // the visible lines; `commit` maps edits back to the full text.
+                  value={displayText}
+                  wrap={lineWrapEnabled ? "soft" : "off"}
                   spellCheck={false}
                   autoCapitalize="off"
                   autoCorrect="off"
-                  aria-label={`${basename(path)} contents`}
-                  // Editable (so the caret actually shows — readOnly hides it), but
-                  // every mutation is cancelled. Flip ALLOW_TYPING to make it a real
-                  // editor later; the controlled value is the second line of defense.
-                  onChange={() => {}}
+                  aria-label={
+                    buffer ? buffer.title : `${basename(path)} contents`
+                  }
+                  // Editable (so the caret shows — readOnly hides it). For a file
+                  // with no in-memory buffer, `allowTyping` is false and every
+                  // mutation is cancelled below (read-only caret + selection only).
+                  onChange={(e) => {
+                    if (buffer) commit(e.target.value);
+                  }}
+                  onKeyDown={onEditorKeyDown}
                   onBeforeInput={(e) => {
-                    if (!ALLOW_TYPING) e.preventDefault();
+                    if (!allowTyping) e.preventDefault();
                   }}
                   onPaste={(e) => {
-                    if (!ALLOW_TYPING) e.preventDefault();
+                    if (!allowTyping) e.preventDefault();
                   }}
                   onDrop={(e) => {
-                    if (!ALLOW_TYPING) e.preventDefault();
+                    if (!allowTyping) e.preventDefault();
                   }}
                   // No onSelect: the native selection renders live on its own.
                   // Reading it into React state per drag-tick is what made the old

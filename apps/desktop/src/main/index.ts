@@ -31,6 +31,7 @@ import {
   setSessionName,
 } from "./manual-projects";
 import { readClaudeConfig, writeClaudeConfig } from "./claude-config";
+import { readScratch, writeScratch, type ScratchData } from "./scratch-store";
 import type { ProjectEntry } from "../shared-types";
 import {
   setCallbacks,
@@ -453,6 +454,12 @@ function registerIpc() {
   ipcMain.handle("updates:openDownload", (_e, url: string) => {
     if (/^https:\/\/github\.com\//.test(url)) void shell.openExternal(url);
   });
+
+  // Per-worktree scratchpad: durable notepad content persisted to ~/.plan.
+  ipcMain.handle("scratch:read", (_e, encoded: string) => readScratch(encoded));
+  ipcMain.handle("scratch:write", (_e, encoded: string, data: ScratchData) =>
+    writeScratch(encoded, data),
+  );
 
   ipcMain.handle(
     "projects:addManual",

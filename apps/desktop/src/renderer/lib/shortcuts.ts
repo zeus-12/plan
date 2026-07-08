@@ -87,6 +87,11 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         chords: [{ mods: ["meta"], key: "," }],
       },
       {
+        id: "openScratchpad",
+        label: "Open scratchpad",
+        chords: [{ mods: ["meta", "shift"], key: "S" }],
+      },
+      {
         id: "cycleTabs",
         label: "Cycle open tabs (next / prev)",
         chords: [

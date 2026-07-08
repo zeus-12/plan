@@ -18,7 +18,15 @@ import { mostRecentUsed } from "./mru-store";
 export type Tab =
   | { id: string; kind: "file"; path: string }
   | { id: string; kind: "diff"; subPath: string; path: string; staged: boolean }
-  | { id: string; kind: "chat"; sessionId: string };
+  | { id: string; kind: "chat"; sessionId: string }
+  | { id: string; kind: "scratch" };
+
+/**
+ * The scratchpad is a per-worktree singleton — one durable notepad per encoded.
+ * Its tab id is constant so opening it twice focuses the existing tab, and the
+ * content itself lives on disk (see main/scratch-store), not in the tab record.
+ */
+export const SCRATCH_TAB_ID = "scratch";
 
 export type TabKind = Tab["kind"];
 
@@ -54,6 +62,9 @@ export function makeDiffTab(
 }
 export function makeChatTab(sessionId: string): Tab {
   return { id: chatTabId(sessionId), kind: "chat", sessionId };
+}
+export function makeScratchTab(): Tab {
+  return { id: SCRATCH_TAB_ID, kind: "scratch" };
 }
 
 interface TabsState {
@@ -106,6 +117,9 @@ function reviveTab(raw: unknown): Tab | null {
   }
   if (t.kind === "chat" && typeof t.sessionId === "string") {
     return makeChatTab(t.sessionId);
+  }
+  if (t.kind === "scratch") {
+    return makeScratchTab();
   }
   return null;
 }
