@@ -2,7 +2,6 @@ import {
   app,
   BrowserWindow,
   dialog,
-  globalShortcut,
   ipcMain,
   Menu,
   nativeTheme,
@@ -122,52 +121,6 @@ function sendSwitcherCycle(key: string, shift: boolean) {
   mainWindow.webContents.send("switcher:cycle", { key, shift });
 }
 
-// Ctrl+Tab / Ctrl+Shift+Tab via OS-level hotkeys. This is the dependable way
-// to catch Ctrl+Tab on macOS — Chromium swallows it before the page's keydown,
-// and a menu accelerator for Tab is unreliable. globalShortcut taps the event
-// at the OS level, so it always fires. We register only while OUR window is
-// focused (toggled on focus/blur) so the combo isn't hijacked from other apps.
-// Commit-on-release still works: globalShortcut consumes Ctrl+Tab but not a
-// lone Ctrl keyup, so the renderer still sees the release.
-let switcherRegistered = false;
-
-function registerSwitcherShortcuts() {
-  if (switcherRegistered) return;
-  const a = globalShortcut.register("Control+Tab", () =>
-    sendSwitcherCycle("Tab", false),
-  );
-  const b = globalShortcut.register("Control+Shift+Tab", () =>
-    sendSwitcherCycle("Tab", true),
-  );
-  // Projects (Ctrl+`) get the SAME OS-level hook as Tab. before-input-event
-  // alone proved unreliable — when a terminal/xterm pane holds focus the page
-  // keydown is swallowed and the project switcher silently dies, while Tab kept
-  // working precisely because globalShortcut bypasses page-level handling. The
-  // backtick lives on the same physical key as ~, so Shift uses that accelerator.
-  const c = globalShortcut.register("Control+`", () =>
-    sendSwitcherCycle("Backquote", false),
-  );
-  const d = globalShortcut.register("Control+~", () =>
-    sendSwitcherCycle("Backquote", true),
-  );
-  switcherRegistered = a || b || c || d;
-  console.log("[switcher] globalShortcut registered:", {
-    ctrlTab: a,
-    ctrlShiftTab: b,
-    ctrlBacktick: c,
-    ctrlTilde: d,
-  });
-}
-
-function unregisterSwitcherShortcuts() {
-  if (!switcherRegistered) return;
-  globalShortcut.unregister("Control+Tab");
-  globalShortcut.unregister("Control+Shift+Tab");
-  globalShortcut.unregister("Control+`");
-  globalShortcut.unregister("Control+~");
-  switcherRegistered = false;
-}
-
 function buildMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
@@ -255,10 +208,6 @@ function createMainWindow(): BrowserWindow {
     if (mainWindow === win) mainWindow = null;
   });
 
-  // Scope the Ctrl+Tab hotkeys to when this window actually has focus.
-  win.on("focus", registerSwitcherShortcuts);
-  win.on("blur", unregisterSwitcherShortcuts);
-
   // Markdown links (target=_blank) open in the user's real browser, not a
   // blank Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -272,6 +221,13 @@ function createMainWindow(): BrowserWindow {
   // without firing). before-input-event is the dependable interception point:
   // it fires before the page, so we cancel the keystroke and forward a cycle to
   // the renderer, which owns the modal and commits when the user releases Ctrl.
+  //
+  // We deliberately do NOT swallow this with globalShortcut: a global hotkey
+  // fires once per physical press and never repeats, so holding the key can't
+  // cycle. before-input-event, by contrast, receives the OS key-repeat stream
+  // (repeated keyDowns while held) — so holding the trigger auto-cycles, and it
+  // stops the instant the key is released. keyUp/keyDown filtering below means
+  // only the repeating keyDowns step; the modal still commits on Ctrl release.
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || input.alt) return;
     // Ctrl+Tab cycles sessions — Tab stays Ctrl-only because Cmd+Tab is the
@@ -826,9 +782,6 @@ app.whenReady().then(async () => {
   bridgeTerminal();
 
   createMainWindow();
-  // Register immediately too — the window opens focused, but don't rely solely
-  // on the focus event's timing.
-  registerSwitcherShortcuts();
 
   // Seed the cwd cache from the authoritative manual-project paths before any
   // terminal:open / files:list IPC can arrive, so those never resolve a project
@@ -860,8 +813,4 @@ app.on("before-quit", () => {
   stopAll();
   stopAllWorktreeWatches();
   killAllTerminals();
-});
-
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
 });

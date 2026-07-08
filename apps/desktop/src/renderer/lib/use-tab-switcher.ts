@@ -5,9 +5,11 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
  *
  * Hold Ctrl and tap a trigger key to cycle a modal highlight; the highlight
  * commits ONLY when Ctrl is released — holding Ctrl keeps the modal open
- * indefinitely, however long the pause between taps. Shift reverses direction
- * for that tap. Escape cancels; losing window focus cancels too (so it can't
- * get stuck).
+ * indefinitely, however long the pause between taps. HOLDING the trigger key
+ * down auto-cycles: the OS key-repeat stream drives one step per repeat (see
+ * cycle's throttle for the rate cap), and it stops the instant you let go.
+ * Shift reverses direction for that tap. Escape cancels; losing window focus
+ * cancels too (so it can't get stuck).
  *
  * Several channels coexist — content-pane tabs (Ctrl+Tab) and the unified
  * projects+worktrees switcher (Ctrl+`) — but there
@@ -56,6 +58,9 @@ function close(commit: boolean) {
 // A keystroke can arrive twice — once from the renderer keydown and once from
 // main's IPC forward (which exists because Chromium swallows Ctrl+Tab before
 // the page sees it). Coalesce bursts so a single keystroke steps exactly once.
+// This same throttle caps the hold-to-repeat rate: when the trigger key is held,
+// the OS emits a fast key-repeat stream and we step at most once per window.
+const REPEAT_THROTTLE_MS = 40;
 let lastCycleAt = 0;
 
 /**
@@ -65,7 +70,7 @@ let lastCycleAt = 0;
  */
 function cycle(code: string, dir: 1 | -1) {
   const now = performance.now();
-  if (now - lastCycleAt < 40) return;
+  if (now - lastCycleAt < REPEAT_THROTTLE_MS) return;
   lastCycleAt = now;
   if (active) {
     const ch = channels.find((c) => c.id === active!.id);
