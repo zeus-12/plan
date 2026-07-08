@@ -121,6 +121,36 @@ function Shell() {
   const [reposByProject, setReposByProject] = useState<
     Map<string, DiscoveredRepo[]>
   >(new Map());
+  const [iconsByProject, setIconsByProject] = useState<Map<string, string>>(
+    new Map(),
+  );
+
+  // Project icons (repo favicon / GitHub avatar, resolved by the main process).
+  // Keyed off the SET of projects, not the list identity — the list is re-pulled
+  // on every watcher tick and we don't want to re-resolve icons each time.
+  const iconsKey = useMemo(
+    () =>
+      projects
+        .map((p) => p.encoded)
+        .sort()
+        .join("\n"),
+    [projects],
+  );
+  useEffect(() => {
+    if (!iconsKey) return;
+    let cancelled = false;
+    void window.electronAPI.getProjectIcons(iconsKey.split("\n")).then(
+      (icons) => {
+        if (!cancelled) setIconsByProject(new Map(Object.entries(icons)));
+      },
+      () => {
+        // Resolution failed outright — keep whatever we last knew.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [iconsKey]);
 
   /**
    * Discover repos for every project in parallel. The result drives:
@@ -586,6 +616,7 @@ function Shell() {
       <ProjectSidebar
         projects={projects}
         reposByProject={reposByProject}
+        iconsByProject={iconsByProject}
         worktreesByProject={allWorktrees.byProject}
         selectedProject={selectedEncoded}
         activeWorktreeId={activeWorktreeId}

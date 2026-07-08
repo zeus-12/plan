@@ -25,6 +25,8 @@ import type {
 
 interface ElectronAPI {
   listProjects: () => Promise<ProjectEntry[]>;
+  /** file:// icon URLs keyed by encoded cwd; projects with no icon are absent. */
+  getProjectIcons: (encodeds: string[]) => Promise<Record<string, string>>;
   listSessions: (encoded: string) => Promise<SessionListEntry[]>;
   readSession: (
     encoded: string,

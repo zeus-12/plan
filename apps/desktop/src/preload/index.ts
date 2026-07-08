@@ -5,6 +5,8 @@ import type { ProjectDefaults, CreatePrInput } from "../shared-types";
 
 const electronAPI = {
   listProjects: () => ipcRenderer.invoke("projects:list"),
+  getProjectIcons: (encodeds: string[]) =>
+    ipcRenderer.invoke("projects:icons", encodeds),
   listSessions: (encoded: string) =>
     ipcRenderer.invoke("projects:listSessions", encoded),
   readSession: (encoded: string, sessionId: string) =>

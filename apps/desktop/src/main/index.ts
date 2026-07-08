@@ -59,6 +59,7 @@ import {
   searchProjectFiles,
 } from "./project-files";
 import { listSkills } from "./skills";
+import { getProjectIcons } from "./project-icons";
 import { checkForUpdate } from "./updates";
 import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
@@ -420,6 +421,10 @@ async function listAllProjects(): Promise<ProjectEntry[]> {
 
 function registerIpc() {
   ipcMain.handle("projects:list", async () => listAllProjects());
+
+  ipcMain.handle("projects:icons", (_e, encodeds: string[]) =>
+    getProjectIcons(encodeds),
+  );
 
   // Update notifier: report whether a newer release exists, and open the
   // download page in the user's browser. We never install — the app is unsigned.
