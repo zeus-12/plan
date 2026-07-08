@@ -38,15 +38,9 @@ let unsubExit: (() => void) | null = null;
 
 /**
  * Resolve a chat pty id to a human label for the notification body. Set by the
- * watcher from the live projects list; falls back to the raw id fragment.
+ * app root from the live projects list (project name only, by design).
  */
-let resolveLabel: (id: string) => string = defaultLabel;
-
-function defaultLabel(id: string): string {
-  // chat:<encoded>:<sessionId> — show the short session id as a last resort.
-  const sessionId = id.split(":").pop() ?? id;
-  return sessionId.slice(0, 8);
-}
+let resolveLabel: (id: string) => string = () => "Claude";
 
 export function setSessionLabelResolver(fn: (id: string) => string) {
   resolveLabel = fn;

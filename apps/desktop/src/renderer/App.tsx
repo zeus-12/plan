@@ -379,16 +379,14 @@ function Shell() {
   // one on screen.
   useEffect(() => startSessionDoneNotifier(), []);
   // Keep the notification body's project label in sync with the project list.
+  // Deliberately just the project name — no chat title, no session id.
   useEffect(() => {
     const byEncoded = new Map(
       projects.map((p) => [p.encoded, projectShortName(p)]),
     );
     setSessionLabelResolver((id) => {
       const m = id.match(/^chat:(.+):([^:]+)$/);
-      if (!m) return "Claude";
-      const name = byEncoded.get(m[1]);
-      const sid = m[2].slice(0, 8);
-      return name ? `${name} · ${sid}` : sid;
+      return (m && byEncoded.get(m[1])) || "Claude";
     });
   }, [projects]);
   const navigateToSession = useCallback(
