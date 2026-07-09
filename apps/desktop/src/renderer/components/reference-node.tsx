@@ -11,6 +11,7 @@ import {
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@plan/shared/lib/utils";
+import { basename } from "@plan/shared/lib/path";
 import { FileIcon, FolderIcon } from "./file-icon";
 
 export type ReferenceKind = "file" | "folder" | "skill";
@@ -106,12 +107,6 @@ export function $createReferenceNode(
   value: string,
 ): ReferenceNode {
   return $applyNodeReplacement(new ReferenceNode(kind, value));
-}
-
-/** Last path segment — what we actually show on a file/folder chip. */
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
 }
 
 function ReferenceChip({

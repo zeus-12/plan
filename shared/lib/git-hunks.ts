@@ -91,14 +91,3 @@ export function buildSingleHunkPatch(
   // `git apply` needs a trailing newline.
   return `${parsed.fileHeader}\n${hunk.header}\n${hunk.body}\n`;
 }
-
-/** Preview text: first non-context line, truncated. */
-export function hunkPreview(hunk: GitHunk, maxLen = 80): string {
-  for (const line of hunk.body.split("\n")) {
-    if (line.startsWith("+") || line.startsWith("-")) {
-      const text = line.slice(1).trim();
-      return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
-    }
-  }
-  return `@@ ${hunk.header.slice(2).trim()}`;
-}

@@ -75,13 +75,7 @@ const electronAPI = {
     headSha: string | null,
     newPath: string | null,
   ) =>
-    ipcRenderer.invoke(
-      "github:prFileView",
-      encoded,
-      subPath,
-      headSha,
-      newPath,
-    ),
+    ipcRenderer.invoke("github:prFileView", encoded, subPath, headSha, newPath),
 
   listProjectFiles: (encoded: string) =>
     ipcRenderer.invoke("files:list", encoded),
@@ -192,7 +186,6 @@ const electronAPI = {
   terminalStatus: (id: string) => ipcRenderer.invoke("terminal:status", id),
   terminalInputState: (id: string) =>
     ipcRenderer.invoke("terminal:inputState", id),
-  terminalDump: (id: string) => ipcRenderer.invoke("terminal:dump", id),
   terminalBusyIds: () => ipcRenderer.invoke("terminal:busyIds"),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", id, cols, rows),

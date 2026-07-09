@@ -1,5 +1,5 @@
-import LZString from "lz-string";
 import { FRONTEND_URL } from "./config";
+import { encodeVersioned, decodeVersioned } from "./url-codec";
 
 /** The `/doc` route's hash prefix — shared by the web page and link builders. */
 export const DOC_HASH_PREFIX = "#c=";
@@ -50,8 +50,7 @@ interface WireComment {
 
 /** Convert doc state to a URL-safe compressed string. */
 export function encodeDocState(state: DocState): string {
-  const payload = JSON.stringify({
-    v: VERSION,
+  return encodeVersioned(VERSION, {
     t: state.text,
     lang: state.language,
     c: state.comments.map(
@@ -67,7 +66,6 @@ export function encodeDocState(state: DocState): string {
       }),
     ),
   });
-  return LZString.compressToEncodedURIComponent(payload);
 }
 
 /**
@@ -83,49 +81,37 @@ export function buildDocUrl(
 
 /** Reverse of encodeDocState. Returns null if the input is malformed. */
 export function decodeDocState(encoded: string): DocState | null {
-  if (!encoded) return null;
-  try {
-    const raw = LZString.decompressFromEncodedURIComponent(encoded);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as {
-      v?: number;
-      t?: unknown;
-      lang?: unknown;
-      c?: unknown;
-    };
-    if (parsed.v !== VERSION) return null;
-    if (typeof parsed.t !== "string") return null;
-    const comments: DocComment[] = Array.isArray(parsed.c)
-      ? parsed.c.flatMap((raw) => {
-          const c = raw as Partial<WireComment>;
-          if (
-            typeof c.i !== "string" ||
-            typeof c.s !== "number" ||
-            typeof c.e !== "number" ||
-            typeof c.b !== "string"
-          ) {
-            return [];
-          }
-          return [
-            {
-              id: c.i,
-              start: c.s,
-              end: c.e,
-              quote: typeof c.q === "string" ? c.q : "",
-              body: c.b,
-              author: typeof c.a === "string" ? c.a : undefined,
-              deviceId: typeof c.d === "string" ? c.d : undefined,
-              createdAt: typeof c.t === "number" ? c.t : undefined,
-            },
-          ];
-        })
-      : [];
-    return {
-      text: parsed.t,
-      language: typeof parsed.lang === "string" ? parsed.lang : undefined,
-      comments,
-    };
-  } catch {
-    return null;
-  }
+  const parsed = decodeVersioned(VERSION, encoded);
+  if (!parsed) return null;
+  if (typeof parsed.t !== "string") return null;
+  const comments: DocComment[] = Array.isArray(parsed.c)
+    ? parsed.c.flatMap((raw) => {
+        const c = raw as Partial<WireComment>;
+        if (
+          typeof c.i !== "string" ||
+          typeof c.s !== "number" ||
+          typeof c.e !== "number" ||
+          typeof c.b !== "string"
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: c.i,
+            start: c.s,
+            end: c.e,
+            quote: typeof c.q === "string" ? c.q : "",
+            body: c.b,
+            author: typeof c.a === "string" ? c.a : undefined,
+            deviceId: typeof c.d === "string" ? c.d : undefined,
+            createdAt: typeof c.t === "number" ? c.t : undefined,
+          },
+        ];
+      })
+    : [];
+  return {
+    text: parsed.t,
+    language: typeof parsed.lang === "string" ? parsed.lang : undefined,
+    comments,
+  };
 }

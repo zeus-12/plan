@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import { type FontSize } from "./settings";
+import { usePersistedSettings } from "./use-persisted-settings";
 
 const STORAGE_KEY = "plan-doc-settings";
 
@@ -24,28 +24,5 @@ export function useDocSettings(): [
   DocSettings,
   (patch: Partial<DocSettings>) => void,
 ] {
-  const [settings, setSettings] = useState<DocSettings>(DEFAULTS);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) });
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const update = useCallback((patch: Partial<DocSettings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, []);
-
-  return [settings, update];
+  return usePersistedSettings(STORAGE_KEY, DEFAULTS);
 }

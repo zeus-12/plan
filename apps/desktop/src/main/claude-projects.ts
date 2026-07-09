@@ -71,11 +71,6 @@ function extractCwd(jsonl: string): string | null {
 }
 
 /**
- * Resolve a project's real working directory by reading the `cwd` field from
- * its most recent session JSONL. Cached. Falls back to the lossy decode when
- * no session file is readable.
- */
-/**
  * Seed the cwd cache for an encoded key whose real path we already know (e.g. a
  * worktree checkout that has no Claude session JSONL yet). Lets all the
  * `(encoded, subPath)` git ops resolve to the worktree without a transcript.
@@ -84,6 +79,11 @@ export function primeProjectCwd(encoded: string, cwd: string): void {
   cwdCache.set(encoded, cwd);
 }
 
+/**
+ * Resolve a project's real working directory by reading the `cwd` field from
+ * its most recent session JSONL. Cached. Falls back to the lossy decode when
+ * no session file is readable.
+ */
 export async function resolveProjectCwd(encoded: string): Promise<string> {
   const cached = cwdCache.get(encoded);
   if (cached) return cached;

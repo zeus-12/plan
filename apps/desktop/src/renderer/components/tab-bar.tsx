@@ -1,15 +1,11 @@
 import { forwardRef, memo, useEffect, useRef, type ReactNode } from "react";
 import { NotebookPen } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
+import { basename } from "@plan/shared/lib/path";
 import { FileIcon } from "./file-icon";
 import { WorkingIcon } from "./working-icon";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 import type { Tab } from "../lib/tabs-store";
-
-function basename(path: string): string {
-  const parts = path.split("/");
-  return parts[parts.length - 1] || path;
-}
 
 function ChatIcon() {
   return (

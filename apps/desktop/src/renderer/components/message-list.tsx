@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
+import { basename } from "@plan/shared/lib/path";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { useTextFind } from "@plan/shared/lib/use-text-find";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
@@ -436,12 +437,6 @@ function ChevronRight({ open }: { open: boolean }) {
   );
 }
 
-/** The basename of a path (last segment), for compact tool-call headers. */
-function baseName(p: string): string {
-  const parts = p.split("/");
-  return parts[parts.length - 1] || p;
-}
-
 /**
  * A tool call → a short verb + target for the header line, e.g.
  * Read → ("Read", "file.ts"), Bash → ("Ran", "<description>"). Tools without a
@@ -458,12 +453,12 @@ function toolHeader(
   const fp = asStr(obj.file_path);
   switch (tool) {
     case "Read":
-      return { verb: "Read", target: fp ? baseName(fp) : "" };
+      return { verb: "Read", target: fp ? basename(fp) : "" };
     case "Edit":
     case "MultiEdit":
-      return { verb: "Edit", target: fp ? baseName(fp) : "" };
+      return { verb: "Edit", target: fp ? basename(fp) : "" };
     case "Write":
-      return { verb: "Write", target: fp ? baseName(fp) : "" };
+      return { verb: "Write", target: fp ? basename(fp) : "" };
     case "Bash":
       return {
         verb: "Ran",

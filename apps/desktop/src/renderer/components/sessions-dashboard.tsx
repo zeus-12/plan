@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
+import { lastSegment } from "@plan/shared/lib/path";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 
 interface TerminalInfo {
@@ -26,10 +27,6 @@ function parseId(id: string): Parsed {
   m = id.match(/^term:(.+):([^:]+)$/);
   if (m) return { kind: "shell", encoded: m[1], n: m[2] };
   return { kind: "other" };
-}
-
-function projectName(cwd: string): string {
-  return cwd.split("/").filter(Boolean).pop() ?? cwd;
 }
 
 /**
@@ -194,7 +191,7 @@ function SessionRow({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
-          {projectName(cwd)}
+          {lastSegment(cwd)}
           <span className="text-[var(--text-tertiary)]"> · {label}</span>
         </span>
         <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">

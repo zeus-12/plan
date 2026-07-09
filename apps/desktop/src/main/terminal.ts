@@ -500,24 +500,6 @@ export function detectInputState(id: string): {
   return { state, lines: nonEmpty.slice(-12) };
 }
 
-/**
- * Full rendered text of terminal `id` (scrollback + visible screen), trimmed of
- * leading/trailing blank lines. Debug aid: lets the UI copy what the headless
- * emulator currently "sees" so the detection heuristics can be tuned against
- * real Claude Code frames.
- */
-export function dumpTerminal(id: string): string {
-  const s = sessions.get(id);
-  if (!s) return "";
-  const buf = s.screen.buffer.active;
-  const out: string[] = [];
-  for (let i = 0; i < buf.length; i++) {
-    const line = buf.getLine(i);
-    out.push(line ? line.translateToString(true) : "");
-  }
-  return out.join("\n").replace(/^\n+|\n+$/g, "");
-}
-
 // While a Claude turn is in flight, its TUI footer renders an "esc to interrupt"
 // hint, and drops it the instant the turn ends (returning to the idle prompt or
 // stopping at an approval menu). That hint is the one true "working" signal:

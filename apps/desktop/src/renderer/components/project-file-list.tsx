@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@plan/shared/lib/utils";
+import { basename, dirname } from "@plan/shared/lib/path";
 import { FileIcon, FolderIcon } from "./file-icon";
 
 interface Props {
@@ -14,15 +15,6 @@ interface Props {
 }
 
 const ROW_HEIGHT = 24;
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
-}
-function dirname(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? "" : p.slice(0, i);
-}
 
 // ── Tree model ──────────────────────────────────────────────────────
 interface DirNode {

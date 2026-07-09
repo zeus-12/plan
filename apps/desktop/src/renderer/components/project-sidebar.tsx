@@ -7,6 +7,7 @@ import {
   Settings as SettingsGear,
 } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
+import { lastSegment } from "@plan/shared/lib/path";
 import {
   Sidebar,
   SidebarContent,
@@ -396,9 +397,7 @@ export function ProjectSidebar({
 
   const confirmCopy = useMemo(() => {
     if (!confirmTarget) return null;
-    const name =
-      confirmTarget.project.cwd.split("/").filter(Boolean).pop() ??
-      confirmTarget.project.cwd;
+    const name = lastSegment(confirmTarget.project.cwd);
     if (confirmTarget.kind === "archive") {
       return {
         title: `Archive "${name}"?`,
@@ -649,8 +648,7 @@ export function ProjectSidebar({
                 const p = row.project;
                 const isLiveActive =
                   p.encoded === selected && activeWorktreeId === null;
-                const shortName =
-                  p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
+                const shortName = lastSegment(p.cwd);
                 const branch = branches.get(p.encoded);
                 const hasWorktrees = row.worktrees.length > 0;
                 const showCount = !row.expanded && hasWorktrees;

@@ -25,6 +25,7 @@ import {
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
 import { cn } from "@plan/shared/lib/utils";
+import { basename, dirname, lastSegment } from "@plan/shared/lib/path";
 import type {
   ProjectEntry,
   ParsedSession,
@@ -66,7 +67,7 @@ import { cachedPrTitle } from "../lib/pr-store";
 import { PrView } from "./pr-view";
 import { TabBar } from "./tab-bar";
 import { ScratchEditor } from "./scratch-editor";
-import { isWorking, useTerminalWorking } from "../lib/terminal-activity-store";
+import { useTerminalWorking } from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { CommandsConfigModal } from "./commands-config-modal";
@@ -89,16 +90,6 @@ import {
 } from "../lib/session-cache";
 import { osNotify, pushToast } from "../lib/toast-store";
 import { markNewSession, isNewSession } from "../lib/new-session-ids";
-
-// EXPERIMENTAL input-box/menu detection: when true, fires a toast + devtools log
-// on every detected state change so the heuristic's accuracy can be validated.
-// Off now that "Needs input" is reliable — flip back on to re-tune the regexes.
-const DEBUG_INPUT_DETECT = false;
-
-// Shows a "Copy terminal" button (and ⌘⇧D) in the chat header that copies the
-// headless emulator's full rendered text — handy for sharing real Claude Code
-// frames to tune the detection heuristics. Flip off to hide it.
-const DEBUG_COPY_TERMINAL = false;
 
 // Stable identity for the middle sidebar's ⌘E toggle shortcut (see the keyed
 // SidebarProvider below). A module constant so it isn't a fresh object each
@@ -156,7 +147,7 @@ function WorkspaceHeader({
   repoLabel: string | null;
 }) {
   const middle = useSidebar();
-  const shortName = project.cwd.split("/").filter(Boolean).pop() ?? project.cwd;
+  const shortName = lastSegment(project.cwd);
 
   return (
     <header
@@ -1205,14 +1196,14 @@ function ProjectWorkspaceImpl({
       : projectFiles.slice(0, 200);
     return matched.map((f) => ({
       id: f,
-      label: fileBase(f),
-      sublabel: fileDir(f),
+      label: basename(f),
+      sublabel: dirname(f),
       // Surface the resolved jump target so it's clear the suffix was parsed.
       badge:
         targetLine != null
           ? `:${targetLine}${targetCol != null ? `:${targetCol}` : ""}`
           : undefined,
-      icon: <FileIcon name={fileBase(f)} />,
+      icon: <FileIcon name={basename(f)} />,
       onSelect: () => {
         if (targetLine != null) {
           // line is 1-based; col is 1-based in the query but 0-based offsets
@@ -1267,7 +1258,7 @@ function ProjectWorkspaceImpl({
                   ? s.derivedTitle
                   : null,
               projectEncoded: p.encoded,
-              projectName: projShortName(p),
+              projectName: lastSegment(p.cwd),
             }));
         } catch {
           return [];
@@ -1282,7 +1273,7 @@ function ProjectWorkspaceImpl({
       .filter((p) => !p.archived)
       .map((p) => ({
         id: `p:${p.encoded}`,
-        name: projShortName(p),
+        name: lastSegment(p.cwd),
         project: p.cwd,
         badge: "project",
         run: () => onSelectProject(p.encoded),
@@ -1895,20 +1886,17 @@ function ProjectWorkspaceImpl({
     selectedSessionId ? `${chatPrefix}${selectedSessionId}` : null,
   );
 
-  // ── EXPERIMENTAL: input-box vs. selection-menu detection ─────────────
+  // ── Input-box vs. selection-menu detection ───────────────────────────
   // Heuristic read of the chat terminal's rendered screen (a headless emulator
   // in main scans the bottom rows for Claude's TUI box). "selection" means a
   // numbered approval/plan/question menu is up — there's NO free-text box, so
-  // sending a message + Enter would mis-navigate the menu. This is a guess, not
-  // a protocol; DEBUG_INPUT_DETECT (module scope) toasts accuracy for tuning.
+  // sending a message + Enter would mis-navigate the menu.
   const [inputState, setInputState] = useState<
     "input" | "selection" | "unknown"
   >("unknown");
-  const lastDetectRef = useRef<string | null>(null);
   useEffect(() => {
     if (!chatTerminalReady || !selectedSessionId) {
       setInputState("unknown");
-      lastDetectRef.current = null;
       return;
     }
     const tid = `${chatPrefix}${selectedSessionId}`;
@@ -1918,20 +1906,6 @@ function ProjectWorkspaceImpl({
         const res = await window.electronAPI.terminalInputState(tid);
         if (!alive) return;
         setInputState(res.state);
-        if (DEBUG_INPUT_DETECT && res.state !== lastDetectRef.current) {
-          lastDetectRef.current = res.state;
-          // Full grid tail to devtools (toasts truncate) so the glyphs that
-          // drove the classification can be inspected and the regexes tuned.
-          console.debug(`[input-detect] ${res.state}\n` + res.lines.join("\n"));
-          pushToast(
-            {
-              title: `[detect] ${res.state} — ${
-                res.lines.slice(-3).join(" ↵ ") || "(empty)"
-              }`,
-            },
-            6_000,
-          );
-        }
       } catch {
         if (alive) setInputState("unknown");
       }
@@ -1969,65 +1943,6 @@ function ProjectWorkspaceImpl({
       autoRevealedRef.current = false;
     }
   }, [awaitingSelection, selectedSessionId, revealChatTerminal]);
-
-  // Debug: capture the chat terminal's rendered text twice — once now (idle),
-  // then again after 2s (scroll during the wait) — and put BOTH frames on the
-  // clipboard so we can compare "idle" vs "while scrolling" and find a real
-  // signal for "working" that scroll output can't fake (button + ⌘⇧D).
-  const copyTerminalDump = useCallback(async () => {
-    if (!selectedSessionId) return;
-    const tid = `${chatPrefix}${selectedSessionId}`;
-    // Snapshot both the rendered screen AND what the app currently believes the
-    // state is: `working` is the timing signal (the one that mis-fires), and
-    // `inputState` is main's screen-derived read. Capturing them WITH the frame
-    // removes any ambiguity about what was shown vs. what we inferred.
-    const snapshot = async (tag: string) => {
-      const text = await window.electronAPI.terminalDump(tid);
-      const working = isWorking(tid);
-      let inputState = "unknown";
-      try {
-        inputState = (await window.electronAPI.terminalInputState(tid)).state;
-      } catch {
-        /* main may not classify it — leave as unknown */
-      }
-      return [
-        `===== ${tag} =====`,
-        `[app state] working=${working}  inputState=${inputState}`,
-        "",
-        text,
-      ].join("\n");
-    };
-    try {
-      const before = await snapshot("FRAME A (idle / before)");
-      pushToast({ title: "Captured frame A — scroll now (2s)…" }, 2_000);
-      await new Promise((r) => setTimeout(r, 2_000));
-      const after = await snapshot("FRAME B (after 2s / while scrolling)");
-      const combined = `${before}\n\n${after}`;
-      await navigator.clipboard.writeText(combined);
-      pushToast(
-        { title: `Copied both frames (${combined.length} chars)` },
-        3_000,
-      );
-    } catch {
-      pushToast({ title: "Couldn't copy the terminal" }, 3_000);
-    }
-  }, [selectedSessionId, chatPrefix]);
-
-  useEffect(() => {
-    if (!DEBUG_COPY_TERMINAL) return;
-    const handler = (e: KeyboardEvent) => {
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        e.key.toLowerCase() === "d"
-      ) {
-        e.preventDefault();
-        void copyTerminalDump();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [copyTerminalDump]);
 
   // Conversation turns (user messages that aren't tool results) — far more
   // meaningful than raw transcript entry count, and free to compute.
@@ -2811,17 +2726,6 @@ function ProjectWorkspaceImpl({
                         "No session"}
                     </span>
                     <div className="flex shrink-0 items-center gap-3">
-                      {DEBUG_COPY_TERMINAL &&
-                        selectedSessionId &&
-                        chatTerminalReady && (
-                          <button
-                            onClick={copyTerminalDump}
-                            title="Capture frame, wait 2s (scroll now), capture again — both to clipboard — ⌘⇧D (debug)"
-                            className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-                          >
-                            Copy 2 frames
-                          </button>
-                        )}
                       <span>
                         {session
                           ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
@@ -2921,7 +2825,9 @@ function ProjectWorkspaceImpl({
                           onSend={handleAddToChat}
                           sendLabel="Add to chat"
                           shortcutEnabled={
-                            active && activeTab?.kind === "chat" && !chatInputFocused
+                            active &&
+                            activeTab?.kind === "chat" &&
+                            !chatInputFocused
                           }
                           onClear={handleClearComments}
                         />
@@ -3094,18 +3000,6 @@ function isTerminalFocused(): boolean {
   return !!el && !!el.closest(".xterm");
 }
 
-function fileBase(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
-}
-function fileDir(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? "" : p.slice(0, i);
-}
-function projShortName(p: ProjectEntry): string {
-  return p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
-}
-
 function letterFromCode(code: string): FileEntry["letter"] | null {
   // X is staged-side, Y is unstaged-side. Pick the most informative.
   const codes = [code[0], code[1]].filter((c) => c && c !== " ");
@@ -3134,9 +3028,7 @@ function letterFromDiff(diff?: FileDiff): FileEntry["letter"] {
 }
 
 function repoDisplayName(repo: DiscoveredRepo, projectCwd: string): string {
-  if (!repo.subPath) {
-    return projectCwd.split("/").filter(Boolean).pop() ?? projectCwd;
-  }
+  if (!repo.subPath) return lastSegment(projectCwd);
   return repo.subPath;
 }
 

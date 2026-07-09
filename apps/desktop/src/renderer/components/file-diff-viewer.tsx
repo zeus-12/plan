@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
 import { cn } from "@plan/shared/lib/utils";
+import { isImagePath } from "../lib/image-paths";
 import { useWorktreeRevision } from "../lib/worktree-revision";
 import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
 import {
@@ -325,10 +326,7 @@ function FileDiffViewerImpl({
     setBlameL(null);
     setBlameR(null);
     let cancelled = false;
-    const fetchSide = (
-      src: string,
-      set: (b: TextBlame | null) => void,
-    ) => {
+    const fetchSide = (src: string, set: (b: TextBlame | null) => void) => {
       if (!src) return;
       window.electronAPI.blameContents(encoded, blameRelPath, src).then((r) => {
         if (!cancelled) set(tagBlame(r, src));
@@ -351,8 +349,10 @@ function FileDiffViewerImpl({
   } = useBlameCard(encoded, blameRelPath);
 
   // A side's blame is trusted only while its tag IS that side's rendered text.
-  const matchedBlameL = blameL && blameL.forText === viewOldText ? blameL : null;
-  const matchedBlameR = blameR && blameR.forText === viewNewText ? blameR : null;
+  const matchedBlameL =
+    blameL && blameL.forText === viewOldText ? blameL : null;
+  const matchedBlameR =
+    blameR && blameR.forText === viewNewText ? blameR : null;
 
   const diffBlame = useMemo<DiffBlame | undefined>(() => {
     if (!matchedBlameL && !matchedBlameR) return undefined;
@@ -655,27 +655,6 @@ function statusLabel(s: FileDiff["status"]): string {
     default:
       return "modified";
   }
-}
-
-/** Image file types we render visually (before/after) instead of as a diff. */
-const IMAGE_EXTS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "ico",
-  "avif",
-  "svg",
-  "apng",
-]);
-
-function isImagePath(path: string): boolean {
-  const dot = path.lastIndexOf(".");
-  const slash = path.lastIndexOf("/");
-  if (dot <= slash) return false;
-  return IMAGE_EXTS.has(path.slice(dot + 1).toLowerCase());
 }
 
 /** Absolute local path → cache-busted `file://` URL (same approach as transcript images). */

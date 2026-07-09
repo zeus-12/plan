@@ -14,6 +14,7 @@ import {
   useSidebar,
 } from "@plan/shared/components/ui/sidebar";
 import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
+import { lastSegment } from "@plan/shared/lib/path";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { WorkspaceHost, type MountTarget } from "./components/workspace-host";
@@ -111,10 +112,6 @@ const switchTargetId = (encoded: string, worktreeId: string | null) =>
   worktreeId ? `w:${worktreeId}` : `p:${encoded}`;
 // Stable getSnapshot for useSyncExternalStore — reads only the switcher scope.
 const getSwitchMruVersion = () => getMruScopeVersion(SWITCH_MRU_SCOPE);
-
-function projectShortName(p: ProjectEntry): string {
-  return p.cwd.split("/").filter(Boolean).pop() ?? p.cwd;
-}
 
 function Shell() {
   const projectsSidebar = useSidebar();
@@ -223,10 +220,7 @@ function Shell() {
   // ⌘R: main forwards the press here (it no longer reloads directly). An open
   // data page — the PR view — claims it to force-refresh its own data; with no
   // claimant this falls back to the ordinary full-app reload.
-  useEffect(
-    () => window.electronAPI.onReloadRequest(handleReloadRequest),
-    [],
-  );
+  useEffect(() => window.electronAPI.onReloadRequest(handleReloadRequest), []);
 
   const handleAddProject = useCallback(async () => {
     const added = await window.electronAPI.addManualProject();
@@ -295,15 +289,12 @@ function Shell() {
   }, []);
   // Cross-project = clicking a worktree under any project in the sidebar. Sets
   // both project + worktree atomically so neither clobbers the other.
-  const selectWorktree = useCallback(
-    (projectEncoded: string, id: string) => {
-      startTransition(() => {
-        setSelectedEncoded(projectEncoded);
-        setActiveWorktreeId(id);
-      });
-    },
-    [],
-  );
+  const selectWorktree = useCallback((projectEncoded: string, id: string) => {
+    startTransition(() => {
+      setSelectedEncoded(projectEncoded);
+      setActiveWorktreeId(id);
+    });
+  }, []);
 
   const handleNewWorktree = useCallback((projectEncoded: string) => {
     // Select the target project synchronously (not via the transition-wrapped
@@ -452,7 +443,7 @@ function Shell() {
   // Deliberately just the project name — no chat title, no session id.
   useEffect(() => {
     const byEncoded = new Map(
-      projects.map((p) => [p.encoded, projectShortName(p)]),
+      projects.map((p) => [p.encoded, lastSegment(p.cwd)]),
     );
     setSessionLabelResolver((id) => {
       const m = id.match(/^chat:(.+):([^:]+)$/);
@@ -498,7 +489,10 @@ function Shell() {
   // float up the switcher by recency, Alt-Tab style.
   useEffect(() => {
     if (selectedEncoded)
-      recordUse(SWITCH_MRU_SCOPE, switchTargetId(selectedEncoded, activeWorktreeId));
+      recordUse(
+        SWITCH_MRU_SCOPE,
+        switchTargetId(selectedEncoded, activeWorktreeId),
+      );
   }, [selectedEncoded, activeWorktreeId]);
 
   // Switching projects remounts the whole workspace (keyed by encoded) and
@@ -544,7 +538,7 @@ function Shell() {
     if (selected.encoded !== from) {
       out.push({
         key: "__live__",
-        label: projectShortName(selected),
+        label: lastSegment(selected.cwd),
         sub: "working copy",
         encoded: selected.encoded,
         worktreeId: null,
@@ -614,7 +608,7 @@ function Shell() {
         key: p.encoded,
         projectEncoded: p.encoded,
         worktreeId: null,
-        label: projectShortName(p),
+        label: lastSegment(p.cwd),
         sub: p.cwd,
         worktree: false,
       });
@@ -625,7 +619,7 @@ function Shell() {
           projectEncoded: p.encoded,
           worktreeId: w.id,
           label: w.name,
-          sub: projectShortName(p),
+          sub: lastSegment(p.cwd),
           worktree: true,
         });
       }
@@ -770,7 +764,9 @@ function Shell() {
           <MoveSessionModal
             sessionTitle={moveSession.title}
             targets={moveTargets}
-            onPick={(encoded, worktreeId) => void performMove(encoded, worktreeId)}
+            onPick={(encoded, worktreeId) =>
+              void performMove(encoded, worktreeId)
+            }
             onNewWorktree={() => {
               setPendingMoveOnCreate(true);
               setShowNewWorktree(true);

@@ -44,6 +44,8 @@ import { useTextFind } from "@plan/shared/lib/use-text-find";
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { buildDocUrl } from "@plan/shared/lib/doc-share-url";
 import { cn } from "@plan/shared/lib/utils";
+import { basename } from "@plan/shared/lib/path";
+import { isImagePath } from "../lib/image-paths";
 import { FileIcon } from "./file-icon";
 import { ImageLightbox } from "./image-lightbox";
 import { useWorktreeRevision } from "../lib/worktree-revision";
@@ -111,23 +113,6 @@ const ENABLE_EDITOR_CARET = true;
  * read-only view. Keeps huge files fast at the cost of the caret on those.
  */
 const EDITOR_MAX_LINES = 4000;
-
-const IMAGE_EXTS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "ico",
-  "avif",
-  "svg",
-]);
-
-function isImagePath(p: string): boolean {
-  const i = p.lastIndexOf(".");
-  return i !== -1 && IMAGE_EXTS.has(p.slice(i + 1).toLowerCase());
-}
 
 interface Props {
   encoded: string;
@@ -211,11 +196,6 @@ interface Hl {
   s: number;
   e: number;
   kind: "ann" | "pending" | "search" | "find" | "find-current";
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
 }
 
 /**
@@ -626,9 +606,7 @@ function FileViewerImpl({
       // plain black between keystrokes. A file switch instead blanks via
       // highlightStale so the previous file's colors never paint the new one.
       if (buffer) return highlightPerLine(deferredText, language);
-      return highlightStale
-        ? EMPTY_PER_LINE
-        : highlightPerLine(text, language);
+      return highlightStale ? EMPTY_PER_LINE : highlightPerLine(text, language);
     },
     // shikiReady / shikiTheme are deps so colors appear once the highlighter
     // finishes loading and re-tokenize when the theme changes.
@@ -653,7 +631,8 @@ function FileViewerImpl({
   const EMPTY_BRACKETS = useMemo(() => new Map<number, BracketMark[]>(), []);
   const bracketByLine = useMemo(
     () => {
-      if (!bracketEnabled || !shikiReady || !isTextContent) return EMPTY_BRACKETS;
+      if (!bracketEnabled || !shikiReady || !isTextContent)
+        return EMPTY_BRACKETS;
       // Same deferred-vs-blank split as perLine, so bracket colors also persist
       // while typing a buffer instead of flashing off.
       if (buffer)
@@ -1775,31 +1754,31 @@ function FileViewerImpl({
     ? // Scratch buffers have no comment system — never offer the popover.
       null
     : editorMode
-    ? editorPopover && editorSel && editorSel.start !== editorSel.end
-      ? {
-          position: editorPopover,
-          selectedText: text.slice(
-            Math.min(editorSel.start, editorSel.end),
-            Math.max(editorSel.start, editorSel.end),
-          ),
-          onSubmit: submitEditorComment,
-          onClose: () => {
-            setEditorPopover(null);
-            const ta = textareaRef.current;
-            if (ta && editorSel)
-              ta.setSelectionRange(editorSel.end, editorSel.end);
-            setEditorSel((s) => (s ? { start: s.end, end: s.end } : null));
-          },
-        }
-      : null
-    : pending
-      ? {
-          position: pending.position,
-          selectedText: pending.selectedText,
-          onSubmit: selection.submit,
-          onClose: selection.cancel,
-        }
-      : null;
+      ? editorPopover && editorSel && editorSel.start !== editorSel.end
+        ? {
+            position: editorPopover,
+            selectedText: text.slice(
+              Math.min(editorSel.start, editorSel.end),
+              Math.max(editorSel.start, editorSel.end),
+            ),
+            onSubmit: submitEditorComment,
+            onClose: () => {
+              setEditorPopover(null);
+              const ta = textareaRef.current;
+              if (ta && editorSel)
+                ta.setSelectionRange(editorSel.end, editorSel.end);
+              setEditorSel((s) => (s ? { start: s.end, end: s.end } : null));
+            },
+          }
+        : null
+      : pending
+        ? {
+            position: pending.position,
+            selectedText: pending.selectedText,
+            onSubmit: selection.submit,
+            onClose: selection.cancel,
+          }
+        : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1924,7 +1903,11 @@ function FileViewerImpl({
                             set: inlineBlameSetting.set,
                           },
                         ]),
-                  ] as { label: string; on: boolean; set: (on: boolean) => void }[]
+                  ] as {
+                    label: string;
+                    on: boolean;
+                    set: (on: boolean) => void;
+                  }[]
                 ).map(({ label, on, set }) => (
                   <div
                     key={label}

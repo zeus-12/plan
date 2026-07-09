@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@plan/shared/lib/utils";
+import { basename, dirname } from "@plan/shared/lib/path";
 import {
   Tooltip,
   TooltipContent,
@@ -93,10 +94,6 @@ interface DirNode {
   path: string;
   dirs: Map<string, DirNode>;
   files: FileEntry[];
-}
-
-function basename(p: string): string {
-  return p.split("/").pop() ?? p;
 }
 
 /**
@@ -703,9 +700,7 @@ export function FileList({
             : file.path;
           const isActive = !isSelected && projPath === activeFilePath;
           const fileBasename = basename(file.path);
-          const dirname = file.path.includes("/")
-            ? file.path.slice(0, file.path.lastIndexOf("/"))
-            : "";
+          const fileDirname = dirname(file.path);
           return (
             <div
               key={row.key}
@@ -737,9 +732,9 @@ export function FileList({
                 <span className="min-w-0 shrink truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
                   {fileBasename}
                 </span>
-                {viewMode === "list" && dirname && (
+                {viewMode === "list" && fileDirname && (
                   <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                    {dirname}
+                    {fileDirname}
                   </span>
                 )}
               </button>

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@plan/shared/lib/utils";
+import { basename, dirname } from "@plan/shared/lib/path";
 import type { SearchFileResult, SearchOptions } from "../../shared-types";
 import { FileIcon } from "./file-icon";
 
@@ -27,15 +28,6 @@ interface Props {
 const ROW_HEIGHT = 22;
 const DEBOUNCE_MS = 200;
 const PREVIEW_MAX = 400;
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
-}
-function dirname(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? "" : p.slice(0, i);
-}
 
 /** A flattened row in the virtualized results list. */
 type Row =

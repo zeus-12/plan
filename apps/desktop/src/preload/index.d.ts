@@ -187,7 +187,6 @@ interface ElectronAPI {
     state: "input" | "selection" | "unknown";
     lines: string[];
   }>;
-  terminalDump: (id: string) => Promise<string>;
   /** Ids of every live pty currently showing Claude's "esc to interrupt" hint. */
   terminalBusyIds: () => Promise<string[]>;
   terminalResize: (id: string, cols: number, rows: number) => void;
