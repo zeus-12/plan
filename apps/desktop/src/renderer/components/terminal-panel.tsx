@@ -209,7 +209,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
         fontSize: 12,
         cursorBlink: true,
         // The DOM renderer repaints aggressively; scrollback is cheap.
-        scrollback: 5000,
+        scrollback: 10000,
         theme: buildTerminalTheme(),
       });
       const fit = new FitAddon();
@@ -224,6 +224,16 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       term.attachCustomKeyEventHandler((e) => {
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
           if (e.type === "keydown") term.clear();
+          return false;
+        }
+        // ⌘↑ / ⌘↓ jump the viewport to the very top / bottom of the scrollback
+        // (like a text field's document ends), rather than reaching the shell.
+        if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "ArrowUp") {
+          if (e.type === "keydown") term.scrollToTop();
+          return false;
+        }
+        if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "ArrowDown") {
+          if (e.type === "keydown") term.scrollToBottom();
           return false;
         }
         // ⌘C copies the selection, but xterm pads every row to the full
