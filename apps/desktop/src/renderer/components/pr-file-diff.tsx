@@ -71,6 +71,29 @@ export const PrFileDiff = memo(function PrFileDiff({
     };
   }, [encoded, subPath, headSha, file.newPath]);
 
+  // ⌥Z — toggle line wrap, same as the local diff (file-diff-viewer). PR files
+  // render InteractiveDiff directly rather than through that wrapper, so the
+  // shortcut has to be wired here too. Match `e.code` (not `e.key`): Option+letter
+  // emits a special glyph on macOS ("Ω" for z), so the physical code is the only
+  // reliable signal.
+  useEffect(() => {
+    if (!active) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        e.code === "KeyZ"
+      ) {
+        e.preventDefault();
+        updateSettings({ lineWrap: !settings.lineWrap });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, settings.lineWrap, updateSettings]);
+
   // Old side: reverse-apply this file's diff to the head blob.
   const contents = useMemo(() => {
     if (!head) return null;
@@ -112,7 +135,10 @@ export const PrFileDiff = memo(function PrFileDiff({
             −{file.deletions}
           </span>
         </div>
-        <div ref={setSettingsSlot} className="flex items-center" />
+        {/* Reserve the gear's height (h-8) so the header row doesn't grow when
+            InteractiveDiff mounts and portals its settings button in here —
+            otherwise switching files visibly shifts this bar down. */}
+        <div ref={setSettingsSlot} className="flex h-8 items-center" />
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
