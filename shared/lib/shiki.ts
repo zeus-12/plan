@@ -218,12 +218,37 @@ const FS_ITALIC = 1;
 const FS_BOLD = 2;
 
 /**
+ * Tokenizing is a synchronous main-thread cost (shiki runs the TextMate grammar
+ * over the whole string), and the SAME (code, language, theme) tuple recurs
+ * constantly: a chat transcript's code blocks are re-tokenized every time its
+ * `MessageList` mounts — which, before this cache, meant on every project /
+ * worktree switch (the keyed workspace remount drops the per-component
+ * `useMemo`) and every tab reopen. This module-level LRU makes those repeats
+ * free: the result is a pure function of (code, language, active theme), so a
+ * cache hit skips `codeToTokens` entirely.
+ *
+ * Bounded two ways so it can't grow without limit: at most MAX_ENTRIES tuples,
+ * and at most MAX_CHARS of cached source across all of them (token arrays scale
+ * with source length). Least-recently-used entries evict first — a plain
+ * insertion-ordered Map, re-inserting on hit to mark recency.
+ */
+const TOKEN_CACHE_MAX_ENTRIES = 600;
+const TOKEN_CACHE_MAX_CHARS = 4_000_000;
+const tokenCache = new Map<string, SyntaxToken[]>();
+let tokenCacheChars = 0;
+
+function tokenCacheKey(theme: string, lang: string, code: string): string {
+  // NUL separators can't appear in a theme/lang id, so the join is unambiguous.
+  return `${theme} ${lang} ${code}`;
+}
+
+/**
  * Synchronously highlight a code string and return flat tokens with
  * character-offset ranges, in source order. Returns [] when shiki isn't
  * ready, the language is unsupported, or highlighting throws. There is no
  * size cap — whether code is colored depends only on language support, never
- * on how large the file is. Tokenization is a synchronous main-thread cost, so
- * very large inputs may briefly cost responsiveness in exchange for color.
+ * on how large the file is. Results are cached (see `tokenCache`), so a repeat
+ * of the same (code, language, theme) is a Map lookup rather than a re-parse.
  */
 export function highlightTokens(
   code: string,
@@ -232,6 +257,17 @@ export function highlightTokens(
   if (!highlighter) return [];
   const lang = resolveLang(languageId);
   if (!lang) return [];
+
+  // Keyed on the RESOLVED grammar name (aliases collapse to one entry) and the
+  // active theme (colors differ per theme, so each theme caches separately).
+  const key = tokenCacheKey(activeShikiTheme, lang, code);
+  const cached = tokenCache.get(key);
+  if (cached) {
+    // Mark most-recently-used: delete + re-insert moves it to the Map's tail.
+    tokenCache.delete(key);
+    tokenCache.set(key, cached);
+    return cached;
+  }
 
   let lines;
   try {
@@ -265,7 +301,29 @@ export function highlightTokens(
     // newline between source lines
     offset += 1;
   }
+
+  cacheTokens(key, code.length, out);
   return out;
+}
+
+/** Insert a freshly-tokenized result, evicting LRU entries to stay in budget. */
+function cacheTokens(key: string, chars: number, tokens: SyntaxToken[]): void {
+  tokenCache.set(key, tokens);
+  tokenCacheChars += chars;
+  while (
+    tokenCache.size > TOKEN_CACHE_MAX_ENTRIES ||
+    tokenCacheChars > TOKEN_CACHE_MAX_CHARS
+  ) {
+    // The first key is the least-recently-used (oldest insertion / touch).
+    const oldest = tokenCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    tokenCache.delete(oldest);
+    // Recover the source length from the key's third NUL-delimited field.
+    const codeStart = oldest.indexOf(" ", oldest.indexOf(" ") + 1) + 1;
+    tokenCacheChars -= oldest.length - codeStart;
+    // Don't evict the entry we just inserted, even if it alone blows the budget.
+    if (oldest === key) break;
+  }
 }
 
 /**

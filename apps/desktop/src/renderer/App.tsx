@@ -82,6 +82,10 @@ import {
 import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
+import {
+  getCachedWorktreeRepos,
+  setCachedWorktreeRepos,
+} from "./lib/worktree-repos-cache";
 import { pushToast } from "./lib/toast-store";
 import {
   getMruScopeVersion,
@@ -96,6 +100,10 @@ import {
 } from "./lib/session-done-notifier";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
+
+// Stable empty-repos reference — passing a fresh `[]` each render would break
+// memoization of anything downstream that depends on repo identity.
+const EMPTY_REPOS: DiscoveredRepo[] = [];
 
 // The switcher's MRU scope: one flat recency list spanning every navigable
 // destination — each project's working copy AND every worktree. A destination's
@@ -343,8 +351,14 @@ function Shell() {
       setWorktreeRepos([]);
       return;
     }
+    const enc = activeWorktree.encoded;
+    // Paint from cache first so a revisited worktree mounts WITH its repos, then
+    // refresh in the background (repos rarely change between visits).
+    const cached = getCachedWorktreeRepos(enc);
+    if (cached) setWorktreeRepos(cached);
     let cancelled = false;
-    window.electronAPI.listRepos(activeWorktree.encoded).then((r) => {
+    window.electronAPI.listRepos(enc).then((r) => {
+      setCachedWorktreeRepos(enc, r);
       if (!cancelled) setWorktreeRepos(r);
     });
     return () => {
@@ -363,8 +377,11 @@ function Shell() {
       }
     : selected;
   const effectiveRepos = activeWorktree
-    ? worktreeRepos
-    : (reposByProject.get(selectedEncoded ?? "") ?? []);
+    ? // Cache read (not the state) is the source of truth so a revisited
+      // worktree mounts with its repos; `worktreeRepos` is the re-render trigger
+      // and the fallback for a first, uncached visit.
+      (getCachedWorktreeRepos(activeWorktree.encoded) ?? worktreeRepos)
+    : (reposByProject.get(selectedEncoded ?? "") ?? EMPTY_REPOS);
 
   const handleRemoveWorktree = useCallback(
     async (id: string) => {
