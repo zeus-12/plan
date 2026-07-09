@@ -5,6 +5,8 @@ import type { ProjectDefaults, CreatePrInput } from "../shared-types";
 
 const electronAPI = {
   listProjects: () => ipcRenderer.invoke("projects:list"),
+  getProjectIcons: (encodeds: string[]) =>
+    ipcRenderer.invoke("projects:icons", encodeds),
   listSessions: (encoded: string) =>
     ipcRenderer.invoke("projects:listSessions", encoded),
   readSession: (encoded: string, sessionId: string) =>
@@ -63,6 +65,24 @@ const electronAPI = {
   ) =>
     ipcRenderer.invoke("project:fileImageDiff", encoded, path, mode, subPath),
 
+  listPrs: (encoded: string, subPath: string = "") =>
+    ipcRenderer.invoke("github:listPrs", encoded, subPath),
+  getPrDetail: (encoded: string, subPath: string, number: number) =>
+    ipcRenderer.invoke("github:prDetail", encoded, subPath, number),
+  getPrFileView: (
+    encoded: string,
+    subPath: string,
+    headSha: string | null,
+    newPath: string | null,
+  ) =>
+    ipcRenderer.invoke(
+      "github:prFileView",
+      encoded,
+      subPath,
+      headSha,
+      newPath,
+    ),
+
   listProjectFiles: (encoded: string) =>
     ipcRenderer.invoke("files:list", encoded),
   readProjectFile: (encoded: string, relPath: string) =>
@@ -101,6 +121,14 @@ const electronAPI = {
     ) => cb(e);
     ipcRenderer.on("switcher:cycle", handler);
     return () => ipcRenderer.removeListener("switcher:cycle", handler);
+  },
+
+  /** ⌘R was pressed — the renderer decides: force-refresh a data page (PR
+   * view) if one is open, else reload the whole app. */
+  onReloadRequest: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on("app:reload-request", handler);
+    return () => ipcRenderer.removeListener("app:reload-request", handler);
   },
 
   addManualProject: () => ipcRenderer.invoke("projects:addManual"),

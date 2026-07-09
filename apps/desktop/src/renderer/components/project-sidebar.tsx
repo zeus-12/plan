@@ -53,6 +53,8 @@ import {
 interface Props {
   projects: ProjectEntry[];
   reposByProject: Map<string, DiscoveredRepo[]>;
+  /** file:// icon URL per project (repo favicon / GitHub avatar); absent = none. */
+  iconsByProject: Map<string, string>;
   /** Each project's worktrees, keyed by the project's encoded cwd. */
   worktreesByProject: Map<string, WorktreeRecord[]>;
   /** The selected project's encoded cwd (the live working copy's project). */
@@ -220,9 +222,34 @@ function TrashIcon() {
   );
 }
 
+/**
+ * Project icon: the resolved image when we have one, else a letter tile.
+ * A broken image (stale cache file, deleted favicon) falls back to the tile
+ * rather than showing the browser's broken-image glyph.
+ */
+function ProjectIcon({ url, name }: { url: string | undefined; name: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (!url || failedUrl === url) {
+    return (
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded border border-[var(--border)] font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
+        {(name[0] ?? "?").toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      onError={() => setFailedUrl(url)}
+      className="h-4 w-4 shrink-0 rounded object-cover"
+    />
+  );
+}
+
 export function ProjectSidebar({
   projects,
   reposByProject,
+  iconsByProject,
   worktreesByProject,
   selectedProject,
   activeWorktreeId,
@@ -672,21 +699,29 @@ export function ProjectSidebar({
                           )}
                           <button
                             onClick={() => onSelectProject(p.encoded)}
-                            className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-1 pl-px pr-2 text-left"
+                            className="flex min-w-0 flex-1 items-center gap-2 py-1 pl-px pr-2 text-left"
                           >
-                            <span
-                              className={cn(
-                                "truncate font-[family-name:var(--font-mono)] text-[13px]",
-                                isLiveActive
-                                  ? "text-[var(--text)]"
-                                  : "text-[var(--text-secondary)]",
-                              )}
-                            >
-                              {shortName}
-                            </span>
-                            <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                              {p.mtimeMs ? `${relativeTime(p.mtimeMs)} · ` : ""}
-                              {p.cwd}
+                            <ProjectIcon
+                              url={iconsByProject.get(p.encoded)}
+                              name={shortName}
+                            />
+                            <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+                              <span
+                                className={cn(
+                                  "truncate font-[family-name:var(--font-mono)] text-[13px]",
+                                  isLiveActive
+                                    ? "text-[var(--text)]"
+                                    : "text-[var(--text-secondary)]",
+                                )}
+                              >
+                                {shortName}
+                              </span>
+                              <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                {p.mtimeMs
+                                  ? `${relativeTime(p.mtimeMs)} · `
+                                  : ""}
+                                {p.cwd}
+                              </span>
                             </span>
                           </button>
                           {/* Right slot: metadata at rest, actions on hover. The

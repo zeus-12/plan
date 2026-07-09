@@ -79,6 +79,7 @@ import {
   makeChatTab,
   chatTabId,
 } from "./lib/tabs-store";
+import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
 import { pushToast } from "./lib/toast-store";
@@ -121,6 +122,36 @@ function Shell() {
   const [reposByProject, setReposByProject] = useState<
     Map<string, DiscoveredRepo[]>
   >(new Map());
+  const [iconsByProject, setIconsByProject] = useState<Map<string, string>>(
+    new Map(),
+  );
+
+  // Project icons (repo favicon / GitHub avatar, resolved by the main process).
+  // Keyed off the SET of projects, not the list identity — the list is re-pulled
+  // on every watcher tick and we don't want to re-resolve icons each time.
+  const iconsKey = useMemo(
+    () =>
+      projects
+        .map((p) => p.encoded)
+        .sort()
+        .join("\n"),
+    [projects],
+  );
+  useEffect(() => {
+    if (!iconsKey) return;
+    let cancelled = false;
+    void window.electronAPI.getProjectIcons(iconsKey.split("\n")).then(
+      (icons) => {
+        if (!cancelled) setIconsByProject(new Map(Object.entries(icons)));
+      },
+      () => {
+        // Resolution failed outright — keep whatever we last knew.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [iconsKey]);
 
   /**
    * Discover repos for every project in parallel. The result drives:
@@ -182,6 +213,14 @@ function Shell() {
       if (timer) clearTimeout(timer);
     };
   }, [refreshProjects]);
+
+  // ⌘R: main forwards the press here (it no longer reloads directly). An open
+  // data page — the PR view — claims it to force-refresh its own data; with no
+  // claimant this falls back to the ordinary full-app reload.
+  useEffect(
+    () => window.electronAPI.onReloadRequest(handleReloadRequest),
+    [],
+  );
 
   const handleAddProject = useCallback(async () => {
     const added = await window.electronAPI.addManualProject();
@@ -586,6 +625,7 @@ function Shell() {
       <ProjectSidebar
         projects={projects}
         reposByProject={reposByProject}
+        iconsByProject={iconsByProject}
         worktreesByProject={allWorktrees.byProject}
         selectedProject={selectedEncoded}
         activeWorktreeId={activeWorktreeId}

@@ -57,10 +57,13 @@ import {
   makeChatTab,
   makeDiffTab,
   makeFileTab,
+  makePrTab,
   makeScratchTab,
   chatTabId,
   type Tab,
 } from "../lib/tabs-store";
+import { cachedPrTitle } from "../lib/pr-store";
+import { PrView } from "./pr-view";
 import { TabBar } from "./tab-bar";
 import { ScratchEditor } from "./scratch-editor";
 import { isWorking, useTerminalWorking } from "../lib/terminal-activity-store";
@@ -419,7 +422,17 @@ export function ProjectWorkspace({
         ? "diffs"
         : activeTab?.kind === "file"
           ? "files"
-          : null;
+          : activeTab?.kind === "pr"
+            ? "pr"
+            : null;
+  // Stable reference so MiddleSidebar's memo isn't broken every keystroke.
+  const activePr = useMemo(
+    () =>
+      activeTab?.kind === "pr"
+        ? { subPath: activeTab.subPath, number: activeTab.number }
+        : null,
+    [activeTab],
+  );
   // Header branch pill. A single-repo project always shows its branch. A
   // multi-repo project shows a branch only when the active tab pins a file to
   // one specific repo — never an arbitrary repo's branch.
@@ -523,6 +536,8 @@ export function ProjectWorkspace({
     setChatAnnotations,
     annotationsByProjectFile,
     setAnnotationsByProjectFile,
+    annotationsByPr,
+    setAnnotationsByPr,
   } = useProjectAnnotations(project.encoded);
   /** subPath currently being pushed (for the sync-bar spinner). */
   const [pushingRepo, setPushingRepo] = useState<string | null>(null);
@@ -664,6 +679,13 @@ export function ProjectWorkspace({
   const aggregatedProjectFileAnnotations = useMemo(
     () => Object.values(annotationsByProjectFile).flat(),
     [annotationsByProjectFile],
+  );
+
+  // PR-viewer comments (diff lines + conversation) across every open PR — same
+  // compose buffer, so a note on a PR joins the one send-to-chat batch.
+  const aggregatedPrAnnotations = useMemo(
+    () => Object.values(annotationsByPr).flat(),
+    [annotationsByPr],
   );
 
   // ── Git actions (routed via subPath) ─────────────────────────
@@ -1393,9 +1415,20 @@ export function ProjectWorkspace({
   const totalComments =
     aggregatedDiffAnnotations.length +
     aggregatedChatAnnotations.length +
-    aggregatedProjectFileAnnotations.length;
+    aggregatedProjectFileAnnotations.length +
+    aggregatedPrAnnotations.length;
   const composedMessage = useMemo(() => {
     const parts: string[] = [];
+    if (aggregatedPrAnnotations.length > 0) {
+      parts.push(
+        "On the PR:\n\n" +
+          generateMessage(aggregatedPrAnnotations, {
+            intro: "",
+            leftLabel: "the original",
+            rightLabel: "the changes",
+          }),
+      );
+    }
     if (aggregatedProjectFileAnnotations.length > 0) {
       parts.push(
         "On the files:\n\n" +
@@ -1423,6 +1456,7 @@ export function ProjectWorkspace({
     aggregatedDiffAnnotations,
     aggregatedChatAnnotations,
     aggregatedProjectFileAnnotations,
+    aggregatedPrAnnotations,
   ]);
 
   // ── Chat annotation handlers ─────────────────────────────────
@@ -1495,6 +1529,19 @@ export function ProjectWorkspace({
     [openTab],
   );
 
+  const handleOpenPr = useCallback(
+    (subPath: string, number: number) => {
+      openTab(makePrTab(subPath, number));
+    },
+    [openTab],
+  );
+
+  // Stable so it doesn't break MiddleSidebar's memo (composer keystrokes).
+  const prRepoName = useCallback(
+    (repo: DiscoveredRepo) => repoDisplayName(repo, project.cwd),
+    [project.cwd],
+  );
+
   // A tab's display title — derived from live data so a renamed chat / moved
   // file stays current (titles are never stored on the tab itself).
   const titleForTab = useCallback(
@@ -1507,9 +1554,13 @@ export function ProjectWorkspace({
         );
       }
       if (t.kind === "scratch") return "Scratchpad";
+      if (t.kind === "pr") {
+        const title = cachedPrTitle(project.encoded, t.subPath, t.number);
+        return title ? `#${t.number} ${title}` : `PR #${t.number}`;
+      }
       return t.path.split("/").pop() || t.path;
     },
-    [sessions, transcripts],
+    [sessions, transcripts, project.encoded],
   );
 
   // ── Terminals (⌘J) ───────────────────────────────────────────
@@ -1972,6 +2023,7 @@ export function ProjectWorkspace({
     byFile: typeof annotationsByFile;
     chat: typeof chatAnnotations;
     byProjectFile: typeof annotationsByProjectFile;
+    pr: typeof annotationsByPr;
   } | null>(null);
 
   // "Add to chat": move the composed comments into the chat composer, then
@@ -1992,10 +2044,12 @@ export function ProjectWorkspace({
         byFile: annotationsByFile,
         chat: chatAnnotations,
         byProjectFile: annotationsByProjectFile,
+        pr: annotationsByPr,
       };
       setAnnotationsByFile({});
       setChatAnnotations([]);
       setAnnotationsByProjectFile({});
+      setAnnotationsByPr({});
       requestAnimationFrame(() => {
         chatInputRef.current?.append(text);
         chatInputRef.current?.focus();
@@ -2012,6 +2066,8 @@ export function ProjectWorkspace({
       setAnnotationsByFile,
       setChatAnnotations,
       setAnnotationsByProjectFile,
+      annotationsByPr,
+      setAnnotationsByPr,
     ],
   );
 
@@ -2024,26 +2080,34 @@ export function ProjectWorkspace({
     setAnnotationsByFile(snap.byFile);
     setChatAnnotations(snap.chat);
     setAnnotationsByProjectFile(snap.byProjectFile);
-  }, [setAnnotationsByFile, setChatAnnotations, setAnnotationsByProjectFile]);
+    setAnnotationsByPr(snap.pr);
+  }, [
+    setAnnotationsByFile,
+    setChatAnnotations,
+    setAnnotationsByProjectFile,
+    setAnnotationsByPr,
+  ]);
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
-  // and chat. Gated behind a confirmation since it can't be undone.
+  // PRs, and chat. Gated behind a confirmation since it can't be undone.
   const handleClearComments = useCallback(async () => {
     const ok = await confirm({
       title: "Clear all comments?",
       description:
-        "This permanently removes every comment you've added across files, diffs, and the chat. This can't be undone.",
+        "This permanently removes every comment you've added across files, diffs, PRs, and the chat. This can't be undone.",
       confirmLabel: "Clear comments",
     });
     if (!ok) return;
     setAnnotationsByFile({});
     setChatAnnotations([]);
     setAnnotationsByProjectFile({});
+    setAnnotationsByPr({});
   }, [
     confirm,
     setAnnotationsByFile,
     setChatAnnotations,
     setAnnotationsByProjectFile,
+    setAnnotationsByPr,
   ]);
 
   // "Run terminal": start `claude --resume` for the selected session in the
@@ -2283,7 +2347,13 @@ export function ProjectWorkspace({
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "d")
         return;
-      if (!activeTab || activeTab.kind === "chat" || activeTab.kind === "scratch")
+      // Only file/diff tabs have a staging cycle; chat, scratch and PR don't.
+      if (
+        !activeTab ||
+        activeTab.kind === "chat" ||
+        activeTab.kind === "scratch" ||
+        activeTab.kind === "pr"
+      )
         return;
       e.preventDefault();
 
@@ -2549,7 +2619,9 @@ export function ProjectWorkspace({
                       ? t.staged
                         ? "Diff · staged"
                         : "Diff"
-                      : t.path,
+                      : t.kind === "pr"
+                        ? `PR #${t.number}`
+                        : t.path,
             };
           })}
         />
@@ -2652,6 +2724,29 @@ export function ProjectWorkspace({
                       <ScratchEditor
                         encoded={project.encoded}
                         active={t.id === activeId}
+                      />
+                    </div>
+                  ) : null,
+                )}
+
+                {/* PR tabs — each mounted, hidden when inactive so sub-tab and
+                    scroll state survive switching. */}
+                {tabs.map((t) =>
+                  t.kind === "pr" ? (
+                    <div
+                      key={t.id}
+                      className={cn(
+                        "absolute inset-0",
+                        t.id !== activeId && "hidden",
+                      )}
+                    >
+                      <PrView
+                        encoded={project.encoded}
+                        subPath={t.subPath}
+                        number={t.number}
+                        active={t.id === activeId}
+                        annotationsByPr={annotationsByPr}
+                        setAnnotationsByPr={setAnnotationsByPr}
                       />
                     </div>
                   ) : null,
@@ -2914,6 +3009,9 @@ export function ProjectWorkspace({
           }
           onSelectProjectFile={handleSelectProjectFile}
           onOpenSearchResult={handleOpenSearchResult}
+          activePr={activePr}
+          onOpenPr={handleOpenPr}
+          repoName={prRepoName}
           encoded={project.encoded}
           terminals={sidebarTerminals}
           // Default to the always-present Run tab when no shell is selected.

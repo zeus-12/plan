@@ -215,6 +215,19 @@ function basename(p: string): string {
   return i === -1 ? p : p.slice(i + 1);
 }
 
+/**
+ * True when a key/clipboard event is headed for a text-entry control (find
+ * input, comment popover, chat composer…) — those own their ⌘A/⌘C, so the
+ * file-level select-all must stay out of the way.
+ */
+function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
 /** Fold toggle: a chevron that points down when open, right when collapsed. */
 function FoldChevron({ collapsed }: { collapsed: boolean }) {
   return (
@@ -822,10 +835,18 @@ function FileViewerImpl({
     left: number;
   } | null>(null);
 
+  // ⌘A in the virtualized read-only view. The DOM only holds the mounted rows,
+  // so native select-all — and the copy that follows — would silently truncate
+  // the file to the rendered window. Instead we own it: this flag paints a
+  // whole-document highlight (per-row, so it survives scrolling) and ⌘C/copy
+  // answer from the full in-memory `text`, never the DOM.
+  const [selectAllActive, setSelectAllActive] = useState(false);
+
   useEffect(() => {
     // Reset selection, folds, and the symbol palette when the open file changes.
     setEditorSel(null);
     setEditorPopover(null);
+    setSelectAllActive(false);
     setCollapsed(new Set());
     setSymbolOpen(false);
     setSymbols([]);
@@ -1040,6 +1061,12 @@ function FileViewerImpl({
       const ls = lineStarts[lineIdx];
       const le = ls + lines[lineIdx].length;
       const out: Hl[] = [];
+      // Pushed first so it wins ties at the same start offset (findHl takes
+      // the first match) — while everything is selected, the selection tint
+      // sits on top of annotation/find tints, like an editor selection would.
+      if (selectAllActive && le > ls) {
+        out.push({ s: 0, e: le - ls, kind: "pending" });
+      }
       for (const a of annotations) {
         if (a.startOffset < le && a.endOffset > ls) {
           out.push({
@@ -1074,7 +1101,15 @@ function FileViewerImpl({
       }
       return out.sort((a, b) => a.s - b.s);
     },
-    [annotations, activeRange, revealRange, findByLine, lineStarts, lines],
+    [
+      annotations,
+      activeRange,
+      revealRange,
+      findByLine,
+      lineStarts,
+      lines,
+      selectAllActive,
+    ],
   );
 
   // Track the scroll viewport's height so `paddingEnd` below can equal it. The
@@ -1262,6 +1297,72 @@ function FileViewerImpl({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [active, searchable, find]);
+
+  // The editor overlay (a real textarea holding the whole file) owns ⌘A/⌘C
+  // natively, so a lingering select-all flag from the read-only view must not
+  // paint over it when the mode flips (e.g. wrap toggled off).
+  useEffect(() => {
+    if (editorMode) setSelectAllActive(false);
+  }, [editorMode]);
+
+  // ⌘A — select all, virtualized read-only view only (see `selectAllActive`).
+  useEffect(() => {
+    if (!active || !searchable || editorMode) return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "a" &&
+        !isEditableTarget(e.target)
+      ) {
+        e.preventDefault();
+        // Drop any native selection so the painted highlight is the only one.
+        window.getSelection()?.removeAllRanges();
+        setSelectAllActive(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, searchable, editorMode]);
+
+  // While select-all is active: ⌘C (and any copy command) yields the complete
+  // file text, Escape or a pointer-down dismisses it — the same lifecycle a
+  // native selection would have.
+  useEffect(() => {
+    if (!selectAllActive || !active) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "c" &&
+        !isEditableTarget(e.target)
+      ) {
+        // No native selection exists (⌘A suppressed it), so without this the
+        // keystroke would copy nothing.
+        e.preventDefault();
+        void navigator.clipboard.writeText(text);
+      } else if (e.key === "Escape") {
+        setSelectAllActive(false);
+      }
+    };
+    // Context-menu "Copy" raises a copy event instead of going through ⌘C.
+    const onCopy = (e: ClipboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", text);
+    };
+    const onMouseDown = () => setSelectAllActive(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("copy", onCopy);
+    window.addEventListener("mousedown", onMouseDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("copy", onCopy);
+      window.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [selectAllActive, active, text]);
 
   // ⌘⇧O — go to symbol. Only when the active engine can supply symbols (the
   // tree-sitter engine on desktop; the indentation fallback can't parse names).
@@ -1820,11 +1921,23 @@ function FileViewerImpl({
                         !editorMode && "select-text [cursor:text]",
                       )}
                     >
-                      {lineNodes(
-                        line,
-                        perLine[lineIdx],
-                        hlsForLine(lineIdx),
-                        bracketByLine.get(lineIdx),
+                      {selectAllActive && !line.length ? (
+                        // A blank line has no characters for the range-based
+                        // tint to land on — a single tinted space keeps the
+                        // select-all highlight from visually skipping it.
+                        <span
+                          className="rounded-sm"
+                          style={{ background: "var(--selection-bg)" }}
+                        >
+                          {" "}
+                        </span>
+                      ) : (
+                        lineNodes(
+                          line,
+                          perLine[lineIdx],
+                          hlsForLine(lineIdx),
+                          bracketByLine.get(lineIdx),
+                        )
                       )}
                       {/* A collapsed region shows a "⋯" affordance on its header
                         line; clicking it (or the gutter chevron) re-expands. */}

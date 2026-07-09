@@ -51,6 +51,7 @@ import {
 } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
+import { listPrs, getPrDetail, getPrFileView } from "./github";
 import { getFileImageDiff } from "./file-media";
 import {
   listProjectFiles,
@@ -59,6 +60,7 @@ import {
   searchProjectFiles,
 } from "./project-files";
 import { listSkills } from "./skills";
+import { getProjectIcons } from "./project-icons";
 import { checkForUpdate } from "./updates";
 import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
@@ -136,6 +138,14 @@ const switcherModifierOk: Record<
   Backquote: (input) => input.control || input.meta,
 };
 
+/** Forward a Cmd/Ctrl+R press to the renderer so it can force-refresh a
+ * data-fetching page (PR view) instead of reloading the whole app. The renderer
+ * falls back to a real reload when no page claims the shortcut. */
+function sendReloadRequest() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("app:reload-request");
+}
+
 function buildMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
@@ -169,7 +179,17 @@ function buildMenu() {
     {
       label: "View",
       submenu: [
-        { role: "reload" as const },
+        // Custom Reload (not role: "reload") so ⌘R doesn't reload directly: the
+        // accelerator forwards to the renderer, which force-refreshes a data
+        // page (PR view) if one claims it, else does the ordinary full reload.
+        // A menu accelerator is the reliable, focus-independent path — and it
+        // consumes the key, so we avoid preventDefault in before-input-event
+        // (which swallows subsequent keyUps on macOS).
+        {
+          label: "Reload",
+          accelerator: "CmdOrCtrl+R",
+          click: () => sendReloadRequest(),
+        },
         { role: "toggleDevTools" as const },
         { type: "separator" as const },
         { role: "resetZoom" as const },
@@ -421,6 +441,10 @@ async function listAllProjects(): Promise<ProjectEntry[]> {
 function registerIpc() {
   ipcMain.handle("projects:list", async () => listAllProjects());
 
+  ipcMain.handle("projects:icons", (_e, encodeds: string[]) =>
+    getProjectIcons(encodeds),
+  );
+
   // Update notifier: report whether a newer release exists, and open the
   // download page in the user's browser. We never install — the app is unsigned.
   ipcMain.handle("updates:check", () => checkForUpdate());
@@ -552,6 +576,27 @@ function registerIpc() {
       mode: "staged" | "unstaged",
       subPath: string = "",
     ) => getFileImageDiff(encoded, path, mode, subPath),
+  );
+
+  ipcMain.handle(
+    "github:listPrs",
+    async (_e, encoded: string, subPath: string = "") =>
+      listPrs(encoded, subPath),
+  );
+  ipcMain.handle(
+    "github:prDetail",
+    async (_e, encoded: string, subPath: string, number: number) =>
+      getPrDetail(encoded, subPath, number),
+  );
+  ipcMain.handle(
+    "github:prFileView",
+    async (
+      _e,
+      encoded: string,
+      subPath: string,
+      headSha: string | null,
+      newPath: string | null,
+    ) => getPrFileView(encoded, subPath, headSha, newPath),
   );
 
   ipcMain.handle("files:list", async (_e, encoded: string) =>
