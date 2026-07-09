@@ -1976,6 +1976,12 @@ function FileViewerImpl({
                 width: lineWrapEnabled ? "100%" : "max-content",
                 minWidth: "100%",
                 position: "relative",
+                // Wrap mode promises "no horizontal scrolling", but the
+                // out-of-flow blame annotation still counts toward scrollable
+                // overflow — clip it at the pane edge instead (the full text
+                // lives in the hover card). Non-wrap keeps it reachable by
+                // scrolling, matching the code's own horizontal overflow.
+                overflowX: lineWrapEnabled ? "clip" : undefined,
               }}
             >
               {virtualizer.getVirtualItems().map((vi) => {

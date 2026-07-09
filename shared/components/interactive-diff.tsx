@@ -38,6 +38,7 @@ import {
   useShikiReady,
 } from "../lib/shiki";
 import { computeFoldRanges } from "../lib/folding";
+import { cn } from "../lib/utils";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
@@ -1115,6 +1116,16 @@ export function InteractiveDiff({
     [leftColRef, rightColRef, unifiedRef],
     effectiveViewMode,
   );
+  // Wrap mode promises "no horizontal scrolling", but the out-of-flow blame
+  // annotation still counts toward scrollable overflow — so the host must
+  // CLIP x-overflow instead of scrolling it (a too-long annotation is cut at
+  // the pane edge, like VS Code; the full text lives in the hover card).
+  // Non-wrap keeps the scroller: long lines, and the annotation past them,
+  // stay reachable by scrolling.
+  const hostClassName = cn(
+    editableHostProps.className,
+    settings.lineWrap && "overflow-x-clip",
+  );
 
   /* ── Selection ──────────────────────────────────────────── */
 
@@ -1441,7 +1452,7 @@ export function InteractiveDiff({
     const colCount = isFirstVersion ? 3 : 4;
 
     return (
-      <div ref={unifiedRef} {...editableHostProps}>
+      <div ref={unifiedRef} {...editableHostProps} className={hostClassName}>
         <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
           <tbody>
             {expandedFiltered.map((item, i) => {
@@ -1729,6 +1740,7 @@ export function InteractiveDiff({
           data-split-side={side}
           ref={side === "left" ? leftColRef : rightColRef}
           {...editableHostProps}
+          className={hostClassName}
         >
           <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
             <tbody>
