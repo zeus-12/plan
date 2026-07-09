@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
@@ -31,7 +30,7 @@ import type {
   DiscoveredRepo,
   CommandEntry,
 } from "../../shared-types";
-import { MiddleSidebar, type WorkTab } from "./middle-sidebar";
+import { MiddleSidebar } from "./middle-sidebar";
 import { FileDiffViewer } from "./file-diff-viewer";
 import { MessageList } from "./message-list";
 import { FileViewer } from "./file-viewer";
@@ -51,8 +50,8 @@ import { chatTerminalPrefix } from "../../terminal-ids";
 import { useAutoModeEnabled } from "../lib/auto-mode-settings";
 import { useTerminalHeight } from "../lib/terminal-store";
 import { useTerminalRegistry } from "../lib/use-terminal-registry";
+import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
 import {
-  useProjectTabs,
   getProjectTabs,
   openProjectTab,
   closeProjectTab,
@@ -76,12 +75,6 @@ import { CommandsConfigModal } from "./commands-config-modal";
 import { ThemeMenu } from "./theme-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
-import {
-  getMruScopeVersion,
-  orderByMru,
-  recordUse,
-  subscribeMru,
-} from "../lib/mru-store";
 import { mergeSession } from "../lib/merge-session";
 import { bumpWorktreeRevision } from "../lib/worktree-revision";
 import {
@@ -413,36 +406,43 @@ function ProjectWorkspaceImpl({
   // Auto-mode is an app-wide preference (Settings dialog); it applies to every
   // project's Claude sessions.
   const [globalAutoMode] = useAutoModeEnabled();
-  // VSCode model: `tab` chooses which LIST shows in the right sidebar. The main
-  // content pane is a set of open tabs (chat / diff / file), scoped to this
-  // worktree and persisted — see tabs-store. Everything the content pane needs
-  // (`openKind` + the per-kind selection) is DERIVED from the active tab below,
-  // so the tab list is the single source of truth.
-  const [tab, setTab] = useState<WorkTab>("chat");
-  const { tabs, activeId, openTab, closeTab, closeActive, setActive } =
-    useProjectTabs(project.encoded);
-  const activeTab = useMemo(
-    () => tabs.find((t) => t.id === activeId) ?? null,
-    [tabs, activeId],
+  // Session list state lives up here because the tab hook's Ctrl+Tab switcher
+  // lists sessions without an open tab. Seeded from the per-encoded cache so
+  // revisiting a worktree paints instantly (then refreshes in the background)
+  // instead of flashing "Loading…" through a full re-list on every remount.
+  const [sessions, setSessions] = useState<SessionListItem[]>(
+    () => getCachedSessions(project.encoded) ?? [],
   );
-  const openKind: WorkTab | null =
-    activeTab?.kind === "chat"
-      ? "chat"
-      : activeTab?.kind === "diff"
-        ? "diffs"
-        : activeTab?.kind === "file"
-          ? "files"
-          : activeTab?.kind === "pr"
-            ? "pr"
-            : null;
-  // Stable reference so MiddleSidebar's memo isn't broken every keystroke.
-  const activePr = useMemo(
-    () =>
-      activeTab?.kind === "pr"
-        ? { subPath: activeTab.subPath, number: activeTab.number }
-        : null,
-    [activeTab],
+  // Only show the loading placeholder if this worktree was never loaded.
+  const [sessionsLoading, setSessionsLoading] = useState(
+    () => getCachedSessions(project.encoded) === null,
   );
+
+  // VSCode model: `tab` chooses which LIST shows in the right sidebar; the
+  // content pane is driven by the open-tab list (single source of truth) —
+  // see useWorkspaceTabs for the full contract.
+  const {
+    tab,
+    setTab,
+    tabs,
+    activeId,
+    activeTab,
+    openTab,
+    closeTab,
+    closeActive,
+    setActive,
+    openChatTab,
+    openKind,
+    selectedSessionId,
+    selectedFile,
+    selectedProjectFile,
+    activePr,
+    activeFilePath,
+    switcherEntries,
+    switcherCurrentIndex,
+    firstSessionSwitcherId,
+    hasOpenTabs,
+  } = useWorkspaceTabs(project.encoded, sessions);
   // Header branch pill. A single-repo project always shows its branch. A
   // multi-repo project shows a branch only when the active tab pins a file to
   // one specific repo — never an arbitrary repo's branch.
@@ -482,9 +482,6 @@ function ProjectWorkspaceImpl({
     else if (prev === "chat") setComposerCollapsed(true);
   }, [activeTab?.kind]);
 
-  const selectedSessionId =
-    activeTab?.kind === "chat" ? activeTab.sessionId : null;
-
   // Opening a chat (sidebar click, tab switch, Ctrl+Tab) should land the caret
   // in the composer so the user can type straight away — no click required.
   // Keyed on the session id: every switch to a chat re-runs this. `focus()`
@@ -494,34 +491,7 @@ function ProjectWorkspaceImpl({
     if (!selectedSessionId || !activeRef.current) return;
     requestAnimationFrame(() => chatInputRef.current?.focus());
   }, [selectedSessionId]);
-  const selectedFile = useMemo(
-    () =>
-      activeTab?.kind === "diff"
-        ? {
-            subPath: activeTab.subPath,
-            path: activeTab.path,
-            staged: activeTab.staged,
-          }
-        : null,
-    [activeTab],
-  );
-  const selectedProjectFile =
-    activeTab?.kind === "file" ? activeTab.path : null;
-  // The file currently of interest — the open diff or file. Shared across the
-  // Diffs and Files sidebar lists so each highlights it. Project-relative
-  // (repo subPath prefixed) to compare across both lists.
-  const activeFilePath =
-    activeTab?.kind === "file"
-      ? activeTab.path
-      : activeTab?.kind === "diff"
-        ? activeTab.subPath
-          ? `${activeTab.subPath}/${activeTab.path}`
-          : activeTab.path
-        : null;
-  const openChatTab = useCallback(
-    (sid: string) => openTab(makeChatTab(sid)),
-    [openTab],
-  );
+
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   // ── Files state (per-repo) ───────────────────────────────────
@@ -819,16 +789,7 @@ function ProjectWorkspaceImpl({
   }, [refreshDiff]);
 
   // ── Sessions state ───────────────────────────────────────────
-  // Seed from the per-encoded cache so revisiting a worktree paints the session
-  // list + open transcripts instantly (then refreshes in the background) instead
-  // of flashing "Loading…" through a full re-list/re-parse on every remount.
-  const [sessions, setSessions] = useState<SessionListItem[]>(
-    () => getCachedSessions(project.encoded) ?? [],
-  );
-  // Only show the loading placeholder if this worktree was never loaded.
-  const [sessionsLoading, setSessionsLoading] = useState(
-    () => getCachedSessions(project.encoded) === null,
-  );
+  // (`sessions` itself is declared above the tab hook, which needs it.)
   // Parsed transcripts for every OPEN chat tab, keyed by session id, so each
   // chat tab keeps a live, mounted MessageList (its scroll survives switching
   // tabs). The watcher refreshes whichever open transcripts change. The active
@@ -2096,65 +2057,6 @@ function ProjectWorkspaceImpl({
     connectAndShowChat,
   ]);
 
-  // Ctrl+Tab: cycle this worktree's open content-pane tabs in a modal,
-  // committing on Ctrl-release (Shift reverses). Ordered most-recently-USED
-  // first (Alt-Tab style), per worktree, so the first tap lands on the tab you
-  // were last on; before any switch this session it keeps the tab-bar order.
-  const tabsMruScope = `tabs:${project.encoded}`;
-  // Subscribe to THIS worktree's tab scope only — a project switch elsewhere
-  // bumps the "projects" scope and must not re-render the whole workspace's
-  // tab ordering.
-  const getTabsMruVersion = useCallback(
-    () => getMruScopeVersion(tabsMruScope),
-    [tabsMruScope],
-  );
-  const mruVersion = useSyncExternalStore(
-    subscribeMru,
-    getTabsMruVersion,
-    getTabsMruVersion,
-  );
-  const tabsByMru = useMemo(
-    () => orderByMru(tabsMruScope, tabs, (t) => t.id),
-    [tabsMruScope, tabs, mruVersion],
-  );
-  useEffect(() => {
-    if (activeId) recordUse(tabsMruScope, activeId);
-  }, [tabsMruScope, activeId]);
-  // The switcher lists open tabs first, then chat sessions WITHOUT an open tab
-  // (newest-first — `sessions` is already sorted that way), so Ctrl+Tab can
-  // reach any chat without going through the ⌘A palette. Committing a tab
-  // activates it; committing a session opens it as a chat tab.
-  type SwitcherEntry =
-    | { type: "tab"; id: string; tab: Tab }
-    | { type: "session"; id: string; sessionId: string; title: string };
-  const switcherEntries = useMemo<SwitcherEntry[]>(() => {
-    const openSessionIds = new Set(
-      tabs.filter((t) => t.kind === "chat").map((t) => t.sessionId),
-    );
-    const tabEntries: SwitcherEntry[] = tabsByMru.map((t) => ({
-      type: "tab",
-      id: t.id,
-      tab: t,
-    }));
-    const sessionEntries: SwitcherEntry[] = sessions
-      .filter((s) => !s.archived && !openSessionIds.has(s.sessionId))
-      .map((s) => ({
-        type: "session",
-        id: `switch-session:${s.sessionId}`,
-        sessionId: s.sessionId,
-        title: s.title ?? "Chat",
-      }));
-    return [...tabEntries, ...sessionEntries];
-  }, [tabsByMru, tabs, sessions]);
-  // Index of the active tab, or -1 when nothing is open so the first tap lands
-  // on the first entry rather than skipping it.
-  const switcherCurrentIndex = activeId
-    ? switcherEntries.findIndex((e) => e.type === "tab" && e.id === activeId)
-    : -1;
-  // The first session entry carries the divider — but only when tabs precede
-  // it, so a tabs-only or sessions-only list shows no stray line.
-  const firstSessionId = switcherEntries.find((e) => e.type === "session")?.id;
-  const hasOpenTabs = tabsByMru.length > 0;
   const tabSwitcher = useTabSwitcher({
     // Per-worktree id: under the keep-alive pool several workspaces are mounted
     // and each registers a Ctrl+Tab channel. A shared id would let the
@@ -2228,7 +2130,7 @@ function ProjectWorkspaceImpl({
                 key: e.id,
                 label: e.title,
                 sub: "Chat",
-                divider: hasOpenTabs && e.id === firstSessionId,
+                divider: hasOpenTabs && e.id === firstSessionSwitcherId,
                 dividerLabel: "Recent chats",
               };
             }

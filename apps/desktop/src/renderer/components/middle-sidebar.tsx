@@ -24,7 +24,9 @@ import { SearchPanel } from "./search-panel";
 import { PrSidebar } from "./pr-sidebar";
 import { usePersistentNumber } from "../lib/use-persistent-number";
 
-export type WorkTab = "diffs" | "chat" | "files" | "search" | "pr";
+import type { WorkTab } from "../lib/use-workspace-tabs";
+
+export type { WorkTab };
 
 interface Props {
   tab: WorkTab;
