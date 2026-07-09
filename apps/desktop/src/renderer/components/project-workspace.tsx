@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
-import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
+import type { FileDiff } from "@plan/shared/lib/diff-parser";
 import { MessageOutput } from "@plan/shared/components/message-output";
 import {
   SidebarProvider,
@@ -26,7 +26,6 @@ import { basename, dirname, lastSegment } from "@plan/shared/lib/path";
 import type {
   ProjectEntry,
   ParsedSession,
-  GitFileStatus,
   DiscoveredRepo,
   CommandEntry,
 } from "../../shared-types";
@@ -50,6 +49,7 @@ import { chatTerminalPrefix } from "../../terminal-ids";
 import { useTerminalHeight } from "../lib/terminal-store";
 import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
+import { useWorkingTree, repoDisplayName } from "../lib/use-working-tree";
 import { useChatSession } from "../lib/use-chat-session";
 import {
   getProjectTabs,
@@ -490,28 +490,32 @@ function ProjectWorkspaceImpl({
 
   const { confirm, dialog: confirmDialog } = useConfirm();
 
-  // ── Files state (per-repo) ───────────────────────────────────
-  interface RepoFiles {
-    files: FileDiff[];
-    status: GitFileStatus[];
-    diffAvailable: boolean;
-    ahead: number;
-    hasUpstream: boolean;
-  }
-  const [filesByRepo, setFilesByRepo] = useState<Map<string, RepoFiles>>(
-    new Map(),
-  );
-  const [filesLoading, setFilesLoading] = useState(true);
-  // True once the first load has populated data. Subsequent refreshes (after a
-  // stage/discard/etc.) update in place WITHOUT flipping back to the loading
-  // placeholder — that swap unmounts the list and resets its scroll.
-  const loadedRef = useRef(false);
-  /**
-   * The selected diff (`selectedFile`) is derived from the active tab near the
-   * top of the component — a diff is identified by repo (subPath), path, and
-   * which stage we're viewing (staged vs unstaged), since a partially-staged
-   * file appears in both sections and each shows a different diff.
-   */
+  // ── Git working tree (per-repo diff/status + ops) ────────────
+  // See useWorkingTree: ops route via subPath, every op re-pulls git state,
+  // and open diff tabs follow their file across staged/unstaged/committed.
+  const {
+    filesLoading,
+    refreshDiff,
+    repoGroups,
+    syncTargets,
+    fileStages,
+    getFileDiff,
+    stageFile: handleStageFile,
+    unstageFile: handleUnstageFile,
+    discardFile: handleDiscardFile,
+    stageAll: handleStageAll,
+    unstageAll: handleUnstageAll,
+    discardAll: handleDiscardAll,
+    stashAll: handleStashAll,
+    push: handlePush,
+    commit: handleCommit,
+  } = useWorkingTree({
+    encoded: project.encoded,
+    cwd: project.cwd,
+    repos,
+    confirm,
+  });
+
   // Comments persist per-project across first-sidebar switches (the workspace
   // is keyed by `encoded` and remounts on switch). Both the diff annotations
   // (keyed by "subPath::path") and the chat annotations come from this store.
@@ -530,259 +534,6 @@ function ProjectWorkspaceImpl({
     restoreAll,
     clearAll,
   } = useProjectAnnotations(project.encoded);
-  /** subPath currently being pushed (for the sync-bar spinner). */
-  const [pushingRepo, setPushingRepo] = useState<string | null>(null);
-
-  const refreshDiff = useCallback(async () => {
-    if (repos.length === 0) {
-      setFilesByRepo(new Map());
-      setFilesLoading(false);
-      loadedRef.current = true;
-      return;
-    }
-    if (!loadedRef.current) setFilesLoading(true);
-    try {
-      const entries = await Promise.all(
-        repos.map(async (r) => {
-          const [diff, status] = await Promise.all([
-            window.electronAPI.getDiff(project.encoded, r.subPath),
-            window.electronAPI.getGitStatus(project.encoded, r.subPath),
-          ]);
-          return [
-            r.subPath,
-            {
-              files: diff.available ? parseUnifiedDiff(diff.diff) : [],
-              status: status.files,
-              diffAvailable: diff.available,
-              ahead: status.ahead,
-              hasUpstream: status.hasUpstream,
-            },
-          ] as const;
-        }),
-      );
-      const next = new Map(entries);
-      setFilesByRepo(next);
-      // Reconcile open diff tabs against fresh git status. We DON'T auto-open
-      // anything — content only opens on explicit click — but an already-open
-      // diff tab must follow its file: close it once the file is no longer
-      // changed (committed/discarded), and flip its staged side when the file
-      // moves across sections (staging the open diff), so it never goes blank.
-      for (const t of getProjectTabs(project.encoded).tabs) {
-        if (t.kind !== "diff") continue;
-        const status = next
-          .get(t.subPath)
-          ?.status.find((s) => s.path === t.path);
-        if (!status) {
-          closeProjectTab(project.encoded, t.id);
-          continue;
-        }
-        if (t.staged ? status.staged : status.unstaged) continue;
-        if (t.staged ? status.unstaged : status.staged) {
-          replaceProjectTab(
-            project.encoded,
-            t.id,
-            makeDiffTab(t.subPath, t.path, !t.staged),
-          );
-        } else {
-          closeProjectTab(project.encoded, t.id);
-        }
-      }
-    } finally {
-      loadedRef.current = true;
-      setFilesLoading(false);
-    }
-  }, [project.encoded, repos]);
-
-  /**
-   * Per-repo {staged, unstaged} groups for the sidebar file list. Built from
-   * each repo's status + diff. When there's only one repo we still produce
-   * one group; the FileList collapses single-group rendering to flat.
-   */
-  const repoGroups: RepoFileGroup[] = useMemo(() => {
-    return repos.map((repo) => {
-      const state = filesByRepo.get(repo.subPath);
-      if (!state) {
-        return {
-          subPath: repo.subPath,
-          repoName: repoDisplayName(repo, project.cwd),
-          branch: repo.branch,
-          staged: [],
-          unstaged: [],
-          diffAvailable: true,
-        };
-      }
-      const diffByPath = new Map(state.files.map((f) => [f.path, f]));
-      const staged: FileEntry[] = [];
-      const unstaged: FileEntry[] = [];
-      for (const s of state.status) {
-        const diff = diffByPath.get(s.path);
-        const letter = letterFromCode(s.code) ?? letterFromDiff(diff);
-        const base = {
-          path: s.path,
-          code: s.code,
-          letter,
-          additions: diff?.additions,
-          deletions: diff?.deletions,
-          subPath: repo.subPath,
-        };
-        if (s.staged) staged.push({ ...base, staged: true });
-        if (s.unstaged) unstaged.push({ ...base, staged: false });
-      }
-      return {
-        subPath: repo.subPath,
-        repoName: repoDisplayName(repo, project.cwd),
-        branch: repo.branch,
-        staged,
-        unstaged,
-        diffAvailable: state.diffAvailable,
-      };
-    });
-  }, [repos, filesByRepo, project.cwd]);
-
-  // Per-repo push targets for the sync bar (only repos with an upstream or
-  // unpushed commits are worth showing).
-  const syncTargets = useMemo(
-    () =>
-      repos
-        .map((repo) => {
-          const state = filesByRepo.get(repo.subPath);
-          return {
-            subPath: repo.subPath,
-            repoName: repoDisplayName(repo, project.cwd),
-            branch: repo.branch,
-            ahead: state?.ahead ?? 0,
-            hasUpstream: state?.hasUpstream ?? false,
-            pushing: pushingRepo === repo.subPath,
-          };
-        })
-        .filter((t) => t.hasUpstream || t.ahead > 0),
-    [repos, filesByRepo, project.cwd, pushingRepo],
-  );
-
-  // ── Git actions (routed via subPath) ─────────────────────────
-  const handleStageFile = useCallback(
-    async (path: string, subPath: string) => {
-      const res = await window.electronAPI.stageFile(
-        project.encoded,
-        path,
-        subPath,
-      );
-      if (!res.ok) console.warn("stage failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  const handleUnstageFile = useCallback(
-    async (path: string, subPath: string) => {
-      const res = await window.electronAPI.unstageFile(
-        project.encoded,
-        path,
-        subPath,
-      );
-      if (!res.ok) console.warn("unstage failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  const handleDiscardFile = useCallback(
-    async (path: string, subPath: string) => {
-      const ok = await confirm({
-        title: `Discard changes to ${path.split("/").pop() ?? path}?`,
-        description:
-          "This permanently discards your local changes to this file. It cannot be undone.",
-        confirmLabel: "Discard",
-      });
-      if (!ok) return;
-      const res = await window.electronAPI.discardFile(
-        project.encoded,
-        path,
-        subPath,
-      );
-      if (!res.ok) console.warn("discard failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff, confirm],
-  );
-
-  const handleStageAll = useCallback(
-    async (subPath: string) => {
-      const res = await window.electronAPI.stageAll(project.encoded, subPath);
-      if (!res.ok) console.warn("stage all failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  const handleUnstageAll = useCallback(
-    async (subPath: string) => {
-      const res = await window.electronAPI.unstageAll(project.encoded, subPath);
-      if (!res.ok) console.warn("unstage all failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  const handleDiscardAll = useCallback(
-    async (subPath: string) => {
-      const ok = await confirm({
-        title: "Discard all changes?",
-        description:
-          "This permanently discards every unstaged change and removes untracked files in this repo. It cannot be undone.",
-        confirmLabel: "Discard all",
-      });
-      if (!ok) return;
-      const res = await window.electronAPI.discardAll(project.encoded, subPath);
-      if (!res.ok) console.warn("discard all failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff, confirm],
-  );
-
-  const handleStashAll = useCallback(
-    async (subPath: string) => {
-      const res = await window.electronAPI.stashAll(project.encoded, subPath);
-      if (!res.ok) console.warn("stash all failed:", res.error);
-      refreshDiff();
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  const handlePush = useCallback(
-    async (subPath: string) => {
-      setPushingRepo(subPath);
-      try {
-        const res = await window.electronAPI.push(project.encoded, subPath);
-        if (!res.ok) console.warn("push failed:", res.error);
-        await refreshDiff();
-      } finally {
-        setPushingRepo(null);
-      }
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  const handleCommit = useCallback(
-    async (message: string, subPath: string) => {
-      const res = await window.electronAPI.commit(
-        project.encoded,
-        message,
-        subPath,
-      );
-      if (!res.ok) return { ok: false, error: res.error ?? "Commit failed" };
-      refreshDiff();
-      return { ok: true };
-    },
-    [project.encoded, refreshDiff],
-  );
-
-  useEffect(() => {
-    // Comments and open tabs are intentionally NOT cleared here — they persist
-    // per worktree (see useProjectAnnotations / useProjectTabs) so switching
-    // projects doesn't lose them.
-    refreshDiff();
-  }, [refreshDiff]);
 
   // ── Sessions state ───────────────────────────────────────────
   // (`sessions` itself is declared above the tab hook, which needs it.)
@@ -1306,44 +1057,6 @@ function ProjectWorkspaceImpl({
     return () => window.removeEventListener("keydown", handler);
   }, [indexProjectFiles, loadAllChats]);
 
-  /**
-   * The FileDiff for the currently-selected file. Untracked files (and any
-   * status entry that `git diff HEAD` doesn't emit) get a synthetic FileDiff
-   * so they still open in the viewer — FileDiffViewer fetches the actual
-   * content itself via getFileContents.
-   */
-  // Resolve a diff for any (subPath, path) — used per diff tab in the render.
-  const getFileDiff = useCallback(
-    (subPath: string, path: string): FileDiff | null => {
-      const repo = filesByRepo.get(subPath);
-      if (!repo) return null;
-      const fromDiff = repo.files.find((f) => f.path === path);
-      if (fromDiff) return fromDiff;
-
-      // Not in the diff — synthesize from the status entry.
-      const status = repo.status.find((s) => s.path === path);
-      if (!status) return null;
-      const isDeleted = status.code.includes("D");
-      const isUntracked = status.code === "??";
-      const statusKind: FileDiff["status"] = isDeleted
-        ? "deleted"
-        : isUntracked
-          ? "added"
-          : "modified";
-      return {
-        path,
-        oldPath: isUntracked ? null : path,
-        newPath: isDeleted ? null : path,
-        status: statusKind,
-        body: "",
-        additions: 0,
-        deletions: 0,
-        binary: false,
-      };
-    },
-    [filesByRepo],
-  );
-
   const handleSelectFile = useCallback(
     (subPath: string, path: string, staged: boolean) => {
       openTab(makeDiffTab(subPath, path, staged));
@@ -1720,40 +1433,26 @@ function ProjectWorkspaceImpl({
       let current: "file" | "unstaged" | "staged";
 
       if (activeTab.kind === "file") {
-        // A file tab's path is project-relative (repo subPath prefixed). Find
-        // the status entry whose full path matches it.
+        // A file tab's path is project-relative (repo subPath prefixed).
         current = "file";
         projectRelPath = activeTab.path;
-        let found: { subPath: string; path: string } | null = null;
-        let status: GitFileStatus | undefined;
-        for (const [sp, state] of filesByRepo) {
-          const match = state.status.find(
-            (s) => (sp ? `${sp}/${s.path}` : s.path) === activeTab.path,
-          );
-          if (match) {
-            found = { subPath: sp, path: match.path };
-            status = match;
-            break;
-          }
-        }
-        if (!found || !status || (!status.staged && !status.unstaged)) {
+        const stages = fileStages(activeTab.path);
+        if (!stages || (!stages.staged && !stages.unstaged)) {
           pushToast({ title: "No diff found for that file." }, 3_000);
           return;
         }
-        subPath = found.subPath;
-        repoPath = found.path;
-        hasUnstaged = status.unstaged;
-        hasStaged = status.staged;
+        subPath = stages.subPath;
+        repoPath = stages.path;
+        hasUnstaged = stages.unstaged;
+        hasStaged = stages.staged;
       } else {
         subPath = activeTab.subPath;
         repoPath = activeTab.path;
         projectRelPath = subPath ? `${subPath}/${repoPath}` : repoPath;
         current = activeTab.staged ? "staged" : "unstaged";
-        const status = filesByRepo
-          .get(subPath)
-          ?.status.find((s) => s.path === repoPath);
-        hasUnstaged = status?.unstaged ?? false;
-        hasStaged = status?.staged ?? false;
+        const stages = fileStages(projectRelPath);
+        hasUnstaged = stages?.unstaged ?? false;
+        hasStaged = stages?.staged ?? false;
       }
 
       // The cycle is the existing stages in order; advance to the next one,
@@ -1769,7 +1468,7 @@ function ProjectWorkspaceImpl({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeTab, filesByRepo, openTab]);
+  }, [activeTab, fileStages, openTab]);
 
   const startTerminalResize = useCallback(
     (e: React.PointerEvent) => {
@@ -2337,38 +2036,6 @@ interface SwitchEntry {
 function isTerminalFocused(): boolean {
   const el = document.activeElement;
   return !!el && !!el.closest(".xterm");
-}
-
-function letterFromCode(code: string): FileEntry["letter"] | null {
-  // X is staged-side, Y is unstaged-side. Pick the most informative.
-  const codes = [code[0], code[1]].filter((c) => c && c !== " ");
-  for (const c of codes) {
-    if (c === "A") return "A";
-    if (c === "D") return "D";
-    if (c === "M") return "M";
-    if (c === "R") return "R";
-    if (c === "?") return "?";
-  }
-  return null;
-}
-
-function letterFromDiff(diff?: FileDiff): FileEntry["letter"] {
-  if (!diff) return "M";
-  switch (diff.status) {
-    case "added":
-      return "A";
-    case "deleted":
-      return "D";
-    case "renamed":
-      return "R";
-    default:
-      return "M";
-  }
-}
-
-function repoDisplayName(repo: DiscoveredRepo, projectCwd: string): string {
-  if (!repo.subPath) return lastSegment(projectCwd);
-  return repo.subPath;
 }
 
 /**
