@@ -47,10 +47,10 @@ import {
   type ProjectFileAnnotationInput,
 } from "../lib/annotation-store";
 import { chatTerminalPrefix } from "../../terminal-ids";
-import { useAutoModeEnabled } from "../lib/auto-mode-settings";
 import { useTerminalHeight } from "../lib/terminal-store";
 import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
+import { useChatSession } from "../lib/use-chat-session";
 import {
   getProjectTabs,
   openProjectTab,
@@ -68,7 +68,6 @@ import { cachedPrTitle } from "../lib/pr-store";
 import { PrView } from "./pr-view";
 import { TabBar } from "./tab-bar";
 import { ScratchEditor } from "./scratch-editor";
-import { useTerminalWorking } from "../lib/terminal-activity-store";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { CommandsConfigModal } from "./commands-config-modal";
@@ -83,7 +82,7 @@ import {
   getCachedTranscripts,
   setCachedTranscripts,
 } from "../lib/session-cache";
-import { osNotify, pushToast } from "../lib/toast-store";
+import { pushToast } from "../lib/toast-store";
 import { markNewSession, isNewSession } from "../lib/new-session-ids";
 
 // Stable identity for the middle sidebar's ⌘E toggle shortcut (see the keyed
@@ -403,9 +402,6 @@ function ProjectWorkspaceImpl({
   // current value (assigned on each render, before the handlers can fire).
   const activeRef = useRef(active);
   activeRef.current = active;
-  // Auto-mode is an app-wide preference (Settings dialog); it applies to every
-  // project's Claude sessions.
-  const [globalAutoMode] = useAutoModeEnabled();
   // Session list state lives up here because the tab hook's Ctrl+Tab switcher
   // lists sessions without an open tab. Seeded from the per-encoded cache so
   // revisiting a worktree paints instantly (then refreshes in the background)
@@ -1420,7 +1416,6 @@ function ProjectWorkspaceImpl({
   const terminalMounted = openedIds.length > 0;
 
   const chatPrefix = chatTerminalPrefix(project.encoded);
-  const sessionTermId = (sid: string) => `${chatPrefix}${sid}`;
   // Drives each chat tab's working icon: the terminal id of its agent, or null
   // for non-chat tabs (which have no agent to be busy).
   const termIdForTab = useCallback(
@@ -1428,48 +1423,6 @@ function ProjectWorkspaceImpl({
       t.kind === "chat" ? `${chatPrefix}${t.sessionId}` : null,
     [chatPrefix],
   );
-  const initialCommandFor = (tid: string): string | undefined => {
-    if (!tid.startsWith(chatPrefix)) return undefined;
-    const sid = tid.slice(chatPrefix.length);
-    // Brand-new chats start claude with a pre-chosen session id (nothing to
-    // resume yet); existing ones resume their transcript.
-    const flags = globalAutoMode ? " --permission-mode auto" : "";
-    return isNewSession(sid)
-      ? `claude --session-id ${sid}${flags}`
-      : `claude --resume ${sid}${flags}`;
-  };
-
-  // The dock (⌘J) mirrors the selected chat's Claude instance — on the Diffs
-  // and Files tabs too, not just the Chat tab — so ⌘J anywhere brings up the
-  // same running agent. The dock is NEVER a plain shell: with no live chat
-  // terminal there's nothing to show, so it stays closed (see the ⌘J handler
-  // and the exit handler). Scratch shells live in the sidebar's Terminals
-  // section instead.
-  const sessionResumed =
-    selectedSessionId != null &&
-    openedIds.includes(sessionTermId(selectedSessionId));
-  const activeTerminalId = sessionResumed
-    ? sessionTermId(selectedSessionId!)
-    : null;
-  const activeTerminalIdRef = useRef(activeTerminalId);
-  activeTerminalIdRef.current = activeTerminalId;
-
-  // Whether the selected chat has a live (resumed) terminal to send into.
-  const chatTerminalReady =
-    selectedSessionId != null &&
-    openedIds.includes(`${chatPrefix}${selectedSessionId}`);
-
-  // session in a ref so callbacks can read the latest without re-creating.
-  const sessionRef = useRef<ParsedSession | null>(null);
-  sessionRef.current = session;
-
-  // Send watchdog: if no user message lands in the transcript within 12s of a
-  // UI send, the message may be stuck behind a TUI prompt — say so.
-  const sendWatchdogRef = useRef<{
-    baseLen: number;
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
-
   // Reveal a chat's terminal: select the chat, switch to its tab, snap the
   // dock off any scratch shell, and open it — so the dock lands on THAT chat's
   // terminal regardless of where the user currently is.
@@ -1483,54 +1436,31 @@ function ProjectWorkspaceImpl({
     [openChatTab, setActiveShellId, setTerminalOpen],
   );
 
-  const armSendWatchdog = useCallback(
-    (sid: string) => {
-      if (sendWatchdogRef.current) clearTimeout(sendWatchdogRef.current.timer);
-      sendWatchdogRef.current = {
-        baseLen: sessionRef.current?.messages.length ?? 0,
-        timer: setTimeout(() => {
-          sendWatchdogRef.current = null;
-          pushToast({
-            title: "Message may be stuck",
-            description: "Please check the terminal.",
-            actionLabel: "Open terminal",
-            onAction: () => revealChatTerminal(sid),
-          });
-          if (!document.hasFocus())
-            osNotify("plan", "Message may be stuck — check the terminal");
-        }, 12_000),
-      };
-    },
-    [revealChatTerminal],
-  );
-
-  // Chat composer: send a message into the selected chat's `claude` (submits).
-  // No optimistic echo / "working" indicator — the transcript (JSONL watcher)
-  // is the source of truth; the message appears when it actually lands.
-  const handleSendChat = useCallback(
-    (text: string, imagePaths: string[] = []) => {
-      if (!selectedSessionId) return;
-      const tid = `${chatPrefix}${selectedSessionId}`;
-      if (!openedIds.includes(tid)) return;
-      sendToTerminal(tid, text, imagePaths, true);
-      // The transcript will confirm delivery; if it doesn't within 12s, the
-      // watchdog says so (toast + notification) instead of leaving you lost.
-      armSendWatchdog(selectedSessionId);
-    },
-    [selectedSessionId, chatPrefix, openedIds, sendToTerminal, armSendWatchdog],
-  );
-
-  // Drive the chat terminal's TUI selectors (e.g. AskUserQuestion options)
-  // with discrete keystrokes.
-  const handleSendKeysToChat = useCallback(
-    (keys: string[]) => {
-      if (!selectedSessionId) return;
-      const tid = `${chatPrefix}${selectedSessionId}`;
-      if (!openedIds.includes(tid)) return;
-      window.electronAPI.terminalSendKeys(tid, keys);
-    },
-    [selectedSessionId, chatPrefix, openedIds],
-  );
+  // The selected chat's lifecycle: terminal binding (the dock ⌘J mirrors
+  // activeTerminalId — never a plain shell), sending + the stuck-message
+  // watchdog, and the observed activity signals. See useChatSession.
+  const {
+    chatTerminalReady,
+    activeTerminalId,
+    initialCommandFor,
+    connectChat,
+    sendChat,
+    sendKeysToChat,
+    agentLive,
+    chatWorking,
+    awaitingSelection,
+    turnCount,
+  } = useChatSession({
+    encoded: project.encoded,
+    selectedSessionId,
+    session,
+    openedIds,
+    ensureOpened,
+    sendToTerminal,
+    revealChatTerminal,
+  });
+  const activeTerminalIdRef = useRef(activeTerminalId);
+  activeTerminalIdRef.current = activeTerminalId;
 
   // New chat: pre-pick the session uuid and start `claude --session-id` in a
   // background terminal — the composer is immediately live; the transcript
@@ -1543,154 +1473,6 @@ function ProjectWorkspaceImpl({
     setTab("chat");
     requestAnimationFrame(() => chatInputRef.current?.focus());
   }, [chatPrefix, ensureOpened, openChatTab]);
-
-  // ── Activity signals (all transcript/OS facts — nothing invented) ──
-
-  // The transcript is the truth: a user message arriving clears the watchdog.
-  useEffect(() => {
-    const w = sendWatchdogRef.current;
-    if (!w || !session) return;
-    const delivered = session.messages
-      .slice(w.baseLen)
-      .some(
-        (m) =>
-          m.role === "user" && m.parts.some((p) => p.kind !== "tool_result"),
-      );
-    if (delivered) {
-      clearTimeout(w.timer);
-      sendWatchdogRef.current = null;
-    }
-  }, [session]);
-  useEffect(() => {
-    // Watchdog is per-session.
-    if (sendWatchdogRef.current) {
-      clearTimeout(sendWatchdogRef.current.timer);
-      sendWatchdogRef.current = null;
-    }
-  }, [selectedSessionId]);
-
-  // "Claude is done" notifications are owned globally by the session-done
-  // notifier (started at the app root), which watches every live session's
-  // status — not just the one on screen. We deliberately don't fire a per-reply
-  // notification here: a single turn appends several assistant messages (text,
-  // then a tool call, then more text), which would notify several times.
-
-  // A pending tool-approval prompt is surfaced reliably from Claude's rendered
-  // menu (the global session-approval notifier + `awaitingSelection` below),
-  // not guessed from transcript timing. An earlier "last message has an
-  // unresolved tool_use for 20s" heuristic lived here; it was a guess (and now
-  // double-fired against the real signal), so it's gone.
-
-  // Agent status: poll the pty's foreground process name (an OS fact) so the
-  // header can say whether Claude itself is running in the chat terminal.
-  const [agentProcess, setAgentProcess] = useState<string | null>(null);
-  useEffect(() => {
-    if (!chatTerminalReady || !selectedSessionId) {
-      setAgentProcess(null);
-      return;
-    }
-    const tid = `${chatPrefix}${selectedSessionId}`;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      let proc: string | null = null;
-      try {
-        const st = await window.electronAPI.terminalStatus(tid);
-        proc = st.running ? st.process : null;
-        if (alive) setAgentProcess(proc);
-      } catch {
-        // Status unavailable — show the neutral state, not a wrong one.
-        if (alive) setAgentProcess(null);
-      }
-      if (!alive) return;
-      // Poll quickly until Claude is detected so the composer (which holds send
-      // until the agent is live) unlocks right as the session finishes booting;
-      // ease off to a slow heartbeat once it's up.
-      const live = /claude|node/i.test(proc ?? "");
-      timer = setTimeout(poll, live ? 5_000 : 1_000);
-    };
-    void poll();
-    return () => {
-      alive = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [chatTerminalReady, selectedSessionId, chatPrefix]);
-  // Claude's CLI runs under node; either name means the agent process is live.
-  const agentLive = /claude|node/i.test(agentProcess ?? "");
-  // Live "is Claude actively emitting output right now" — an observed fact from
-  // the pty stream, not a guess. The spinner redraws while it works, so output
-  // flowing = working; output stopped = idle (done or blocked on approval).
-  const chatWorking = useTerminalWorking(
-    selectedSessionId ? `${chatPrefix}${selectedSessionId}` : null,
-  );
-
-  // ── Input-box vs. selection-menu detection ───────────────────────────
-  // Heuristic read of the chat terminal's rendered screen (a headless emulator
-  // in main scans the bottom rows for Claude's TUI box). "selection" means a
-  // numbered approval/plan/question menu is up — there's NO free-text box, so
-  // sending a message + Enter would mis-navigate the menu.
-  const [inputState, setInputState] = useState<
-    "input" | "selection" | "unknown"
-  >("unknown");
-  useEffect(() => {
-    if (!chatTerminalReady || !selectedSessionId) {
-      setInputState("unknown");
-      return;
-    }
-    const tid = `${chatPrefix}${selectedSessionId}`;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const res = await window.electronAPI.terminalInputState(tid);
-        if (!alive) return;
-        setInputState(res.state);
-      } catch {
-        if (alive) setInputState("unknown");
-      }
-    };
-    void poll();
-    const interval = setInterval(poll, 1_500);
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, [chatTerminalReady, selectedSessionId, chatPrefix]);
-
-  // A rendered selection menu IS the "waiting for you" signal — it must win
-  // over the output-recency "working" heuristic, NOT be gated by it: Claude
-  // keeps repainting the prompt (cursor blink / box redraw) while it waits, so
-  // `chatWorking` stays true the whole time the menu is up. We only require the
-  // agent process to be live (a stray menu in a dead shell isn't actionable).
-  const awaitingSelection = agentLive && inputState === "selection";
-
-  // Auto-reveal the terminal when a menu appears so the user can respond —
-  // only once per transition into the selection state (not on every poll). The
-  // toast/OS banner is owned globally by the session-approval notifier (it
-  // covers every session, including ones in projects/worktrees not on screen);
-  // here we only do the local convenience of surfacing this workspace's own tab.
-  const autoRevealedRef = useRef(false);
-  useEffect(() => {
-    if (awaitingSelection && !autoRevealedRef.current) {
-      autoRevealedRef.current = true;
-      revealChatTerminal(selectedSessionId!);
-    } else if (!awaitingSelection) {
-      autoRevealedRef.current = false;
-    }
-  }, [awaitingSelection, selectedSessionId, revealChatTerminal]);
-
-  // Conversation turns (user messages that aren't tool results) — far more
-  // meaningful than raw transcript entry count, and free to compute.
-  const turnCount = useMemo(
-    () =>
-      session
-        ? session.messages.filter(
-            (m) =>
-              m.role === "user" &&
-              m.parts.some((p) => p.kind !== "tool_result"),
-          ).length
-        : 0,
-    [session],
-  );
 
   // Comments cleared by the last "Add to chat", kept so ⌘Z in the composer can
   // put them back exactly where they were (see handleUndoAddToChat).
@@ -1741,20 +1523,13 @@ function ProjectWorkspaceImpl({
     clearAll();
   }, [confirm, clearAll]);
 
-  // "Run terminal": start `claude --resume` for the selected session in the
-  // background (does NOT reveal the dock). Enables the composer.
-  const handleResumeChat = useCallback(() => {
-    if (!selectedSessionId) return;
-    ensureOpened(`${chatPrefix}${selectedSessionId}`);
-  }, [selectedSessionId, chatPrefix, ensureOpened]);
-
   // ⌘J's connect path: hook the selected chat up to Claude if it isn't already
   // (runs `claude --resume` in the background) AND reveal the dock — one action,
   // no separate "Connect" step.
   const connectAndShowChat = useCallback(() => {
-    if (selectedSessionId) ensureOpened(`${chatPrefix}${selectedSessionId}`);
+    connectChat();
     setTerminalOpen(true);
-  }, [selectedSessionId, chatPrefix, ensureOpened, setTerminalOpen]);
+  }, [connectChat, setTerminalOpen]);
 
   const [runConfigOpen, setRunConfigOpen] = useState(false);
   const [buildConfigOpen, setBuildConfigOpen] = useState(false);
@@ -1848,13 +1623,13 @@ function ProjectWorkspaceImpl({
       ) {
         e.preventDefault();
         setTab("chat");
-        if (!chatTerminalReady) handleResumeChat();
+        if (!chatTerminalReady) connectChat();
         requestAnimationFrame(() => chatInputRef.current?.focus());
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [chatTerminalReady, handleResumeChat]);
+  }, [chatTerminalReady, connectChat]);
 
   // ⌘⇧S opens (or focuses) the scratchpad tab.
   useEffect(() => {
@@ -2378,7 +2153,7 @@ function ProjectWorkspaceImpl({
                           onAddAnnotation={addChatAnnotation}
                           onUpdateAnnotation={updateChatAnnotation}
                           onRemoveAnnotation={removeChatAnnotation}
-                          onSendKeys={handleSendKeysToChat}
+                          onSendKeys={sendKeysToChat}
                         />
                       );
                     })}
@@ -2409,8 +2184,8 @@ function ProjectWorkspaceImpl({
                       projectEncoded={project.encoded}
                       inactive={!chatTerminalReady}
                       notReady={chatTerminalReady && !agentLive}
-                      onStart={handleResumeChat}
-                      onSend={handleSendChat}
+                      onStart={connectChat}
+                      onSend={sendChat}
                       blocked={awaitingSelection}
                       onBlocked={() => revealChatTerminal(selectedSessionId)}
                       autoFocus={isNewSession(selectedSessionId)}
