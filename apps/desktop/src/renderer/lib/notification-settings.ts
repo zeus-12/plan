@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { createPersistedValue } from "./external-value";
 
 /**
  * User-configurable notification settings, persisted to localStorage so they
@@ -30,44 +30,24 @@ export interface NotificationSettings {
   sound: SoundId;
 }
 
-const STORAGE_KEY = "plan.notifications";
-
 const DEFAULTS: NotificationSettings = {
   enabled: true,
   sound: "chime",
 };
 
-let current: NotificationSettings = load();
-const listeners = new Set<() => void>();
-
-function load(): NotificationSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
-  } catch {
-    // Corrupt/unavailable storage — fall back to defaults, never crash.
-  }
-  return { ...DEFAULTS };
-}
+const store = createPersistedValue<NotificationSettings>(
+  "plan.notifications",
+  (raw) => ({
+    ...DEFAULTS,
+    ...(raw && typeof raw === "object" ? raw : {}),
+  }),
+);
 
 /** Synchronous read for the notifier (no React). */
-export function getNotificationSettings(): NotificationSettings {
-  return current;
-}
+export const getNotificationSettings = store.get;
 
 export function setNotificationSettings(patch: Partial<NotificationSettings>) {
-  current = { ...current, ...patch };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-  } catch {
-    // Persistence is best-effort; the in-memory value still applies this run.
-  }
-  listeners.forEach((l) => l());
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  store.set({ ...store.get(), ...patch });
 }
 
 /** React binding for the settings UI. */
@@ -75,10 +55,5 @@ export function useNotificationSettings(): [
   NotificationSettings,
   (patch: Partial<NotificationSettings>) => void,
 ] {
-  const settings = useSyncExternalStore(
-    subscribe,
-    getNotificationSettings,
-    getNotificationSettings,
-  );
-  return [settings, setNotificationSettings];
+  return [store.useValue(), setNotificationSettings];
 }

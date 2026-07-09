@@ -1,7 +1,5 @@
-import { readPlanConfig, writePlanConfig } from "./plan-config";
+import { createJsonStore } from "./json-store";
 import { primeProjectCwd } from "./claude-projects";
-
-const CONFIG_NAME = "projects.json";
 
 interface Stored {
   manualCwds: string[];
@@ -12,28 +10,22 @@ interface Stored {
   sessionNames: Record<string, string>;
 }
 
-let cache: Stored | null = null;
+function stringList(raw: unknown): string[] {
+  return Array.isArray(raw)
+    ? raw.filter((x): x is string => typeof x === "string")
+    : [];
+}
 
-async function load(): Promise<Stored> {
-  if (cache) return cache;
-  try {
-    const raw = await readPlanConfig(CONFIG_NAME);
-    if (raw === null) throw new Error("no config");
-    const parsed = JSON.parse(raw) as Partial<Stored>;
-    cache = {
-      manualCwds: Array.isArray(parsed.manualCwds)
-        ? parsed.manualCwds.filter((x): x is string => typeof x === "string")
-        : [],
-      archivedEncoded: Array.isArray(parsed.archivedEncoded)
-        ? parsed.archivedEncoded.filter(
-            (x): x is string => typeof x === "string",
-          )
-        : [],
-      archivedSessions: Array.isArray(parsed.archivedSessions)
-        ? parsed.archivedSessions.filter(
-            (x): x is string => typeof x === "string",
-          )
-        : [],
+const { load, scheduleWrite } = createJsonStore<Stored>(
+  "projects.json",
+  (raw) => {
+    const parsed = (
+      raw && typeof raw === "object" ? raw : {}
+    ) as Partial<Stored>;
+    return {
+      manualCwds: stringList(parsed.manualCwds),
+      archivedEncoded: stringList(parsed.archivedEncoded),
+      archivedSessions: stringList(parsed.archivedSessions),
       sessionNames:
         parsed.sessionNames && typeof parsed.sessionNames === "object"
           ? Object.fromEntries(
@@ -43,30 +35,8 @@ async function load(): Promise<Stored> {
             )
           : {},
     };
-  } catch {
-    cache = {
-      manualCwds: [],
-      archivedEncoded: [],
-      archivedSessions: [],
-      sessionNames: {},
-    };
-  }
-  return cache;
-}
-
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleWrite() {
-  if (writeTimer) clearTimeout(writeTimer);
-  writeTimer = setTimeout(async () => {
-    if (!cache) return;
-    try {
-      await writePlanConfig(CONFIG_NAME, JSON.stringify(cache, null, 2));
-    } catch {
-      // ignore — best-effort persistence
-    }
-  }, 300);
-}
+  },
+);
 
 export async function getManualCwds(): Promise<string[]> {
   const data = await load();

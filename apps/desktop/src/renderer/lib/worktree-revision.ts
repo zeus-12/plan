@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { createExternalValue } from "./external-value";
 
 /**
  * Per-project "content revision" counter, bumped whenever the worktree on disk
@@ -12,25 +13,17 @@ import { useSyncExternalStore } from "react";
  * file didn't) just causes a harmless redundant re-read, never a stale view.
  */
 
-const revisions = new Map<string, number>();
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
+const revisions = createExternalValue<Record<string, number>>({});
 
 export function bumpWorktreeRevision(encoded: string) {
-  revisions.set(encoded, (revisions.get(encoded) ?? 0) + 1);
-  listeners.forEach((l) => l());
+  const cur = revisions.get();
+  revisions.set({ ...cur, [encoded]: (cur[encoded] ?? 0) + 1 });
 }
 
 export function useWorktreeRevision(encoded: string): number {
   return useSyncExternalStore(
-    subscribe,
-    () => revisions.get(encoded) ?? 0,
-    () => revisions.get(encoded) ?? 0,
+    revisions.subscribe,
+    () => revisions.get()[encoded] ?? 0,
+    () => revisions.get()[encoded] ?? 0,
   );
 }

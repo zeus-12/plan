@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { PrDetail, PrListResult } from "../../shared-types";
 
 /**
@@ -42,7 +42,13 @@ const details = new Map<string, DetailEntry>(); // `${encoded}::${subPath}#${n}`
 const inFlight = new Set<string>();
 const listeners = new Set<() => void>();
 
+// The hooks derive their state from several mutable maps per render, so the
+// subscription snapshot is a plain version counter: any cache change bumps it,
+// and useSyncExternalStore re-renders the consumers, which re-read the maps.
+let version = 0;
+
 function emit() {
+  version++;
   listeners.forEach((l) => l());
 }
 function subscribe(l: () => void) {
@@ -50,6 +56,13 @@ function subscribe(l: () => void) {
   return () => {
     listeners.delete(l);
   };
+}
+function useCacheVersion() {
+  useSyncExternalStore(
+    subscribe,
+    () => version,
+    () => version,
+  );
 }
 
 function listStorageKey(encoded: string): string {
@@ -215,8 +228,7 @@ export function usePrList(
   subPath: string,
   enabled: boolean,
 ): PrListState {
-  const [, force] = useReducer((x: number) => x + 1, 0);
-  useEffect(() => subscribe(force), []);
+  useCacheVersion();
   useEffect(() => {
     if (enabled) void fetchList(encoded, subPath, false);
   }, [encoded, subPath, enabled]);
@@ -244,8 +256,7 @@ export function usePrDetail(
   subPath: string,
   n: number,
 ): PrDetailState {
-  const [, force] = useReducer((x: number) => x + 1, 0);
-  useEffect(() => subscribe(force), []);
+  useCacheVersion();
   useEffect(() => {
     void fetchDetail(encoded, subPath, n, false);
   }, [encoded, subPath, n]);

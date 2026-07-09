@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { readPlanConfig, writePlanConfig } from "./plan-config";
+import { createJsonStore } from "./json-store";
 import type {
   WorktreeRecord,
   WorktreeRepoRecord,
@@ -8,15 +8,11 @@ import type {
 
 export type { WorktreeRecord, WorktreeRepoRecord, ProjectDefaults };
 
-const CONFIG_NAME = "worktrees.json";
-
 interface Stored {
   worktrees: WorktreeRecord[];
   /** Keyed by projectEncoded. */
   defaults: Record<string, ProjectDefaults>;
 }
-
-let cache: Stored | null = null;
 
 function sanitizeRepo(r: unknown): WorktreeRepoRecord | null {
   if (!r || typeof r !== "object") return null;
@@ -57,13 +53,13 @@ function sanitizeWorktree(w: unknown): WorktreeRecord | null {
   };
 }
 
-async function load(): Promise<Stored> {
-  if (cache) return cache;
-  try {
-    const raw = await readPlanConfig(CONFIG_NAME);
-    if (raw === null) throw new Error("no config");
-    const parsed = JSON.parse(raw) as Partial<Stored>;
-    cache = {
+const { load, scheduleWrite } = createJsonStore<Stored>(
+  "worktrees.json",
+  (raw) => {
+    const parsed = (
+      raw && typeof raw === "object" ? raw : {}
+    ) as Partial<Stored>;
+    return {
       worktrees: Array.isArray(parsed.worktrees)
         ? parsed.worktrees
             .map(sanitizeWorktree)
@@ -74,25 +70,8 @@ async function load(): Promise<Stored> {
           ? (parsed.defaults as Record<string, ProjectDefaults>)
           : {},
     };
-  } catch {
-    cache = { worktrees: [], defaults: {} };
-  }
-  return cache;
-}
-
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleWrite() {
-  if (writeTimer) clearTimeout(writeTimer);
-  writeTimer = setTimeout(async () => {
-    if (!cache) return;
-    try {
-      await writePlanConfig(CONFIG_NAME, JSON.stringify(cache, null, 2));
-    } catch {
-      // best-effort persistence
-    }
-  }, 300);
-}
+  },
+);
 
 export async function listWorktreeRecords(
   projectEncoded: string,
