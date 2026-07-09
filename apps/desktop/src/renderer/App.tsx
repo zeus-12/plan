@@ -79,6 +79,7 @@ import {
   makeChatTab,
   chatTabId,
 } from "./lib/tabs-store";
+import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
 import { pushToast } from "./lib/toast-store";
@@ -212,6 +213,14 @@ function Shell() {
       if (timer) clearTimeout(timer);
     };
   }, [refreshProjects]);
+
+  // ⌘R: main forwards the press here (it no longer reloads directly). An open
+  // data page — the PR view — claims it to force-refresh its own data; with no
+  // claimant this falls back to the ordinary full-app reload.
+  useEffect(
+    () => window.electronAPI.onReloadRequest(handleReloadRequest),
+    [],
+  );
 
   const handleAddProject = useCallback(async () => {
     const added = await window.electronAPI.addManualProject();

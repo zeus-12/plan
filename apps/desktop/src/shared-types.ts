@@ -345,6 +345,108 @@ export interface CreatePrResult {
   repos: CreatePrRepoResult[];
 }
 
+// ── GitHub PR viewer ─────────────────────────────────────────────────────────
+// Read-only browsing of a repo's pull requests via the `gh` CLI. Shapes mirror
+// what `gh pr list` / `gh pr view` / the REST API actually return (verified),
+// normalized to the fields the UI needs.
+
+export type PrState = "OPEN" | "CLOSED" | "MERGED";
+/** Rolled-up CI state; null when the PR has no checks at all. */
+export type PrChecks = "success" | "failure" | "pending" | null;
+
+/** One PR row in the sidebar list — cheap to fetch (`gh pr list`). */
+export interface PrSummary {
+  number: number;
+  title: string;
+  state: PrState;
+  isDraft: boolean;
+  headRefName: string;
+  baseRefName: string;
+  author: string;
+  authorIsBot: boolean;
+  /** ISO timestamp of the last update (drives stale-while-revalidate). */
+  updatedAt: string;
+  checks: PrChecks;
+  url: string;
+}
+
+export interface PrListResult {
+  /** True when the repo has a GitHub remote and `gh` could list its PRs. */
+  available: boolean;
+  prs: PrSummary[];
+  error?: string;
+}
+
+/** What produced a timeline entry: a conversation comment, a review, or an
+ * inline (code-anchored) review comment. */
+export type PrCommentKind = "comment" | "review" | "review-comment";
+
+export interface PrComment {
+  kind: PrCommentKind;
+  id: string;
+  author: string;
+  /** Reliable: derived from the REST `user.type === "Bot"`. */
+  authorIsBot: boolean;
+  body: string;
+  createdAt: string;
+  url: string;
+  /** review only: APPROVED / CHANGES_REQUESTED / COMMENTED / DISMISSED. */
+  reviewState?: string;
+  /** review-comment only: file + line the note is anchored to. */
+  path?: string;
+  line?: number | null;
+  /** review-comment only: the code snippet GitHub attaches to the note. */
+  diffHunk?: string;
+  /** review-comment only: parent id for threaded replies (null = top of thread). */
+  inReplyToId?: string | null;
+}
+
+export interface PrCommit {
+  oid: string;
+  messageHeadline: string;
+  author: string;
+  committedDate: string;
+}
+
+export interface PrDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: PrState;
+  isDraft: boolean;
+  url: string;
+  author: string;
+  authorIsBot: boolean;
+  createdAt: string;
+  mergedAt: string | null;
+  baseRefName: string;
+  headRefName: string;
+  additions: number;
+  deletions: number;
+  /** Raw unified diff (`gh pr diff`); parse with parseUnifiedDiff in the UI. */
+  diff: string;
+  /** Conversation comments + reviews + inline review comments, chronological. */
+  timeline: PrComment[];
+  commits: PrCommit[];
+  /** PR head commit SHA — the "new" side of every file diff. The "old" side is
+   * reconstructed from `diff` (reverse-applied to the head blob), so no base SHA
+   * is needed. null when the head ref couldn't be fetched (offline / no access). */
+  headSha: string | null;
+}
+
+export interface PrDetailResult {
+  ok: boolean;
+  detail?: PrDetail;
+  error?: string;
+}
+
+/** The PR head blob for one file (the "new" side). The "old" side is
+ * reconstructed in the renderer by reverse-applying the diff. */
+export interface PrFileView {
+  text: string;
+  binary: boolean;
+}
+
 /** A newer published release than the running app, per the GitHub feed. */
 export interface UpdateInfo {
   /** Marketing version of the latest release, without the leading `v`. */
