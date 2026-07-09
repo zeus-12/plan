@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { cn } from "@plan/shared/lib/utils";
 import { usePrDetail } from "../lib/pr-store";
+import { useProjectAnnotations } from "../lib/annotation-store";
 import { setReloadOverride } from "../lib/reload-override";
 import { PrConversation } from "./pr-conversation";
 import { PrFileDiff } from "./pr-file-diff";
@@ -15,8 +15,6 @@ interface Props {
   number: number;
   /** False while this PR tab is hidden — gates ⌘R, ⌘F and text selection. */
   active: boolean;
-  annotationsByPr: Record<string, Annotation[]>;
-  setAnnotationsByPr: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
 }
 
 type SubTab = "conversation" | "files" | "commits";
@@ -45,14 +43,18 @@ export const PrView = memo(function PrView({
   subPath,
   number,
   active,
-  annotationsByPr,
-  setAnnotationsByPr,
 }: Props) {
   const { detail, loading, revalidating, refetch } = usePrDetail(
     encoded,
     subPath,
     number,
   );
+  const {
+    annotationsByPr,
+    addPrAnnotation,
+    updatePrAnnotation,
+    removePrAnnotation,
+  } = useProjectAnnotations(encoded);
   const [sub, setSub] = useState<SubTab>("conversation");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
@@ -83,24 +85,16 @@ export const PrView = memo(function PrView({
   // another surface bumps the shared annotation store).
   const addConversationNote = useCallback(
     (label: string, selectedText: string, comment: string) => {
-      const key = convKey(subPath, number);
-      setAnnotationsByPr((prev) => ({
-        ...prev,
-        [key]: [
-          ...(prev[key] ?? []),
-          {
-            id: crypto.randomUUID(),
-            selectedText,
-            startOffset: 0,
-            endOffset: selectedText.length,
-            comment,
-            side: "right",
-            context: { filePath: `PR #${number} · ${label}` },
-          },
-        ],
-      }));
+      addPrAnnotation(convKey(subPath, number), {
+        selectedText,
+        startOffset: 0,
+        endOffset: selectedText.length,
+        comment,
+        side: "right",
+        context: { filePath: `PR #${number} · ${label}` },
+      });
     },
-    [subPath, number, setAnnotationsByPr],
+    [subPath, number, addPrAnnotation],
   );
 
   // ── File-diff annotations (keyed per file) ────────────────────
@@ -115,50 +109,32 @@ export const PrView = memo(function PrView({
       startLine: number,
       endLine: number,
     ) => {
-      const key = fileKey(subPath, number, path);
-      setAnnotationsByPr((prev) => ({
-        ...prev,
-        [key]: [
-          ...(prev[key] ?? []),
-          {
-            id: crypto.randomUUID(),
-            selectedText,
-            startOffset,
-            endOffset,
-            comment,
-            side,
-            context: {
-              filePath: `${path} (PR #${number})`,
-              startLine,
-              endLine,
-            },
-          },
-        ],
-      }));
+      addPrAnnotation(fileKey(subPath, number, path), {
+        selectedText,
+        startOffset,
+        endOffset,
+        comment,
+        side,
+        context: {
+          filePath: `${path} (PR #${number})`,
+          startLine,
+          endLine,
+        },
+      });
     },
-    [subPath, number, setAnnotationsByPr],
+    [subPath, number, addPrAnnotation],
   );
   const updateFileNote = useCallback(
     (path: string, id: string, comment: string) => {
-      const key = fileKey(subPath, number, path);
-      setAnnotationsByPr((prev) => ({
-        ...prev,
-        [key]: (prev[key] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a,
-        ),
-      }));
+      updatePrAnnotation(fileKey(subPath, number, path), id, comment);
     },
-    [subPath, number, setAnnotationsByPr],
+    [subPath, number, updatePrAnnotation],
   );
   const removeFileNote = useCallback(
     (path: string, id: string) => {
-      const key = fileKey(subPath, number, path);
-      setAnnotationsByPr((prev) => ({
-        ...prev,
-        [key]: (prev[key] ?? []).filter((a) => a.id !== id),
-      }));
+      removePrAnnotation(fileKey(subPath, number, path), id);
     },
-    [subPath, number, setAnnotationsByPr],
+    [subPath, number, removePrAnnotation],
   );
 
   if (!detail) {
@@ -335,7 +311,9 @@ export const PrView = memo(function PrView({
 const EMPTY: Annotation[] = [];
 
 function StatePill({ state, isDraft }: { state: PrState; isDraft: boolean }) {
-  const label = isDraft ? "Draft" : state.charAt(0) + state.slice(1).toLowerCase();
+  const label = isDraft
+    ? "Draft"
+    : state.charAt(0) + state.slice(1).toLowerCase();
   const color = isDraft
     ? "bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)]"
     : state === "OPEN"
@@ -402,9 +380,7 @@ function FileRail({
               : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]",
           )}
         >
-          <span className="truncate flex-1">
-            {f.path.split("/").pop()}
-          </span>
+          <span className="truncate flex-1">{f.path.split("/").pop()}</span>
           <span className="shrink-0 text-[var(--diff-add-bar)]">
             +{f.additions}
           </span>

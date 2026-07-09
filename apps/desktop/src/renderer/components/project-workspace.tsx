@@ -7,10 +7,8 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type Dispatch,
-  type SetStateAction,
 } from "react";
-import { generateMessage, type Annotation } from "@plan/shared/lib/store";
+import type { Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { MessageOutput } from "@plan/shared/components/message-output";
 import {
@@ -35,18 +33,20 @@ import type {
 } from "../../shared-types";
 import { MiddleSidebar, type WorkTab } from "./middle-sidebar";
 import { FileDiffViewer } from "./file-diff-viewer";
-import {
-  MessageList,
-  type ChatAnnotation,
-  type ChatAnchor,
-} from "./message-list";
+import { MessageList } from "./message-list";
 import { FileViewer } from "./file-viewer";
 import { CommandPalette, type PaletteItem } from "./command-palette";
 import { FileIcon } from "./file-icon";
 import Fuse from "fuse.js";
 import { useConfirm } from "./confirm-dialog";
 import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
-import { useProjectAnnotations } from "../lib/annotation-store";
+import {
+  useProjectAnnotations,
+  type ChatAnchor,
+  type ChatAnnotation,
+  type ProjectAnnotations,
+  type ProjectFileAnnotationInput,
+} from "../lib/annotation-store";
 import { useAutoModeEnabled } from "../lib/auto-mode-settings";
 import { useProjectTerminals, useTerminalHeight } from "../lib/terminal-store";
 import {
@@ -245,8 +245,6 @@ const DiffTabPane = memo(function DiffTabPane({
   active,
   encoded,
   diff,
-  annotationsByFile,
-  setAnnotationsByFile,
   onStageFile,
   onUnstageFile,
   onDiscardFile,
@@ -257,8 +255,6 @@ const DiffTabPane = memo(function DiffTabPane({
   active: boolean;
   encoded: string;
   diff: FileDiff | null;
-  annotationsByFile: Record<string, Annotation[]>;
-  setAnnotationsByFile: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
   onStageFile: (path: string, subPath: string) => void;
   onUnstageFile: (path: string, subPath: string) => void;
   onDiscardFile: (path: string, subPath: string) => void;
@@ -278,8 +274,6 @@ const DiffTabPane = memo(function DiffTabPane({
           file={diff}
           mode={tab.staged ? "staged" : "unstaged"}
           active={active}
-          annotationsByFile={annotationsByFile}
-          setAnnotationsByFile={setAnnotationsByFile}
           onStage={() => onStageFile(tab.path, tab.subPath)}
           onUnstage={() => onUnstageFile(tab.path, tab.subPath)}
           onDiscard={() => onDiscardFile(tab.path, tab.subPath)}
@@ -310,15 +304,7 @@ const FileTabPane = memo(function FileTabPane({
   encoded: string;
   annotations: Annotation[];
   revealTarget: RevealTarget;
-  onAddAnnotation: (
-    path: string,
-    selectedText: string,
-    startOffset: number,
-    endOffset: number,
-    startLine: number,
-    endLine: number,
-    comment: string,
-  ) => void;
+  onAddAnnotation: (path: string, input: ProjectFileAnnotationInput) => void;
   onUpdateAnnotation: (path: string, id: string, comment: string) => void;
   onRemoveAnnotation: (path: string, id: string) => void;
 }) {
@@ -329,7 +315,14 @@ const FileTabPane = memo(function FileTabPane({
         path={tab.path}
         annotations={annotations}
         onAddAnnotation={(s, so, eo, sl, el, c) =>
-          onAddAnnotation(tab.path, s, so, eo, sl, el, c)
+          onAddAnnotation(tab.path, {
+            selectedText: s,
+            startOffset: so,
+            endOffset: eo,
+            startLine: sl,
+            endLine: el,
+            comment: c,
+          })
         }
         onUpdateAnnotation={(id, c) => onUpdateAnnotation(tab.path, id, c)}
         onRemoveAnnotation={(id) => onRemoveAnnotation(tab.path, id)}
@@ -545,14 +538,19 @@ function ProjectWorkspaceImpl({
   // is keyed by `encoded` and remounts on switch). Both the diff annotations
   // (keyed by "subPath::path") and the chat annotations come from this store.
   const {
-    annotationsByFile,
-    setAnnotationsByFile,
     chatAnnotations,
-    setChatAnnotations,
     annotationsByProjectFile,
-    setAnnotationsByProjectFile,
-    annotationsByPr,
-    setAnnotationsByPr,
+    totalComments,
+    composedMessage,
+    addProjectFileAnnotation,
+    updateProjectFileAnnotation,
+    removeProjectFileAnnotation,
+    addChatAnnotation,
+    updateChatAnnotation,
+    removeChatAnnotation,
+    snapshotAndClearAll,
+    restoreAll,
+    clearAll,
   } = useProjectAnnotations(project.encoded);
   /** subPath currently being pushed (for the sync-bar spinner). */
   const [pushingRepo, setPushingRepo] = useState<string | null>(null);
@@ -681,26 +679,6 @@ function ProjectWorkspaceImpl({
         })
         .filter((t) => t.hasUpstream || t.ahead > 0),
     [repos, filesByRepo, project.cwd, pushingRepo],
-  );
-
-  // For diff-annotation aggregation (kept global so the copy box at the
-  // bottom shows everything regardless of which file is selected).
-  const aggregatedDiffAnnotations = useMemo(
-    () => Object.values(annotationsByFile).flat(),
-    [annotationsByFile],
-  );
-
-  // Read-only file-viewer comments across all files — same compose buffer.
-  const aggregatedProjectFileAnnotations = useMemo(
-    () => Object.values(annotationsByProjectFile).flat(),
-    [annotationsByProjectFile],
-  );
-
-  // PR-viewer comments (diff lines + conversation) across every open PR — same
-  // compose buffer, so a note on a PR joins the one send-to-chat batch.
-  const aggregatedPrAnnotations = useMemo(
-    () => Object.values(annotationsByPr).flat(),
-    [annotationsByPr],
   );
 
   // ── Git actions (routed via subPath) ─────────────────────────
@@ -1359,148 +1337,6 @@ function ProjectWorkspaceImpl({
     return () => window.removeEventListener("keydown", handler);
   }, [indexProjectFiles, loadAllChats]);
 
-  // ── Project-file (read-only viewer) annotation handlers ──────
-  // Parameterized by `path` because several file tabs can be open at once; each
-  // FileViewer binds these to its own path.
-  const addProjectFileAnnotation = useCallback(
-    (
-      path: string,
-      selectedText: string,
-      startOffset: number,
-      endOffset: number,
-      startLine: number,
-      endLine: number,
-      comment: string,
-    ) => {
-      setAnnotationsByProjectFile((prev) => ({
-        ...prev,
-        [path]: [
-          ...(prev[path] ?? []),
-          {
-            id: crypto.randomUUID(),
-            selectedText,
-            startOffset,
-            endOffset,
-            comment,
-            side: "right",
-            context: { filePath: path, startLine, endLine },
-          },
-        ],
-      }));
-    },
-    [setAnnotationsByProjectFile],
-  );
-  const updateProjectFileAnnotation = useCallback(
-    (path: string, id: string, comment: string) => {
-      setAnnotationsByProjectFile((prev) => ({
-        ...prev,
-        [path]: (prev[path] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a,
-        ),
-      }));
-    },
-    [setAnnotationsByProjectFile],
-  );
-  const removeProjectFileAnnotation = useCallback(
-    (path: string, id: string) => {
-      setAnnotationsByProjectFile((prev) => ({
-        ...prev,
-        [path]: (prev[path] ?? []).filter((a) => a.id !== id),
-      }));
-    },
-    [setAnnotationsByProjectFile],
-  );
-
-  // ── Aggregated annotations ───────────────────────────────────
-  const aggregatedChatAnnotations = useMemo<Annotation[]>(
-    () =>
-      chatAnnotations.map((c) => ({
-        id: c.id,
-        selectedText: c.selectedText,
-        // Offsets here only order the outgoing message; the span's start/end
-        // are enough for that.
-        startOffset: c.start.offset,
-        endOffset: c.end.offset,
-        comment: c.comment,
-        side: "right",
-      })),
-    [chatAnnotations],
-  );
-
-  // One outgoing buffer combining code-diff annotations and chat annotations,
-  // so a single compose box can Copy / Send-to-terminal everything at once.
-  const totalComments =
-    aggregatedDiffAnnotations.length +
-    aggregatedChatAnnotations.length +
-    aggregatedProjectFileAnnotations.length +
-    aggregatedPrAnnotations.length;
-  const composedMessage = useMemo(() => {
-    const parts: string[] = [];
-    if (aggregatedPrAnnotations.length > 0) {
-      parts.push(
-        "On the PR:\n\n" +
-          generateMessage(aggregatedPrAnnotations, {
-            intro: "",
-            leftLabel: "the original",
-            rightLabel: "the changes",
-          }),
-      );
-    }
-    if (aggregatedProjectFileAnnotations.length > 0) {
-      parts.push(
-        "On the files:\n\n" +
-          generateMessage(aggregatedProjectFileAnnotations, { intro: "" }),
-      );
-    }
-    if (aggregatedDiffAnnotations.length > 0) {
-      parts.push(
-        "On the code changes:\n\n" +
-          generateMessage(aggregatedDiffAnnotations, {
-            intro: "",
-            leftLabel: "the original",
-            rightLabel: "the changes",
-          }),
-      );
-    }
-    if (aggregatedChatAnnotations.length > 0) {
-      parts.push(
-        "On the conversation:\n\n" +
-          generateMessage(aggregatedChatAnnotations, { intro: "" }),
-      );
-    }
-    return parts.join("\n\n");
-  }, [
-    aggregatedDiffAnnotations,
-    aggregatedChatAnnotations,
-    aggregatedProjectFileAnnotations,
-    aggregatedPrAnnotations,
-  ]);
-
-  // ── Chat annotation handlers ─────────────────────────────────
-  const addChatAnnotation = useCallback(
-    (anchor: ChatAnchor, selectedText: string, comment: string) => {
-      setChatAnnotations((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          start: anchor.start,
-          end: anchor.end,
-          selectedText,
-          comment,
-        },
-      ]);
-    },
-    [],
-  );
-  const updateChatAnnotation = useCallback((id: string, comment: string) => {
-    setChatAnnotations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, comment } : a)),
-    );
-  }, []);
-  const removeChatAnnotation = useCallback((id: string) => {
-    setChatAnnotations((prev) => prev.filter((a) => a.id !== id));
-  }, []);
-
   /**
    * The FileDiff for the currently-selected file. Untracked files (and any
    * status entry that `git diff HEAD` doesn't emit) get a synthetic FileDiff
@@ -1960,12 +1796,7 @@ function ProjectWorkspaceImpl({
 
   // Comments cleared by the last "Add to chat", kept so ⌘Z in the composer can
   // put them back exactly where they were (see handleUndoAddToChat).
-  const addToChatUndoRef = useRef<{
-    byFile: typeof annotationsByFile;
-    chat: typeof chatAnnotations;
-    byProjectFile: typeof annotationsByProjectFile;
-    pr: typeof annotationsByPr;
-  } | null>(null);
+  const addToChatUndoRef = useRef<ProjectAnnotations | null>(null);
 
   // "Add to chat": move the composed comments into the chat composer, then
   // clear them — they now live in the composer text.
@@ -1981,35 +1812,13 @@ function ProjectWorkspaceImpl({
         else handleNewChat();
       }
       // Snapshot before clearing so an immediate ⌘Z can restore the comments.
-      addToChatUndoRef.current = {
-        byFile: annotationsByFile,
-        chat: chatAnnotations,
-        byProjectFile: annotationsByProjectFile,
-        pr: annotationsByPr,
-      };
-      setAnnotationsByFile({});
-      setChatAnnotations([]);
-      setAnnotationsByProjectFile({});
-      setAnnotationsByPr({});
+      addToChatUndoRef.current = snapshotAndClearAll();
       requestAnimationFrame(() => {
         chatInputRef.current?.append(text);
         chatInputRef.current?.focus();
       });
     },
-    [
-      activeTab,
-      tabs,
-      setActive,
-      handleNewChat,
-      annotationsByFile,
-      chatAnnotations,
-      annotationsByProjectFile,
-      setAnnotationsByFile,
-      setChatAnnotations,
-      setAnnotationsByProjectFile,
-      annotationsByPr,
-      setAnnotationsByPr,
-    ],
+    [activeTab, tabs, setActive, handleNewChat, snapshotAndClearAll],
   );
 
   // The composer pulled the just-added text back out (⌘Z) — restore the
@@ -2018,16 +1827,8 @@ function ProjectWorkspaceImpl({
     const snap = addToChatUndoRef.current;
     if (!snap) return;
     addToChatUndoRef.current = null;
-    setAnnotationsByFile(snap.byFile);
-    setChatAnnotations(snap.chat);
-    setAnnotationsByProjectFile(snap.byProjectFile);
-    setAnnotationsByPr(snap.pr);
-  }, [
-    setAnnotationsByFile,
-    setChatAnnotations,
-    setAnnotationsByProjectFile,
-    setAnnotationsByPr,
-  ]);
+    restoreAll(snap);
+  }, [restoreAll]);
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
   // PRs, and chat. Gated behind a confirmation since it can't be undone.
@@ -2039,17 +1840,8 @@ function ProjectWorkspaceImpl({
       confirmLabel: "Clear comments",
     });
     if (!ok) return;
-    setAnnotationsByFile({});
-    setChatAnnotations([]);
-    setAnnotationsByProjectFile({});
-    setAnnotationsByPr({});
-  }, [
-    confirm,
-    setAnnotationsByFile,
-    setChatAnnotations,
-    setAnnotationsByProjectFile,
-    setAnnotationsByPr,
-  ]);
+    clearAll();
+  }, [confirm, clearAll]);
 
   // "Run terminal": start `claude --resume` for the selected session in the
   // background (does NOT reveal the dock). Enables the composer.
@@ -2631,8 +2423,6 @@ function ProjectWorkspaceImpl({
                       active={active && t.id === activeId}
                       encoded={project.encoded}
                       diff={getFileDiff(t.subPath, t.path)}
-                      annotationsByFile={annotationsByFile}
-                      setAnnotationsByFile={setAnnotationsByFile}
                       onStageFile={handleStageFile}
                       onUnstageFile={handleUnstageFile}
                       onDiscardFile={handleDiscardFile}
@@ -2701,8 +2491,6 @@ function ProjectWorkspaceImpl({
                         subPath={t.subPath}
                         number={t.number}
                         active={active && t.id === activeId}
-                        annotationsByPr={annotationsByPr}
-                        setAnnotationsByPr={setAnnotationsByPr}
                       />
                     </div>
                   ) : null,

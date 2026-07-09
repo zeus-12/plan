@@ -1,19 +1,65 @@
-import { useCallback, useSyncExternalStore } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
-import type { ChatAnnotation } from "../components/message-list";
+import { generateMessage } from "@plan/shared/lib/store";
 
 /**
- * In-progress comments (diff annotations + chat annotations) keyed by project
- * `encoded`. Lives at module scope so it survives `ProjectWorkspace` remounts —
- * the workspace is keyed by `encoded` in App, so without this the comments
- * would be lost every time the user switches projects in the first sidebar.
+ * In-progress comments across every surface (diffs, chat, file viewer, PRs),
+ * keyed by project `encoded`. This module owns the whole domain: adding,
+ * editing and removing comments, id minting, aggregation into the outgoing
+ * send-to-chat message, and the snapshot/clear/restore lifecycle around
+ * "Add to chat" — consumers never touch raw state.
  *
- * Persisted to localStorage so the comments also survive a renderer refresh and
- * a full app quit & relaunch — a comment you've drafted but not yet sent to the
- * chat is real work and must not vanish when the window reloads.
+ * Lives at module scope so it survives `ProjectWorkspace` remounts — the
+ * workspace is keyed by `encoded` in App, so without this the comments would
+ * be lost every time the user switches projects in the first sidebar.
+ *
+ * Persisted to localStorage so the comments also survive a renderer refresh
+ * and a full app quit & relaunch — a comment you've drafted but not yet sent
+ * to the chat is real work and must not vanish when the window reloads.
  */
-interface ProjectAnnotations {
+
+/** One endpoint of a chat selection: which message, which part of that turn, and
+ *  the char offset into that part's annotatable text (see message-list's
+ *  `annoTextWalker`). */
+export interface ChatSpan {
+  messageUuid: string;
+  partIndex: number;
+  offset: number;
+}
+
+/** A chat comment anchored to a document-order span from `start` to `end`, which
+ *  may cross several parts AND several message rows (prose + the tool rows and
+ *  turns between them). */
+export interface ChatAnnotation {
+  id: string;
+  start: ChatSpan;
+  end: ChatSpan;
+  selectedText: string;
+  comment: string;
+}
+
+/** Surface-specific anchor for a chat comment: a document-order span from `start`
+ *  to `end`, which may cross parts and message rows. */
+export interface ChatAnchor {
+  start: ChatSpan;
+  end: ChatSpan;
+}
+
+/** A comment as the caller describes it — the store mints the id. */
+export type NewAnnotation = Omit<Annotation, "id">;
+
+/** The raw selection facts for a read-only file-viewer comment; the store owns
+ *  the surface's annotation shape (always right-side, context = path+lines). */
+export interface ProjectFileAnnotationInput {
+  selectedText: string;
+  startOffset: number;
+  endOffset: number;
+  startLine: number;
+  endLine: number;
+  comment: string;
+}
+
+export interface ProjectAnnotations {
   byFile: Record<string, Annotation[]>;
   chat: ChatAnnotation[];
   /** Read-only file-viewer comments, keyed by the project-relative path.
@@ -55,9 +101,9 @@ function storageKey(encoded: string): string {
 // ── Revive parsed JSON back into typed annotations ──────────────────────────
 // localStorage is untrusted (could be hand-edited or written by an older
 // build), so we narrow each field and drop anything malformed rather than
-// trusting the shape blindly.
+// trusting the shape blindly. Exported for tests.
 
-function reviveAnnotation(raw: unknown): Annotation | null {
+export function reviveAnnotation(raw: unknown): Annotation | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as Record<string, unknown>;
   if (
@@ -94,10 +140,7 @@ function reviveAnnotation(raw: unknown): Annotation | null {
  * message for the intermediate shape that stored it once at the top level
  * (start/end without their own uuid).
  */
-function reviveChatSpan(
-  raw: unknown,
-  fallbackUuid: string,
-): { messageUuid: string; partIndex: number; offset: number } | null {
+function reviveChatSpan(raw: unknown, fallbackUuid: string): ChatSpan | null {
   if (!raw || typeof raw !== "object") return null;
   const s = raw as Record<string, unknown>;
   if (typeof s.partIndex !== "number" || typeof s.offset !== "number") {
@@ -109,7 +152,7 @@ function reviveChatSpan(
   return { messageUuid, partIndex: s.partIndex, offset: s.offset };
 }
 
-function reviveChatAnnotation(raw: unknown): ChatAnnotation | null {
+export function reviveChatAnnotation(raw: unknown): ChatAnnotation | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as Record<string, unknown>;
   if (
@@ -239,77 +282,304 @@ function set(encoded: string, next: ProjectAnnotations) {
   emit();
 }
 
-export function useProjectAnnotations(encoded: string): {
+// ── Mutations ────────────────────────────────────────────────────────────────
+// The three record-keyed surfaces (diff files, project files, PR notes) share
+// one CRUD implementation; chat is a flat list with the same ops.
+
+type RecordSlice = "byFile" | "byProjectFile" | "pr";
+
+function addToRecord(
+  encoded: string,
+  slice: RecordSlice,
+  key: string,
+  ann: NewAnnotation,
+) {
+  const cur = get(encoded);
+  set(encoded, {
+    ...cur,
+    [slice]: {
+      ...cur[slice],
+      [key]: [...(cur[slice][key] ?? []), { ...ann, id: crypto.randomUUID() }],
+    },
+  });
+}
+
+function updateInRecord(
+  encoded: string,
+  slice: RecordSlice,
+  key: string,
+  id: string,
+  comment: string,
+) {
+  const cur = get(encoded);
+  set(encoded, {
+    ...cur,
+    [slice]: {
+      ...cur[slice],
+      [key]: (cur[slice][key] ?? []).map((a) =>
+        a.id === id ? { ...a, comment } : a,
+      ),
+    },
+  });
+}
+
+function removeFromRecord(
+  encoded: string,
+  slice: RecordSlice,
+  key: string,
+  id: string,
+) {
+  const cur = get(encoded);
+  set(encoded, {
+    ...cur,
+    [slice]: {
+      ...cur[slice],
+      [key]: (cur[slice][key] ?? []).filter((a) => a.id !== id),
+    },
+  });
+}
+
+function clearRecordKey(encoded: string, slice: RecordSlice, key: string) {
+  const cur = get(encoded);
+  if (!(key in cur[slice])) return;
+  const { [key]: _drop, ...rest } = cur[slice];
+  set(encoded, { ...cur, [slice]: rest });
+}
+
+// ── Aggregation ──────────────────────────────────────────────────────────────
+
+/** Chat comments flattened into the plain Annotation shape for the outgoing
+ *  message. Offsets only order the message; the span's endpoints suffice. */
+function chatToAnnotations(chat: ChatAnnotation[]): Annotation[] {
+  return chat.map((c) => ({
+    id: c.id,
+    selectedText: c.selectedText,
+    startOffset: c.start.offset,
+    endOffset: c.end.offset,
+    comment: c.comment,
+    side: "right",
+  }));
+}
+
+/** One outgoing message combining every surface's comments, section by section,
+ *  so a single compose box can Copy / Send-to-terminal everything at once. */
+function composeMessage(state: ProjectAnnotations): string {
+  const pr = Object.values(state.pr).flat();
+  const projectFile = Object.values(state.byProjectFile).flat();
+  const diff = Object.values(state.byFile).flat();
+  const chat = chatToAnnotations(state.chat);
+
+  const parts: string[] = [];
+  if (pr.length > 0) {
+    parts.push(
+      "On the PR:\n\n" +
+        generateMessage(pr, {
+          intro: "",
+          leftLabel: "the original",
+          rightLabel: "the changes",
+        }),
+    );
+  }
+  if (projectFile.length > 0) {
+    parts.push(
+      "On the files:\n\n" + generateMessage(projectFile, { intro: "" }),
+    );
+  }
+  if (diff.length > 0) {
+    parts.push(
+      "On the code changes:\n\n" +
+        generateMessage(diff, {
+          intro: "",
+          leftLabel: "the original",
+          rightLabel: "the changes",
+        }),
+    );
+  }
+  if (chat.length > 0) {
+    parts.push(
+      "On the conversation:\n\n" + generateMessage(chat, { intro: "" }),
+    );
+  }
+  return parts.join("\n\n");
+}
+
+function countComments(state: ProjectAnnotations): number {
+  return (
+    Object.values(state.byFile).flat().length +
+    state.chat.length +
+    Object.values(state.byProjectFile).flat().length +
+    Object.values(state.pr).flat().length
+  );
+}
+
+// ── Hook ─────────────────────────────────────────────────────────────────────
+
+export interface ProjectAnnotationsApi {
+  // Snapshots per surface (stable references between mutations).
   annotationsByFile: Record<string, Annotation[]>;
-  setAnnotationsByFile: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
   chatAnnotations: ChatAnnotation[];
-  setChatAnnotations: Dispatch<SetStateAction<ChatAnnotation[]>>;
   annotationsByProjectFile: Record<string, Annotation[]>;
-  setAnnotationsByProjectFile: Dispatch<
-    SetStateAction<Record<string, Annotation[]>>
-  >;
   annotationsByPr: Record<string, Annotation[]>;
-  setAnnotationsByPr: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
-} {
+
+  /** Total comments across every surface — drives the compose box. */
+  totalComments: number;
+  /** The outgoing send-to-chat message composed from every surface. */
+  composedMessage: string;
+
+  // Diff-viewer comments, keyed by file path (or a plan-card version-pair key).
+  addFileAnnotation: (path: string, ann: NewAnnotation) => void;
+  updateFileAnnotation: (path: string, id: string, comment: string) => void;
+  removeFileAnnotation: (path: string, id: string) => void;
+  /** Drop every comment on one diff file — its content changed, so the stored
+   *  offsets no longer match the text on screen. */
+  clearFileAnnotations: (path: string) => void;
+
+  // Read-only file-viewer comments, keyed by project-relative path.
+  addProjectFileAnnotation: (
+    path: string,
+    input: ProjectFileAnnotationInput,
+  ) => void;
+  updateProjectFileAnnotation: (
+    path: string,
+    id: string,
+    comment: string,
+  ) => void;
+  removeProjectFileAnnotation: (path: string, id: string) => void;
+
+  // PR-viewer comments, keyed by the caller's opaque surface key.
+  addPrAnnotation: (key: string, ann: NewAnnotation) => void;
+  updatePrAnnotation: (key: string, id: string, comment: string) => void;
+  removePrAnnotation: (key: string, id: string) => void;
+
+  // Chat comments.
+  addChatAnnotation: (
+    anchor: ChatAnchor,
+    selectedText: string,
+    comment: string,
+  ) => void;
+  updateChatAnnotation: (id: string, comment: string) => void;
+  removeChatAnnotation: (id: string) => void;
+
+  // "Add to chat" lifecycle: move everything into the composer, clearing the
+  // panel — the returned snapshot lets ⌘Z put the comments back verbatim.
+  snapshotAndClearAll: () => ProjectAnnotations;
+  restoreAll: (snap: ProjectAnnotations) => void;
+  clearAll: () => void;
+}
+
+export function useProjectAnnotations(encoded: string): ProjectAnnotationsApi {
   const snapshot = useSyncExternalStore(
     subscribe,
     () => get(encoded),
     () => get(encoded),
   );
 
-  const setAnnotationsByFile = useCallback<
-    Dispatch<SetStateAction<Record<string, Annotation[]>>>
-  >(
-    (update) => {
-      const cur = get(encoded);
-      const next = typeof update === "function" ? update(cur.byFile) : update;
-      set(encoded, { ...cur, byFile: next });
-    },
+  // Mutations close over `encoded` only, so the whole ops object is stable for
+  // a mounted workspace — memoized children keyed on individual ops don't
+  // re-render when unrelated state changes.
+  const ops = useMemo(
+    () => ({
+      addFileAnnotation: (path: string, ann: NewAnnotation) =>
+        addToRecord(encoded, "byFile", path, ann),
+      updateFileAnnotation: (path: string, id: string, comment: string) =>
+        updateInRecord(encoded, "byFile", path, id, comment),
+      removeFileAnnotation: (path: string, id: string) =>
+        removeFromRecord(encoded, "byFile", path, id),
+      clearFileAnnotations: (path: string) =>
+        clearRecordKey(encoded, "byFile", path),
+
+      addProjectFileAnnotation: (
+        path: string,
+        input: ProjectFileAnnotationInput,
+      ) =>
+        addToRecord(encoded, "byProjectFile", path, {
+          selectedText: input.selectedText,
+          startOffset: input.startOffset,
+          endOffset: input.endOffset,
+          comment: input.comment,
+          side: "right",
+          context: {
+            filePath: path,
+            startLine: input.startLine,
+            endLine: input.endLine,
+          },
+        }),
+      updateProjectFileAnnotation: (
+        path: string,
+        id: string,
+        comment: string,
+      ) => updateInRecord(encoded, "byProjectFile", path, id, comment),
+      removeProjectFileAnnotation: (path: string, id: string) =>
+        removeFromRecord(encoded, "byProjectFile", path, id),
+
+      addPrAnnotation: (key: string, ann: NewAnnotation) =>
+        addToRecord(encoded, "pr", key, ann),
+      updatePrAnnotation: (key: string, id: string, comment: string) =>
+        updateInRecord(encoded, "pr", key, id, comment),
+      removePrAnnotation: (key: string, id: string) =>
+        removeFromRecord(encoded, "pr", key, id),
+
+      addChatAnnotation: (
+        anchor: ChatAnchor,
+        selectedText: string,
+        comment: string,
+      ) => {
+        const cur = get(encoded);
+        set(encoded, {
+          ...cur,
+          chat: [
+            ...cur.chat,
+            {
+              id: crypto.randomUUID(),
+              start: anchor.start,
+              end: anchor.end,
+              selectedText,
+              comment,
+            },
+          ],
+        });
+      },
+      updateChatAnnotation: (id: string, comment: string) => {
+        const cur = get(encoded);
+        set(encoded, {
+          ...cur,
+          chat: cur.chat.map((a) => (a.id === id ? { ...a, comment } : a)),
+        });
+      },
+      removeChatAnnotation: (id: string) => {
+        const cur = get(encoded);
+        set(encoded, {
+          ...cur,
+          chat: cur.chat.filter((a) => a.id !== id),
+        });
+      },
+
+      snapshotAndClearAll: (): ProjectAnnotations => {
+        const snap = get(encoded);
+        set(encoded, EMPTY);
+        return snap;
+      },
+      restoreAll: (snap: ProjectAnnotations) => set(encoded, snap),
+      clearAll: () => set(encoded, EMPTY),
+    }),
     [encoded],
   );
 
-  const setChatAnnotations = useCallback<
-    Dispatch<SetStateAction<ChatAnnotation[]>>
-  >(
-    (update) => {
-      const cur = get(encoded);
-      const next = typeof update === "function" ? update(cur.chat) : update;
-      set(encoded, { ...cur, chat: next });
-    },
-    [encoded],
-  );
-
-  const setAnnotationsByProjectFile = useCallback<
-    Dispatch<SetStateAction<Record<string, Annotation[]>>>
-  >(
-    (update) => {
-      const cur = get(encoded);
-      const next =
-        typeof update === "function" ? update(cur.byProjectFile) : update;
-      set(encoded, { ...cur, byProjectFile: next });
-    },
-    [encoded],
-  );
-
-  const setAnnotationsByPr = useCallback<
-    Dispatch<SetStateAction<Record<string, Annotation[]>>>
-  >(
-    (update) => {
-      const cur = get(encoded);
-      const next = typeof update === "function" ? update(cur.pr) : update;
-      set(encoded, { ...cur, pr: next });
-    },
-    [encoded],
+  const { totalComments, composedMessage } = useMemo(
+    () => ({
+      totalComments: countComments(snapshot),
+      composedMessage: composeMessage(snapshot),
+    }),
+    [snapshot],
   );
 
   return {
     annotationsByFile: snapshot.byFile,
-    setAnnotationsByFile,
     chatAnnotations: snapshot.chat,
-    setChatAnnotations,
     annotationsByProjectFile: snapshot.byProjectFile,
-    setAnnotationsByProjectFile,
     annotationsByPr: snapshot.pr,
-    setAnnotationsByPr,
+    totalComments,
+    composedMessage,
+    ...ops,
   };
 }

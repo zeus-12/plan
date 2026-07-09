@@ -70,8 +70,12 @@ export function PlanCard({
   // the highlight always matches the exact diff on screen (versions are
   // immutable, so offsets stay valid). They join the same compose buffer as
   // every other comment via aggregatedDiffAnnotations.
-  const { annotationsByFile, setAnnotationsByFile } =
-    useProjectAnnotations(encoded);
+  const {
+    annotationsByFile,
+    addFileAnnotation,
+    updateFileAnnotation,
+    removeFileAnnotation,
+  } = useProjectAnnotations(encoded);
   // Revisions open on the diff so "what changed in this version" is the first
   // thing you see; the very first version (no prior) has nothing to diff, so it
   // opens on the plan body.
@@ -99,47 +103,30 @@ export function PlanCard({
       side: "left" | "right",
     ) => {
       if (!diffKey) return;
-      setAnnotationsByFile((prev) => ({
-        ...prev,
-        [diffKey]: [
-          ...(prev[diffKey] ?? []),
-          {
-            id: crypto.randomUUID(),
-            selectedText,
-            startOffset,
-            endOffset,
-            comment,
-            side,
-            context: { filePath: planPath ?? undefined },
-          },
-        ],
-      }));
+      addFileAnnotation(diffKey, {
+        selectedText,
+        startOffset,
+        endOffset,
+        comment,
+        side,
+        context: { filePath: planPath ?? undefined },
+      });
     },
-    [diffKey, planPath, setAnnotationsByFile],
+    [diffKey, planPath, addFileAnnotation],
   );
 
   const updateDiffAnnotation = useCallback(
     (id: string, comment: string) => {
-      if (!diffKey) return;
-      setAnnotationsByFile((prev) => ({
-        ...prev,
-        [diffKey]: (prev[diffKey] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a,
-        ),
-      }));
+      if (diffKey) updateFileAnnotation(diffKey, id, comment);
     },
-    [diffKey, setAnnotationsByFile],
+    [diffKey, updateFileAnnotation],
   );
 
   const removeDiffAnnotation = useCallback(
     (id: string) => {
-      if (!diffKey) return;
-      setAnnotationsByFile((prev) => ({
-        ...prev,
-        [diffKey]: (prev[diffKey] ?? []).filter((a) => a.id !== id),
-      }));
+      if (diffKey) removeFileAnnotation(diffKey, id);
     },
-    [diffKey, setAnnotationsByFile],
+    [diffKey, removeFileAnnotation],
   );
 
   return (

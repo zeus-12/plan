@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "@plan/shared/lib/diff-parser";
 import type { FileView, FileImageDiff } from "../../shared-types";
-import type { Annotation } from "@plan/shared/lib/store";
+import { useProjectAnnotations } from "../lib/annotation-store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import {
   InteractiveDiff,
@@ -36,11 +36,6 @@ interface Props {
   /** Repo sub-path within the project. "" for project-root repo. */
   subPath: string;
   file: FileDiff;
-  /** All annotations across all files, so we can keep the aggregate copy box global. */
-  annotationsByFile: Record<string, Annotation[]>;
-  setAnnotationsByFile: React.Dispatch<
-    React.SetStateAction<Record<string, Annotation[]>>
-  >;
   /** Which stage's diff to show: "staged" (HEAD↔index) or "unstaged" (index↔worktree). */
   mode: "staged" | "unstaged";
   /** False while the diffs pane is hidden — disables the global ⌘Z handler. */
@@ -74,8 +69,6 @@ function FileDiffViewerImpl({
   encoded,
   subPath,
   file,
-  annotationsByFile,
-  setAnnotationsByFile,
   mode,
   active,
   onStage,
@@ -261,6 +254,13 @@ function FileDiffViewerImpl({
     };
   }, [encoded, file.path, mode, subPath, reloadKey, revision]);
 
+  const {
+    annotationsByFile,
+    addFileAnnotation,
+    updateFileAnnotation,
+    removeFileAnnotation,
+    clearFileAnnotations,
+  } = useProjectAnnotations(encoded);
   const annotations = annotationsByFile[file.path] ?? [];
 
   // If the underlying old/new content changes, drop stale annotations for this
@@ -268,12 +268,8 @@ function FileDiffViewerImpl({
   const contentSig =
     (contents?.oldText.length ?? 0) + ":" + (contents?.newText.length ?? 0);
   useEffect(() => {
-    setAnnotationsByFile((prev) => {
-      if (!(file.path in prev)) return prev;
-      const { [file.path]: _drop, ...rest } = prev;
-      return rest;
-    });
-  }, [contentSig, file.path, setAnnotationsByFile]);
+    clearFileAnnotations(file.path);
+  }, [contentSig, file.path, clearFileAnnotations]);
 
   const detected = useMemo(() => {
     const fromPath = languageFromPath(file.path);
@@ -395,49 +391,31 @@ function FileDiffViewerImpl({
         sourceText,
         Math.max(startOffset, endOffset - 1),
       );
-      setAnnotationsByFile((prev) => ({
-        ...prev,
-        [file.path]: [
-          ...(prev[file.path] ?? []),
-          {
-            id: crypto.randomUUID(),
-            selectedText,
-            startOffset,
-            endOffset,
-            comment,
-            side,
-            context: {
-              filePath: file.path,
-              startLine,
-              endLine,
-            },
-          },
-        ],
-      }));
+      addFileAnnotation(file.path, {
+        selectedText,
+        startOffset,
+        endOffset,
+        comment,
+        side,
+        context: {
+          filePath: file.path,
+          startLine,
+          endLine,
+        },
+      });
     },
-    [file.path, setAnnotationsByFile, viewOldText, viewNewText],
+    [file.path, addFileAnnotation, viewOldText, viewNewText],
   );
 
   const updateAnnotation = useCallback(
-    (id: string, comment: string) => {
-      setAnnotationsByFile((prev) => ({
-        ...prev,
-        [file.path]: (prev[file.path] ?? []).map((a) =>
-          a.id === id ? { ...a, comment } : a,
-        ),
-      }));
-    },
-    [file.path, setAnnotationsByFile],
+    (id: string, comment: string) =>
+      updateFileAnnotation(file.path, id, comment),
+    [file.path, updateFileAnnotation],
   );
 
   const removeAnnotation = useCallback(
-    (id: string) => {
-      setAnnotationsByFile((prev) => ({
-        ...prev,
-        [file.path]: (prev[file.path] ?? []).filter((a) => a.id !== id),
-      }));
-    },
-    [file.path, setAnnotationsByFile],
+    (id: string) => removeFileAnnotation(file.path, id),
+    [file.path, removeFileAnnotation],
   );
 
   const formatAvailable = canFormat(effectiveLanguage);

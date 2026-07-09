@@ -21,6 +21,11 @@ import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
 import { ImageLightbox } from "./image-lightbox";
 import { UserMessageOverview } from "./user-message-overview";
 import type { ConversationMessage, MessagePart } from "../../shared-types";
+import type {
+  ChatAnchor,
+  ChatAnnotation,
+  ChatSpan,
+} from "../lib/annotation-store";
 
 /** How far (px) above the bottom the user must scroll before the "jump to
  *  latest" button appears. */
@@ -72,25 +77,6 @@ function isSystemMetaMessage(m: ConversationMessage): boolean {
   );
 }
 
-/** One endpoint of a chat selection: which message, which part of that turn, and
- *  the char offset into that part's annotatable text (see `annoTextWalker`). */
-export interface ChatSpan {
-  messageUuid: string;
-  partIndex: number;
-  offset: number;
-}
-
-/** A chat comment anchored to a document-order span from `start` to `end`, which
- *  may cross several parts AND several message rows (prose + the tool rows and
- *  turns between them). */
-export interface ChatAnnotation {
-  id: string;
-  start: ChatSpan;
-  end: ChatSpan;
-  selectedText: string;
-  comment: string;
-}
-
 interface Props {
   messages: ConversationMessage[];
   /** Project key — lets plan cards reach the shared annotation store for
@@ -113,13 +99,6 @@ interface Props {
   working?: boolean;
   /** Send raw keystrokes to the chat's terminal (drives TUI selectors). */
   onSendKeys?: (keys: string[]) => void;
-}
-
-/** Surface-specific anchor for a chat comment: a document-order span from `start`
- *  to `end`, which may cross parts and message rows. */
-export interface ChatAnchor {
-  start: ChatSpan;
-  end: ChatSpan;
 }
 
 /** The portion of one part painted for a comment/pending span. `end: null` means
