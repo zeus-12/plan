@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from "fs/promises";
 import { StringDecoder } from "string_decoder";
 import { join, relative } from "path";
 import { resolveProjectCwd } from "./claude-projects";
-import { IGNORED_DIRS } from "./ignored-dirs";
+import { IGNORED_DIRS, IGNORED_FILES } from "./ignored-dirs";
 import type {
   ProjectFile,
   SearchOptions,
@@ -53,6 +53,7 @@ async function fileList(cwd: string): Promise<string[]> {
         if (IGNORE_DIRS.has(e.name)) continue;
         await walk(join(dir, e.name), childRel);
       } else if (e.isFile()) {
+        if (IGNORED_FILES.has(e.name)) continue;
         out.push(childRel);
       }
     }

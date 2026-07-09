@@ -52,3 +52,12 @@ export const IGNORED_DIRS = new Set([
   ".cache",
   "tmp",
 ]);
+
+/**
+ * File names we never surface in the Files tab, ⌘P finder, `@`-mentions, or
+ * search — OS/editor junk that's noise in a file list and never something the
+ * user opens (macOS `.DS_Store`, Windows `Thumbs.db`/`Desktop.ini`). Matched by
+ * exact name at any depth, mirroring {@link IGNORED_DIRS}. This is the same set
+ * an editor like VS Code hides by default via its `files.exclude` setting.
+ */
+export const IGNORED_FILES = new Set([".DS_Store", "Thumbs.db", "Desktop.ini"]);
