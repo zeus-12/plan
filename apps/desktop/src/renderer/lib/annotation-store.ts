@@ -20,12 +20,18 @@ interface ProjectAnnotations {
    * Separate from `byFile` (diff annotations) so the same path open in both
    * the Diffs and Files tabs doesn't share/clobber comments. */
   byProjectFile: Record<string, Annotation[]>;
+  /** PR-viewer comments (diff lines, description, bot comments), keyed by an
+   * opaque surface key like `<subPath>#<number>:<filePath|conversation>`. Kept
+   * separate so PR notes accumulate into the same send-to-chat batch without
+   * colliding with local-diff comments. */
+  pr: Record<string, Annotation[]>;
 }
 
 const EMPTY: ProjectAnnotations = {
   byFile: {},
   chat: [],
   byProjectFile: {},
+  pr: {},
 };
 
 const store = new Map<string, ProjectAnnotations>();
@@ -179,6 +185,7 @@ function load(encoded: string): ProjectAnnotations {
       byFile?: unknown;
       chat?: unknown;
       byProjectFile?: unknown;
+      pr?: unknown;
     };
     return {
       byFile: reviveByPath(parsed.byFile),
@@ -188,6 +195,7 @@ function load(encoded: string): ProjectAnnotations {
             .filter((a): a is ChatAnnotation => a !== null)
         : [],
       byProjectFile: reviveByPath(parsed.byProjectFile),
+      pr: reviveByPath(parsed.pr),
     };
   } catch {
     return EMPTY;
@@ -202,7 +210,8 @@ function persist(encoded: string, state: ProjectAnnotations) {
     if (
       Object.keys(state.byFile).length === 0 &&
       state.chat.length === 0 &&
-      Object.keys(state.byProjectFile).length === 0
+      Object.keys(state.byProjectFile).length === 0 &&
+      Object.keys(state.pr).length === 0
     ) {
       window.localStorage.removeItem(storageKey(encoded));
       return;
@@ -239,6 +248,8 @@ export function useProjectAnnotations(encoded: string): {
   setAnnotationsByProjectFile: Dispatch<
     SetStateAction<Record<string, Annotation[]>>
   >;
+  annotationsByPr: Record<string, Annotation[]>;
+  setAnnotationsByPr: Dispatch<SetStateAction<Record<string, Annotation[]>>>;
 } {
   const snapshot = useSyncExternalStore(
     subscribe,
@@ -280,6 +291,17 @@ export function useProjectAnnotations(encoded: string): {
     [encoded],
   );
 
+  const setAnnotationsByPr = useCallback<
+    Dispatch<SetStateAction<Record<string, Annotation[]>>>
+  >(
+    (update) => {
+      const cur = get(encoded);
+      const next = typeof update === "function" ? update(cur.pr) : update;
+      set(encoded, { ...cur, pr: next });
+    },
+    [encoded],
+  );
+
   return {
     annotationsByFile: snapshot.byFile,
     setAnnotationsByFile,
@@ -287,5 +309,7 @@ export function useProjectAnnotations(encoded: string): {
     setChatAnnotations,
     annotationsByProjectFile: snapshot.byProjectFile,
     setAnnotationsByProjectFile,
+    annotationsByPr: snapshot.pr,
+    setAnnotationsByPr,
   };
 }

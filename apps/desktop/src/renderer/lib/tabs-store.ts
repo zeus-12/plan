@@ -19,6 +19,7 @@ export type Tab =
   | { id: string; kind: "file"; path: string }
   | { id: string; kind: "diff"; subPath: string; path: string; staged: boolean }
   | { id: string; kind: "chat"; sessionId: string }
+  | { id: string; kind: "pr"; subPath: string; number: number }
   | { id: string; kind: "scratch" };
 
 /**
@@ -43,6 +44,9 @@ export function diffTabId(
 export function chatTabId(sessionId: string): string {
   return `chat:${sessionId}`;
 }
+export function prTabId(subPath: string, number: number): string {
+  return `pr:${subPath}#${number}`;
+}
 
 export function makeFileTab(path: string): Tab {
   return { id: fileTabId(path), kind: "file", path };
@@ -62,6 +66,9 @@ export function makeDiffTab(
 }
 export function makeChatTab(sessionId: string): Tab {
   return { id: chatTabId(sessionId), kind: "chat", sessionId };
+}
+export function makePrTab(subPath: string, number: number): Tab {
+  return { id: prTabId(subPath, number), kind: "pr", subPath, number };
 }
 export function makeScratchTab(): Tab {
   return { id: SCRATCH_TAB_ID, kind: "scratch" };
@@ -117,6 +124,13 @@ function reviveTab(raw: unknown): Tab | null {
   }
   if (t.kind === "chat" && typeof t.sessionId === "string") {
     return makeChatTab(t.sessionId);
+  }
+  if (
+    t.kind === "pr" &&
+    typeof t.subPath === "string" &&
+    typeof t.number === "number"
+  ) {
+    return makePrTab(t.subPath, t.number);
   }
   if (t.kind === "scratch") {
     return makeScratchTab();

@@ -21,9 +21,10 @@ import { CommitPanel } from "./commit-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { CommandsTerminal } from "./commands-terminal";
 import { SearchPanel } from "./search-panel";
+import { PrSidebar } from "./pr-sidebar";
 import { usePersistentNumber } from "../lib/use-persistent-number";
 
-export type WorkTab = "diffs" | "chat" | "files" | "search";
+export type WorkTab = "diffs" | "chat" | "files" | "search" | "pr";
 
 interface Props {
   tab: WorkTab;
@@ -79,6 +80,13 @@ interface Props {
     colStart: number,
     colEnd: number,
   ) => void;
+
+  /** The PR currently open in the content pane, for the PR list's highlight. */
+  activePr: { subPath: string; number: number } | null;
+  /** Open a PR in the content pane. */
+  onOpenPr: (subPath: string, number: number) => void;
+  /** Display name for a repo row in the PR list. */
+  repoName: (repo: DiscoveredRepo) => string;
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
@@ -190,6 +198,9 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   selectedProjectFile,
   onSelectProjectFile,
   onOpenSearchResult,
+  activePr,
+  onOpenPr,
+  repoName,
   encoded,
   terminals,
   activeTerminalId,
@@ -260,6 +271,9 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       } else if (e.key === "4") {
         e.preventDefault();
         onTabChange("search");
+      } else if (e.key === "5") {
+        e.preventDefault();
+        onTabChange("pr");
       }
     };
     window.addEventListener("keydown", handler);
@@ -322,6 +336,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               <TabsTrigger value="diffs">Diffs</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
               <TabsTrigger value="search">Search</TabsTrigger>
+              <TabsTrigger value="pr">PR</TabsTrigger>
             </TabsList>
             {/* Detached from the tab group: opens the scratchpad as a center-pane
                 tab rather than switching this sidebar's view. */}
@@ -452,6 +467,20 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               encoded={encoded}
               active={tab === "search"}
               onOpenResult={onOpenSearchResult}
+            />
+          </TabsContent>
+
+          <TabsContent
+            value="pr"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            <PrSidebar
+              encoded={encoded}
+              repos={repos}
+              repoName={repoName}
+              activePr={activePr}
+              onOpenPr={onOpenPr}
             />
           </TabsContent>
         </SidebarContent>

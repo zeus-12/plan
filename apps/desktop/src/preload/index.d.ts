@@ -18,6 +18,9 @@ import type {
   AddReposToWorktreeInput,
   CreatePrInput,
   CreatePrResult,
+  PrListResult,
+  PrDetailResult,
+  PrFileView,
   SkillInfo,
   UpdateInfo,
   ClaudeConfigBundle,
@@ -78,6 +81,18 @@ interface ElectronAPI {
     mode: "staged" | "unstaged",
     subPath?: string,
   ) => Promise<FileImageDiff>;
+  listPrs: (encoded: string, subPath?: string) => Promise<PrListResult>;
+  getPrDetail: (
+    encoded: string,
+    subPath: string,
+    number: number,
+  ) => Promise<PrDetailResult>;
+  getPrFileView: (
+    encoded: string,
+    subPath: string,
+    headSha: string | null,
+    newPath: string | null,
+  ) => Promise<PrFileView>;
   listProjectFiles: (encoded: string) => Promise<string[]>;
   readProjectFile: (
     encoded: string,
@@ -100,6 +115,8 @@ interface ElectronAPI {
   onSwitcherCycle: (
     cb: (e: { key: string; shift: boolean }) => void,
   ) => () => void;
+  /** ⌘R pressed; renderer force-refreshes a data page or reloads the app. */
+  onReloadRequest: (cb: () => void) => () => void;
   addManualProject: () => Promise<ProjectEntry | null>;
   setProjectArchived: (
     encoded: string,
