@@ -10,16 +10,6 @@
  * A chat pty's id is `chat:<encoded>:<sessionId>`.
  */
 
-const CHAT_ID_RE = /^chat:(.+):([^:]+)$/;
-
-/** Parse a chat pty id into its `{ encoded, sessionId }`, or null if not one. */
-export function parseChatId(
-  id: string,
-): { encoded: string; sessionId: string } | null {
-  const m = id.match(CHAT_ID_RE);
-  return m ? { encoded: m[1], sessionId: m[2] } : null;
-}
-
 // Resolve a chat pty id to a human label for the notification body (project
 // name only, by design). Set by the app root from the live projects list.
 let resolveLabel: (id: string) => string = () => "Claude";

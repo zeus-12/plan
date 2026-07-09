@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import type { CommandEntry, DiscoveredRepo } from "../../shared-types";
+import { commandTerminalId } from "../../terminal-ids";
 import { TerminalPanel } from "./terminal-panel";
 import { entryLabel } from "../lib/commands";
 
@@ -105,7 +106,7 @@ export function CommandsTerminal({
   // Stable key for the effects: re-probe / re-subscribe only when the entry set
   // itself changes (its identity churns every parent render).
   const entryKey = entries.map((e) => e.id).join(",");
-  const ptyId = (e: CommandEntry) => `${kind}:${encoded}:${e.id}`;
+  const ptyId = (e: CommandEntry) => commandTerminalId(kind, encoded, e.id);
 
   // Which entries are mounted (pty spawned / spawning). Truth-driven: seeded by a
   // status probe, updated by our own start/stop and by real `terminal:exit`.

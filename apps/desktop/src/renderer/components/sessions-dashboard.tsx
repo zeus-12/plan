@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { lastSegment } from "@plan/shared/lib/path";
+import { parseTerminalId, type ParsedTerminalId } from "../../terminal-ids";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 
 interface TerminalInfo {
@@ -14,19 +15,6 @@ interface Props {
   onClose: () => void;
   /** Jump to a chat session (project + session id). */
   onNavigate: (encoded: string, sessionId: string) => void;
-}
-
-type Parsed =
-  | { kind: "chat"; encoded: string; sessionId: string }
-  | { kind: "shell"; encoded: string; n: string }
-  | { kind: "other" };
-
-function parseId(id: string): Parsed {
-  let m = id.match(/^chat:(.+):([^:]+)$/);
-  if (m) return { kind: "chat", encoded: m[1], sessionId: m[2] };
-  m = id.match(/^term:(.+):([^:]+)$/);
-  if (m) return { kind: "shell", encoded: m[1], n: m[2] };
-  return { kind: "other" };
 }
 
 /**
@@ -82,7 +70,7 @@ export function SessionsDashboard({ open, onClose, onNavigate }: Props) {
   }, []);
 
   const rows = useMemo(
-    () => items.map((t) => ({ ...t, parsed: parseId(t.id) })),
+    () => items.map((t) => ({ ...t, parsed: parseTerminalId(t.id) })),
     [items],
   );
 
@@ -159,7 +147,7 @@ function SessionRow({
   id: string;
   cwd: string;
   pid: number;
-  parsed: Parsed;
+  parsed: ParsedTerminalId;
   onKill: () => void;
   /** Present for chat rows — clicking the row opens that session. */
   onOpen?: () => void;

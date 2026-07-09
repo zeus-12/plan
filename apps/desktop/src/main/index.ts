@@ -42,6 +42,7 @@ import type {
   IpcInvokeContract,
   IpcSendContract,
 } from "../ipc-contract";
+import { chatTerminalId } from "../terminal-ids";
 import {
   setCallbacks,
   startWatching,
@@ -470,7 +471,7 @@ const invokeHandlers: {
     // the transcript. A live `claude` writes to a path derived from its cwd,
     // so if it outlives the rename it re-creates a metadata stub at the old
     // path — the session then lingers (message-less) in the source worktree.
-    await killTerminalAndWait(`chat:${fromEncoded}:${sessionId}`);
+    await killTerminalAndWait(chatTerminalId(fromEncoded, sessionId));
     await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
   },
 

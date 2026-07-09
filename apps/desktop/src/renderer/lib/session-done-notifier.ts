@@ -1,4 +1,5 @@
 import { currentBusyIds, subscribeActivity } from "./terminal-activity-store";
+import { isChatTerminalId } from "../../terminal-ids";
 import { getNotificationSettings } from "./notification-settings";
 import { playSound } from "./notification-sounds";
 import { sessionLabel, sessionNavigator } from "./session-notify";
@@ -23,10 +24,6 @@ import { osNotify, pushToast } from "./toast-store";
  *   - an approval / selection menu is now on screen — Claude is waiting on the
  *     user, not done; the menu-detection path handles that case.
  */
-
-// A chat pty's id is `chat:<encoded>:<sessionId>`; only these are Claude
-// sessions. Scratch shells (`term:...`) must never trigger a "Claude is done".
-const CHAT_PREFIX = "chat:";
 
 // After the hint disappears, re-confirm the session is genuinely settled before
 // firing — cheap insurance against a one-frame redraw blip mid-turn.
@@ -78,9 +75,9 @@ async function onFinished(id: string) {
 }
 
 function tick() {
-  const now = new Set(
-    currentBusyIds().filter((id) => id.startsWith(CHAT_PREFIX)),
-  );
+  // Only chat ptys are Claude sessions — a scratch shell's TUI must never
+  // trigger a "Claude is done".
+  const now = new Set(currentBusyIds().filter(isChatTerminalId));
   for (const id of prevBusy) {
     if (!now.has(id)) void onFinished(id);
   }

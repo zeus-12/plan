@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { cn } from "@plan/shared/lib/utils";
+import { chatTerminalId } from "../../terminal-ids";
 import { relativeTime } from "../lib/time";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 import { useSessionNeedsApproval } from "../lib/session-approval-store";
@@ -132,7 +133,7 @@ export function SessionList({
                 key={s.sessionId}
                 session={s}
                 isSelected={s.sessionId === selected}
-                termId={`chat:${encoded}:${s.sessionId}`}
+                termId={chatTerminalId(encoded, s.sessionId)}
                 onSelect={onSelect}
                 onRename={onRename}
                 onSetArchived={onSetArchived}

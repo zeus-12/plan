@@ -39,7 +39,7 @@ import { CommandPalette, type PaletteItem } from "./command-palette";
 import { FileIcon } from "./file-icon";
 import Fuse from "fuse.js";
 import { useConfirm } from "./confirm-dialog";
-import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
+import { TerminalPanel } from "./terminal-panel";
 import {
   useProjectAnnotations,
   type ChatAnchor,
@@ -47,8 +47,10 @@ import {
   type ProjectAnnotations,
   type ProjectFileAnnotationInput,
 } from "../lib/annotation-store";
+import { chatTerminalPrefix } from "../../terminal-ids";
 import { useAutoModeEnabled } from "../lib/auto-mode-settings";
-import { useProjectTerminals, useTerminalHeight } from "../lib/terminal-store";
+import { useTerminalHeight } from "../lib/terminal-store";
+import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import {
   useProjectTabs,
   getProjectTabs,
@@ -1434,21 +1436,29 @@ function ProjectWorkspaceImpl({
   // per project across first-sidebar switches.
   const {
     openedIds,
-    setOpenedIds,
     terminalOpen,
     setTerminalOpen,
     shells,
-    setShells,
     activeShellId,
     setActiveShellId,
-  } = useProjectTerminals(project.encoded);
+    ensureOpened,
+    handleTerminalReady,
+    sendToTerminal,
+    shellNumber,
+    newShell,
+    selectShell,
+    closeShell,
+  } = useTerminalRegistry(project.encoded, (tid) => {
+    // Claude exited. Don't leave an empty dock behind — close it. The dock
+    // has no plain-shell fallback, so reopening (⌘J) reconnects.
+    if (tid === activeTerminalIdRef.current) setTerminalOpen(false);
+  });
   // Dock height is a single global, persisted value — shared across projects.
   const [terminalHeight, setTerminalHeight] = useTerminalHeight();
   // The dock is mounted whenever there's at least one opened terminal.
   const terminalMounted = openedIds.length > 0;
 
-  const chatPrefix = `chat:${project.encoded}:`;
-  const shellPrefix = `term:${project.encoded}:`;
+  const chatPrefix = chatTerminalPrefix(project.encoded);
   const sessionTermId = (sid: string) => `${chatPrefix}${sid}`;
   // Drives each chat tab's working icon: the terminal id of its agent, or null
   // for non-chat tabs (which have no agent to be busy).
@@ -1482,58 +1492,6 @@ function ProjectWorkspaceImpl({
     : null;
   const activeTerminalIdRef = useRef(activeTerminalId);
   activeTerminalIdRef.current = activeTerminalId;
-
-  // Imperative handles + readiness, keyed by terminal id (for sending to a pty).
-  const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
-  const readyIds = useRef<Set<string>>(new Set());
-  const pendingPasteRef = useRef<{
-    id: string;
-    text: string;
-    imagePaths: string[];
-    submit: boolean;
-  } | null>(null);
-
-  const ensureOpened = useCallback((tid: string) => {
-    setOpenedIds((ids) => (ids.includes(tid) ? ids : [...ids, tid]));
-  }, []);
-
-  const writeToTerminal = (
-    tid: string,
-    text: string,
-    imagePaths: string[],
-    submit: boolean,
-  ) => {
-    if (submit) {
-      // Main pastes the body, types any image paths (so Claude attaches them),
-      // then sends Enter as a SEPARATE keystroke a beat later — Claude's TUI
-      // ignores an Enter bundled with the paste itself.
-      window.electronAPI.terminalSubmit(tid, text, imagePaths);
-    } else {
-      const body = text.replace(/\r\n/g, "\n").replace(/\r/g, "");
-      window.electronAPI.terminalInput(tid, `\x1b[200~${body}\x1b[201~`);
-    }
-  };
-
-  const handleTerminalReady = useCallback((tid: string) => {
-    readyIds.current.add(tid);
-    const p = pendingPasteRef.current;
-    if (p && p.id === tid) {
-      writeToTerminal(p.id, p.text, p.imagePaths, p.submit);
-      pendingPasteRef.current = null;
-    }
-  }, []);
-
-  // Send text (+ optional image paths) to terminal `tid`, queuing until ready.
-  const sendToTerminal = useCallback(
-    (tid: string, text: string, imagePaths: string[], submit: boolean) => {
-      if (!text.trim() && imagePaths.length === 0) return;
-      ensureOpened(tid);
-      if (readyIds.current.has(tid))
-        writeToTerminal(tid, text, imagePaths, submit);
-      else pendingPasteRef.current = { id: tid, text, imagePaths, submit };
-    },
-    [ensureOpened],
-  );
 
   // Whether the selected chat has a live (resumed) terminal to send into.
   const chatTerminalReady =
@@ -1837,12 +1795,6 @@ function ProjectWorkspaceImpl({
     setTerminalOpen(true);
   }, [selectedSessionId, chatPrefix, ensureOpened, setTerminalOpen]);
 
-  // ── Scratch shells (sidebar "Terminals" section) ─────────────
-  const shellNumber = useCallback(
-    (id: string) => parseInt(id.slice(shellPrefix.length), 10) || 0,
-    [shellPrefix],
-  );
-
   const [runConfigOpen, setRunConfigOpen] = useState(false);
   const [buildConfigOpen, setBuildConfigOpen] = useState(false);
 
@@ -1869,59 +1821,6 @@ function ProjectWorkspaceImpl({
       })),
     ],
     [project.encoded, isWorktree, shells, shellNumber],
-  );
-
-  const handleNewShell = useCallback(() => {
-    // Numbering reuses gaps after closes; the pty behind a reused id is fresh.
-    const n = shells.reduce((m, id) => Math.max(m, shellNumber(id)), 0) + 1;
-    const id = `${shellPrefix}${n}`;
-    setShells((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setActiveShellId(id);
-  }, [shells, shellNumber, shellPrefix, setShells, setActiveShellId]);
-
-  const handleSelectShell = useCallback(
-    (id: string) => {
-      setActiveShellId(id);
-    },
-    [setActiveShellId],
-  );
-
-  const removeShell = useCallback(
-    (id: string) => {
-      readyIds.current.delete(id);
-      const remaining = shells.filter((x) => x !== id);
-      setShells(remaining);
-      // Closing the shown shell falls back to the most recent remaining one.
-      setActiveShellId((cur) =>
-        cur === id ? (remaining[remaining.length - 1] ?? null) : cur,
-      );
-    },
-    [shells, setShells, setActiveShellId],
-  );
-
-  const handleCloseShell = useCallback(
-    (id: string) => {
-      window.electronAPI.terminalKill(id);
-      removeShell(id);
-    },
-    [removeShell],
-  );
-
-  // A pty exiting — typing `exit`, archive-kill, or future idle eviction —
-  // removes its entry. This is the single cleanup path, so killing a pty from
-  // anywhere keeps the renderer's view (openedIds / shells) in sync.
-  useEffect(
-    () =>
-      window.electronAPI.onTerminalExit((id) => {
-        if (id.startsWith(shellPrefix)) removeShell(id);
-        else if (id.startsWith(chatPrefix)) {
-          setOpenedIds((ids) => ids.filter((x) => x !== id));
-          // Claude exited. Don't leave an empty dock behind — close it. The
-          // dock has no plain-shell fallback, so reopening (⌘J) reconnects.
-          if (id === activeTerminalIdRef.current) setTerminalOpen(false);
-        }
-      }),
-    [shellPrefix, chatPrefix, removeShell, setOpenedIds, setTerminalOpen],
   );
 
   // While the dock is open, keep the active chat terminal mounted. If there's
@@ -2181,7 +2080,7 @@ function ProjectWorkspaceImpl({
         }
       } else if (meta && e.shiftKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
-        handleNewShell();
+        newShell();
       } else if (e.key === "Escape" && terminalOpen) {
         setTerminalOpen(false);
       }
@@ -2191,7 +2090,7 @@ function ProjectWorkspaceImpl({
   }, [
     terminalOpen,
     setTerminalOpen,
-    handleNewShell,
+    newShell,
     selectedSessionId,
     chatTerminalReady,
     connectAndShowChat,
@@ -2668,10 +2567,6 @@ function ProjectWorkspaceImpl({
                         )}
                       >
                         <TerminalPanel
-                          ref={(h) => {
-                            if (h) terminalRefs.current.set(tid, h);
-                            else terminalRefs.current.delete(tid);
-                          }}
                           id={tid}
                           encoded={project.encoded}
                           label={
@@ -2736,9 +2631,9 @@ function ProjectWorkspaceImpl({
           terminals={sidebarTerminals}
           // Default to the always-present Run tab when no shell is selected.
           activeTerminalId={activeShellId ?? `run:${project.encoded}`}
-          onNewTerminal={handleNewShell}
-          onSelectTerminal={handleSelectShell}
-          onCloseTerminal={handleCloseShell}
+          onNewTerminal={newShell}
+          onSelectTerminal={selectShell}
+          onCloseTerminal={closeShell}
           runEntries={runEntries}
           buildEntries={buildEntries}
           onConfigureRun={() => setRunConfigOpen(true)}

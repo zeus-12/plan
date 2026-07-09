@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { parseChatId } from "./session-notify";
+import { isChatTerminalId, parseChatTerminalId } from "../../terminal-ids";
 
 /**
  * Live "which chat sessions are parked on an approval/selection menu" signal.
@@ -50,12 +50,12 @@ async function poll() {
   inFlight = true;
   try {
     const ids = await window.electronAPI.terminalSelectionIds();
-    const next = new Set(ids.filter((id) => id.startsWith("chat:")));
+    const next = new Set(ids.filter(isChatTerminalId));
     if (!setsEqual(next, awaiting)) {
       awaiting = next;
       const encoded = new Set<string>();
       for (const id of next) {
-        const parsed = parseChatId(id);
+        const parsed = parseChatTerminalId(id);
         if (parsed) encoded.add(parsed.encoded);
       }
       awaitingEncoded = encoded;
