@@ -482,6 +482,16 @@ function ProjectWorkspaceImpl({
 
   const selectedSessionId =
     activeTab?.kind === "chat" ? activeTab.sessionId : null;
+
+  // Opening a chat (sidebar click, tab switch, Ctrl+Tab) should land the caret
+  // in the composer so the user can type straight away — no click required.
+  // Keyed on the session id: every switch to a chat re-runs this. `focus()`
+  // parks itself if the composer isn't live yet (old chat), so it works whether
+  // the session is already running or being spun up.
+  useEffect(() => {
+    if (!selectedSessionId || !activeRef.current) return;
+    requestAnimationFrame(() => chatInputRef.current?.focus());
+  }, [selectedSessionId]);
   const selectedFile = useMemo(
     () =>
       activeTab?.kind === "diff"
@@ -1646,38 +1656,11 @@ function ProjectWorkspaceImpl({
   // notification here: a single turn appends several assistant messages (text,
   // then a tool call, then more text), which would notify several times.
 
-  // Stall signal: the transcript's LAST message has a tool call with no result
-  // and nothing new has been written for 20s — that's the shape of a pending
-  // permission prompt. Worded as "may", because that's all we can know.
-  useEffect(() => {
-    if (!session || !chatTerminalReady || !selectedSessionId) return;
-    const sid = selectedSessionId;
-    const last = session.messages[session.messages.length - 1];
-    if (!last || last.role !== "assistant") return;
-    const resultIds = new Set<string>();
-    for (const m of session.messages)
-      for (const p of m.parts)
-        if (p.kind === "tool_result") resultIds.add(p.toolUseId);
-    const pendingTool = last.parts.some(
-      (p) => p.kind === "tool_use" && !resultIds.has(p.id),
-    );
-    if (!pendingTool) return;
-    const timer = setTimeout(() => {
-      pushToast(
-        {
-          title: "Waiting on approval",
-          description:
-            "Claude may be paused on a tool-approval prompt in the terminal.",
-          actionLabel: "Open terminal",
-          onAction: () => revealChatTerminal(sid),
-        },
-        15_000,
-      );
-      if (!document.hasFocus())
-        osNotify("plan", "Claude may be waiting on an approval");
-    }, 20_000);
-    return () => clearTimeout(timer);
-  }, [session, chatTerminalReady, selectedSessionId, revealChatTerminal]);
+  // A pending tool-approval prompt is surfaced reliably from Claude's rendered
+  // menu (the global session-approval notifier + `awaitingSelection` below),
+  // not guessed from transcript timing. An earlier "last message has an
+  // unresolved tool_use for 20s" heuristic lived here; it was a guess (and now
+  // double-fired against the real signal), so it's gone.
 
   // Agent status: poll the pty's foreground process name (an OS fact) so the
   // header can say whether Claude itself is running in the chat terminal.
@@ -1762,19 +1745,15 @@ function ProjectWorkspaceImpl({
   const awaitingSelection = agentLive && inputState === "selection";
 
   // Auto-reveal the terminal when a menu appears so the user can respond —
-  // only once per transition into the selection state (not on every poll).
+  // only once per transition into the selection state (not on every poll). The
+  // toast/OS banner is owned globally by the session-approval notifier (it
+  // covers every session, including ones in projects/worktrees not on screen);
+  // here we only do the local convenience of surfacing this workspace's own tab.
   const autoRevealedRef = useRef(false);
   useEffect(() => {
     if (awaitingSelection && !autoRevealedRef.current) {
       autoRevealedRef.current = true;
       revealChatTerminal(selectedSessionId!);
-      pushToast({
-        title: "Waiting on a selection",
-        description:
-          "Claude has a menu open and needs you to choose an option.",
-        actionLabel: "Open terminal",
-        onAction: () => revealChatTerminal(selectedSessionId!),
-      });
     } else if (!awaitingSelection) {
       autoRevealedRef.current = false;
     }

@@ -548,6 +548,35 @@ export function busyTerminalIds(): string[] {
   return out;
 }
 
+/**
+ * Ids of every live pty parked on a selection/approval menu with a live agent
+ * process behind it — i.e. Claude is waiting on the user, not just showing
+ * leftover menu text in a shell that has since dropped back to a prompt.
+ *
+ * This is the batched, cross-session form of the renderer's per-workspace
+ * `awaitingSelection` check (`agentLive && state === "selection"`). Scanning
+ * every session here — including backgrounded projects and worktrees — is what
+ * lets the sidebar and notifier surface "needs approval" for sessions that
+ * aren't the one on screen. The agent-liveness gate matters: a menu detected in
+ * a dead shell (stale scrollback) isn't actionable and must not raise the flag.
+ */
+export async function awaitingSelectionIds(): Promise<string[]> {
+  const candidates: string[] = [];
+  for (const id of sessions.keys()) {
+    if (detectInputState(id).state === "selection") candidates.push(id);
+  }
+  // No menu anywhere — skip the (cached, but not free) process-tree scan.
+  if (candidates.length === 0) return [];
+  const out: string[] = [];
+  for (const id of candidates) {
+    const st = await terminalStatus(id);
+    // `terminalStatus` reports the agent among the pty's descendants (claude or
+    // its node host); anything else means no live agent is driving the menu.
+    if (st.running && /claude|node/i.test(st.process ?? "")) out.push(id);
+  }
+  return out;
+}
+
 /** Snapshot of every live pty — the source of truth for "what's running". */
 export function listTerminals(): TerminalInfo[] {
   return [...sessions.entries()].map(([id, s]) => ({

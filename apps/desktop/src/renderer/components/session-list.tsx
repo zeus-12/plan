@@ -2,7 +2,9 @@ import { memo } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { relativeTime } from "../lib/time";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
+import { useSessionNeedsApproval } from "../lib/session-approval-store";
 import { WorkingIcon } from "./working-icon";
+import { ApprovalDot } from "./approval-dot";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -204,6 +206,10 @@ const SessionRow = memo(function SessionRow({
   onMoveSession?: (sessionId: string, title: string) => void;
 }) {
   const working = useTerminalWorking(termId);
+  // A parked menu wins over the working spinner: the session keeps repainting
+  // its prompt while it waits, so both read true — but "waiting on you" is the
+  // actionable state, so it's the one to show.
+  const needsApproval = useSessionNeedsApproval(termId);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -227,8 +233,12 @@ const SessionRow = memo(function SessionRow({
             >
               {s.title ?? "Untitled session"}
             </span>
-            {working && (
-              <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+            {needsApproval ? (
+              <ApprovalDot />
+            ) : (
+              working && (
+                <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+              )
             )}
           </span>
           <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">

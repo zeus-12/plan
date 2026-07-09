@@ -1,6 +1,7 @@
 import { currentBusyIds, subscribeActivity } from "./terminal-activity-store";
 import { getNotificationSettings } from "./notification-settings";
 import { playSound } from "./notification-sounds";
+import { sessionLabel, sessionNavigator } from "./session-notify";
 import { osNotify, pushToast } from "./toast-store";
 
 /**
@@ -36,31 +37,14 @@ let prevBusy = new Set<string>();
 let unsub: (() => void) | null = null;
 let unsubExit: (() => void) | null = null;
 
-/**
- * Resolve a chat pty id to a human label for the notification body. Set by the
- * app root from the live projects list (project name only, by design).
- */
-let resolveLabel: (id: string) => string = () => "Claude";
-
-export function setSessionLabelResolver(fn: (id: string) => string) {
-  resolveLabel = fn;
-}
-
-// Jump to the session a notification is about. Set by the app root (it owns the
-// project/session navigation); null until then.
-let navigate: ((id: string) => void) | null = null;
-
-export function setSessionNavigator(fn: (id: string) => void) {
-  navigate = fn;
-}
-
 function fire(id: string) {
   const settings = getNotificationSettings();
   if (!settings.enabled) return;
   // We render the sound ourselves (the configured preset), so the OS
   // notification is silent — otherwise the system sound would double up.
   playSound(settings.sound);
-  const label = resolveLabel(id);
+  const label = sessionLabel(id);
+  const navigate = sessionNavigator();
   // OS banner: reliably shown when the app is in the background. macOS
   // suppresses banners while the app is focused (and dev builds often don't
   // banner at all), so the in-app toast below is the focus-independent cue.

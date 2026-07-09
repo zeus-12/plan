@@ -77,6 +77,7 @@ import {
   terminalStatus,
   detectInputState,
   busyTerminalIds,
+  awaitingSelectionIds,
   resizeTerminal,
   killTerminal,
   killTerminalAndWait,
@@ -581,6 +582,7 @@ const invokeHandlers: {
   "terminal:status": (_e, id) => terminalStatus(id),
   "terminal:inputState": (_e, id) => detectInputState(id),
   "terminal:busyIds": () => busyTerminalIds(),
+  "terminal:selectionIds": () => awaitingSelectionIds(),
   "terminal:list": () => listTerminals(),
 
   // Write a pasted image to a temp file; the renderer types the path into the

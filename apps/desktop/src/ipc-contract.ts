@@ -288,6 +288,8 @@ export interface IpcInvokeContract {
   };
   /** Ids of every live pty currently showing Claude's "esc to interrupt" hint. */
   "terminal:busyIds": { args: []; result: string[] };
+  /** Ids of every live pty parked on a selection/approval menu (agent live). */
+  "terminal:selectionIds": { args: []; result: string[] };
   "terminal:list": { args: []; result: TerminalInfo[] };
   /** Write a pasted image to a temp file; null when the write fails. */
   "terminal:saveTempImage": {
@@ -392,6 +394,7 @@ export const API_INVOKE = {
   terminalStatus: "terminal:status",
   terminalInputState: "terminal:inputState",
   terminalBusyIds: "terminal:busyIds",
+  terminalSelectionIds: "terminal:selectionIds",
   terminalList: "terminal:list",
   saveTempImage: "terminal:saveTempImage",
   fileExists: "terminal:fileExists",

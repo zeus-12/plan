@@ -50,6 +50,8 @@ import {
   flattenTree,
   type VisibleItem,
 } from "../lib/project-tree";
+import { useApprovalEncodedSet } from "../lib/session-approval-store";
+import { ApprovalDot } from "./approval-dot";
 
 interface Props {
   projects: ProjectEntry[];
@@ -278,6 +280,10 @@ export function ProjectSidebar({
     }
     return map;
   }, [reposByProject]);
+  // Target cwds (projects + worktrees) with a session parked on a menu. Rolled
+  // up onto rows below so a waiting session in a collapsed project/worktree
+  // still surfaces on the sidebar without expanding it.
+  const approvalEncoded = useApprovalEncodedSet();
   const parentRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
   // When true the sidebar transforms into an archived-only view.
@@ -523,6 +529,17 @@ export function ProjectSidebar({
                 const gap = gapFor(vi.index, row);
 
                 if (row.kind === "group-header") {
+                  // Roll up children (and their worktrees) only while collapsed;
+                  // expanded, each child row shows its own dot.
+                  const groupNeedsApproval =
+                    !row.expanded &&
+                    row.node.children.some(
+                      (c) =>
+                        approvalEncoded.has(c.encoded) ||
+                        (worktreesByProject.get(c.encoded) ?? []).some((w) =>
+                          approvalEncoded.has(w.encoded),
+                        ),
+                    );
                   return (
                     <div
                       key={row.node.key}
@@ -547,6 +564,7 @@ export function ProjectSidebar({
                         <span className="min-w-0 flex-1 truncate">
                           {row.node.name}
                         </span>
+                        {groupNeedsApproval && <ApprovalDot className="mr-0.5" />}
                         <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                           {row.node.children.length}
                         </span>
@@ -560,6 +578,7 @@ export function ProjectSidebar({
                   const wp = row.project;
                   const isActive =
                     wp.encoded === selected && w.id === activeWorktreeId;
+                  const wtNeedsApproval = approvalEncoded.has(w.encoded);
                   const branch = w.repos[0]?.branch ?? "";
                   const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
                   const canAddRepos = w.repos.length < repoCount;
@@ -623,6 +642,7 @@ export function ProjectSidebar({
                               )}
                             </span>
                           </button>
+                          {wtNeedsApproval && <ApprovalDot />}
                         </div>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
@@ -652,6 +672,13 @@ export function ProjectSidebar({
                 const branch = branches.get(p.encoded);
                 const hasWorktrees = row.worktrees.length > 0;
                 const showCount = !row.expanded && hasWorktrees;
+                // The project's own live-copy session, plus (while collapsed)
+                // any of its worktrees — so a collapsed project surfaces a
+                // waiting worktree without needing to be expanded.
+                const projNeedsApproval =
+                  approvalEncoded.has(p.encoded) ||
+                  (!row.expanded &&
+                    row.worktrees.some((w) => approvalEncoded.has(w.encoded)));
                 return (
                   <ContextMenu key={p.encoded}>
                     <ContextMenuTrigger asChild>
@@ -722,6 +749,9 @@ export function ProjectSidebar({
                               </span>
                             </span>
                           </button>
+                          {projNeedsApproval && (
+                            <ApprovalDot className="mr-1.5" />
+                          )}
                           {/* Right slot: metadata at rest, actions on hover. The
                             actions overlay the metadata (absolute), so the row
                             never reflows and they never collide with the label. */}

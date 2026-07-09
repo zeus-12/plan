@@ -90,11 +90,12 @@ import {
   recordUse,
   subscribeMru,
 } from "./lib/mru-store";
+import { startSessionDoneNotifier } from "./lib/session-done-notifier";
+import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
 import {
   setSessionLabelResolver,
   setSessionNavigator,
-  startSessionDoneNotifier,
-} from "./lib/session-done-notifier";
+} from "./lib/session-notify";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
@@ -439,6 +440,10 @@ function Shell() {
   // once here at the app root so it covers background sessions too, not just the
   // one on screen.
   useEffect(() => startSessionDoneNotifier(), []);
+  // And watch every live session for an approval/selection menu, so a session
+  // that parks on a prompt raises a notification even when it's in a project or
+  // worktree that isn't on screen. Sidebar badges read the same store.
+  useEffect(() => startSessionApprovalNotifier(), []);
   // Keep the notification body's project label in sync with the project list.
   // Deliberately just the project name — no chat title, no session id.
   useEffect(() => {
