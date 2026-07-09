@@ -100,12 +100,29 @@ const DEBUG_INPUT_DETECT = false;
 // frames to tune the detection heuristics. Flip off to hide it.
 const DEBUG_COPY_TERMINAL = false;
 
+// Stable identity for the middle sidebar's ⌘E toggle shortcut (see the keyed
+// SidebarProvider below). A module constant so it isn't a fresh object each
+// render — the provider memoizes its context on `shortcut`.
+const MIDDLE_SIDEBAR_SHORTCUT = { key: "e", meta: true } as const;
+
 import type { SessionListItem } from "./session-list";
 import type { FileEntry, RepoFileGroup } from "./file-list";
 
 interface Props {
   project: ProjectEntry;
   repos: DiscoveredRepo[];
+  /**
+   * Whether this workspace is the one on screen. Recently-visited workspaces
+   * stay MOUNTED (hidden via CSS) instead of being torn down on every switch —
+   * so switching back is instant — but that means several ProjectWorkspaces are
+   * live at once. All of them share the global `window` keydown listeners, so
+   * every keyboard-shortcut handler (and the Ctrl+Tab switcher and the ⌘E middle
+   * sidebar) is gated on `active`: a background workspace must not act on a
+   * keystroke meant for the visible one. Encoded-scoped subscriptions (the disk
+   * watcher, terminal-exit) already ignore other workspaces' events, so they
+   * don't need gating.
+   */
+  active: boolean;
   projectsSidebarOpen: boolean;
   /** All projects + a switch callback — drives the ⌘K palette. */
   projects: ProjectEntry[];
@@ -387,9 +404,10 @@ const ChatTabPane = memo(function ChatTabPane({
   );
 });
 
-export function ProjectWorkspace({
+function ProjectWorkspaceImpl({
   project,
   repos,
+  active,
   projectsSidebarOpen,
   projects,
   onSelectProject,
@@ -400,6 +418,12 @@ export function ProjectWorkspace({
   onSaveBuild,
   onMoveSession,
 }: Props) {
+  // Keep the latest `active` in a ref so the global keydown handlers can read it
+  // WITHOUT `active` in their dependency arrays — otherwise every switch would
+  // tear down and re-add ~10 window listeners. `activeRef.current` is always the
+  // current value (assigned on each render, before the handlers can fire).
+  const activeRef = useRef(active);
+  activeRef.current = active;
   // Auto-mode is an app-wide preference (Settings dialog); it applies to every
   // project's Claude sessions.
   const [globalAutoMode] = useAutoModeEnabled();
@@ -957,6 +981,7 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       if (
         (e.metaKey || e.ctrlKey) &&
         e.shiftKey &&
@@ -1320,6 +1345,7 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || e.shiftKey || e.altKey) return;
       const k = e.key.toLowerCase();
@@ -2245,6 +2271,7 @@ export function ProjectWorkspace({
   // ⌘⇧R renames the selected chat.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       if (
         (e.metaKey || e.ctrlKey) &&
         e.shiftKey &&
@@ -2267,6 +2294,7 @@ export function ProjectWorkspace({
   // editable; the send button stays disabled until then.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       if (
         (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&
@@ -2285,6 +2313,7 @@ export function ProjectWorkspace({
   // ⌘⇧S opens (or focuses) the scratchpad tab.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       if (
         (e.metaKey || e.ctrlKey) &&
         e.shiftKey &&
@@ -2302,6 +2331,7 @@ export function ProjectWorkspace({
   // ⌘N starts a new chat in this project.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       if (
         (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&
@@ -2319,6 +2349,7 @@ export function ProjectWorkspace({
   // through to closing the window, which would be a jarring surprise).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       if (
         (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&
@@ -2344,6 +2375,7 @@ export function ProjectWorkspace({
   // how clicking a file/diff in the sidebar opens a tab.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "d")
         return;
@@ -2443,6 +2475,7 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
       const meta = e.metaKey || e.ctrlKey;
       if (meta && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
@@ -2538,8 +2571,14 @@ export function ProjectWorkspace({
   const firstSessionId = switcherEntries.find((e) => e.type === "session")?.id;
   const hasOpenTabs = tabsByMru.length > 0;
   const tabSwitcher = useTabSwitcher({
-    id: "tabs",
-    enabled: switcherEntries.length > 1,
+    // Per-worktree id: under the keep-alive pool several workspaces are mounted
+    // and each registers a Ctrl+Tab channel. A shared id would let the
+    // switcher's `channels.find(c => c.id === active.id)` resolve to the wrong
+    // (background) workspace on commit; a unique id keeps each self-contained.
+    id: `tabs:${project.encoded}`,
+    // Only the visible workspace listens for Ctrl+Tab (all mounted workspaces
+    // share the global driver).
+    enabled: active && switcherEntries.length > 1,
     triggerCode: "Tab",
     items: switcherEntries,
     currentIndex: switcherCurrentIndex,
@@ -2551,7 +2590,9 @@ export function ProjectWorkspace({
     <SidebarProvider
       defaultOpen={true}
       storageKey="plan.middleSidebar.open"
-      shortcut={{ key: "e", meta: true }}
+      // ⌘E toggles this sidebar via a global listener — only wire it for the
+      // visible workspace so a background one doesn't also toggle.
+      shortcut={active ? MIDDLE_SIDEBAR_SHORTCUT : undefined}
     >
       {confirmDialog}
       {runConfigOpen && (
@@ -2672,7 +2713,7 @@ export function ProjectWorkspace({
                     <DiffTabPane
                       key={t.id}
                       tab={t}
-                      active={t.id === activeId}
+                      active={active && t.id === activeId}
                       encoded={project.encoded}
                       diff={getFileDiff(t.subPath, t.path)}
                       annotationsByFile={annotationsByFile}
@@ -2692,7 +2733,7 @@ export function ProjectWorkspace({
                     <FileTabPane
                       key={t.id}
                       tab={t}
-                      active={t.id === activeId}
+                      active={active && t.id === activeId}
                       encoded={project.encoded}
                       annotations={
                         annotationsByProjectFile[t.path] ?? EMPTY_ANN
@@ -2723,7 +2764,7 @@ export function ProjectWorkspace({
                     >
                       <ScratchEditor
                         encoded={project.encoded}
-                        active={t.id === activeId}
+                        active={active && t.id === activeId}
                       />
                     </div>
                   ) : null,
@@ -2744,7 +2785,7 @@ export function ProjectWorkspace({
                         encoded={project.encoded}
                         subPath={t.subPath}
                         number={t.number}
-                        active={t.id === activeId}
+                        active={active && t.id === activeId}
                         annotationsByPr={annotationsByPr}
                         setAnnotationsByPr={setAnnotationsByPr}
                       />
@@ -2844,7 +2885,10 @@ export function ProjectWorkspace({
                   <div className="relative min-h-0 flex-1">
                     {tabs.map((t) => {
                       if (t.kind !== "chat") return null;
-                      const active = t.id === activeId;
+                      // Active only when this workspace is the visible one AND
+                      // this is its active tab — so a hidden (keep-alive) chat
+                      // stops driving its terminal/working signals.
+                      const tabActive = active && t.id === activeId;
                       // Active-only signals (working/terminalReady) are passed as
                       // `false` to inactive panes, so a working-state flip on the
                       // live chat re-renders only that one transcript — not all.
@@ -2852,12 +2896,12 @@ export function ProjectWorkspace({
                         <ChatTabPane
                           key={t.id}
                           tab={t}
-                          active={active}
+                          active={tabActive}
                           encoded={project.encoded}
                           transcript={transcripts.get(t.sessionId)}
                           annotations={chatAnnotations}
-                          working={active ? chatWorking : false}
-                          terminalReady={active ? chatTerminalReady : false}
+                          working={tabActive ? chatWorking : false}
+                          terminalReady={tabActive ? chatTerminalReady : false}
                           isNew={isNewSession(t.sessionId)}
                           onAddAnnotation={addChatAnnotation}
                           onUpdateAnnotation={updateChatAnnotation}
@@ -2877,7 +2921,7 @@ export function ProjectWorkspace({
                           onSend={handleAddToChat}
                           sendLabel="Add to chat"
                           shortcutEnabled={
-                            activeTab?.kind === "chat" && !chatInputFocused
+                            active && activeTab?.kind === "chat" && !chatInputFocused
                           }
                           onClear={handleClearComments}
                         />
@@ -2941,13 +2985,13 @@ export function ProjectWorkspace({
                 />
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   {openedIds.map((tid) => {
-                    const active = tid === activeTerminalId;
+                    const termActive = tid === activeTerminalId;
                     return (
                       <div
                         key={tid}
                         className={cn(
                           "absolute inset-0 overflow-hidden",
-                          !active && "hidden",
+                          !termActive && "hidden",
                         )}
                       >
                         <TerminalPanel
@@ -2961,7 +3005,10 @@ export function ProjectWorkspace({
                             tid.startsWith(chatPrefix) ? "Claude" : "Terminal"
                           }
                           initialCommand={initialCommandFor(tid)}
-                          visible={terminalOpen && active}
+                          // Also gated on the workspace being visible so a
+                          // background (keep-alive) terminal buffers its pty
+                          // output instead of parsing it on the main thread.
+                          visible={active && terminalOpen && termActive}
                           fitSignal={terminalHeight}
                           onClose={() => setTerminalOpen(false)}
                           onReady={() => handleTerminalReady(tid)}
@@ -3092,3 +3139,12 @@ function repoDisplayName(repo: DiscoveredRepo, projectCwd: string): string {
   }
   return repo.subPath;
 }
+
+/**
+ * Memoized so a `Shell` re-render (a watcher tick, a modal toggle, a switch to
+ * ANOTHER workspace) doesn't re-render every keep-alive-mounted workspace — only
+ * the ones whose props actually changed. Under the keep-alive pool several are
+ * mounted at once, so this is what keeps a switch from re-rendering all of them;
+ * it relies on `Shell` passing stable prop identities (see App.tsx).
+ */
+export const ProjectWorkspace = memo(ProjectWorkspaceImpl);

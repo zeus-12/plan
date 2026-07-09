@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -15,8 +16,7 @@ import {
 import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
-import { ProjectWorkspace } from "./components/project-workspace";
-import { runEntriesOf, buildEntriesOf } from "./lib/commands";
+import { WorkspaceHost, type MountTarget } from "./components/workspace-host";
 import { Toaster } from "@plan/shared/components/ui/sonner";
 import { SwitcherOverlay } from "./components/switcher-overlay";
 import type { ClaudeConfigScope, WorktreeRecord } from "../shared-types";
@@ -82,10 +82,6 @@ import {
 import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
-import {
-  getCachedWorktreeRepos,
-  setCachedWorktreeRepos,
-} from "./lib/worktree-repos-cache";
 import { pushToast } from "./lib/toast-store";
 import {
   getMruScopeVersion,
@@ -101,9 +97,11 @@ import {
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 
-// Stable empty-repos reference — passing a fresh `[]` each render would break
-// memoization of anything downstream that depends on repo identity.
-const EMPTY_REPOS: DiscoveredRepo[] = [];
+// How many recently-visited workspaces stay mounted at once. Switching to one
+// already in the pool is instant (just un-hidden); older ones are unmounted
+// (LRU) so their terminals/watchers don't accumulate. 3 covers the common
+// alt-tab-between-a-few pattern without holding many heavy ptys/xterms live.
+const MAX_MOUNTED_WORKSPACES = 3;
 
 // The switcher's MRU scope: one flat recency list spanning every navigable
 // destination — each project's working copy AND every worktree. A destination's
@@ -342,32 +340,9 @@ function Shell() {
     ? (worktreeById.get(addReposWorktreeId) ?? null)
     : null;
 
-  // A worktree is just another cwd; the backend primed its `encoded`, so we
-  // hand ProjectWorkspace a synthesized project + the worktree's own repos and
-  // it scopes everything to the worktree without any changes inside it.
-  const [worktreeRepos, setWorktreeRepos] = useState<DiscoveredRepo[]>([]);
-  useEffect(() => {
-    if (!activeWorktree) {
-      setWorktreeRepos([]);
-      return;
-    }
-    const enc = activeWorktree.encoded;
-    // Paint from cache first so a revisited worktree mounts WITH its repos, then
-    // refresh in the background (repos rarely change between visits).
-    const cached = getCachedWorktreeRepos(enc);
-    if (cached) setWorktreeRepos(cached);
-    let cancelled = false;
-    window.electronAPI.listRepos(enc).then((r) => {
-      setCachedWorktreeRepos(enc, r);
-      if (!cancelled) setWorktreeRepos(r);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // Re-list when repos are added to this worktree (record grows but encoded
-    // stays the same), so the new checkout shows without reselecting.
-  }, [activeWorktree?.encoded, activeWorktree?.repos.length]);
-
+  // The project (or synthesized worktree "project") currently in focus. Still
+  // computed here because the move-session flow reads it; the workspace pool
+  // below resolves each mounted target's own project inside WorkspaceHost.
   const effectiveProject: ProjectEntry | null = activeWorktree
     ? {
         encoded: activeWorktree.encoded,
@@ -376,12 +351,51 @@ function Shell() {
         archived: false,
       }
     : selected;
-  const effectiveRepos = activeWorktree
-    ? // Cache read (not the state) is the source of truth so a revisited
-      // worktree mounts with its repos; `worktreeRepos` is the re-render trigger
-      // and the fallback for a first, uncached visit.
-      (getCachedWorktreeRepos(activeWorktree.encoded) ?? worktreeRepos)
-    : (reposByProject.get(selectedEncoded ?? "") ?? EMPTY_REPOS);
+
+  // ── Keep-alive workspace pool ────────────────────────────────────────
+  // Switching project/worktree used to remount the whole ProjectWorkspace
+  // (it's keyed by encoded) — a full teardown + rebuild every time. Instead we
+  // keep the N most-recently-visited workspaces MOUNTED and just toggle which
+  // one is visible, so switching back is instant. `activeTarget` is the one on
+  // screen; `mountTargets` is the LRU set that's alive.
+  // Built from primitives (NOT `effectiveProject`, which is a fresh object each
+  // render) so its identity only changes on an actual switch — otherwise the
+  // reconcile effect below would loop.
+  const activeTarget = useMemo<MountTarget | null>(() => {
+    if (!selectedEncoded) return null;
+    return {
+      encoded: activeWorktree ? activeWorktree.encoded : selectedEncoded,
+      projectEncoded: selectedEncoded,
+      worktreeId: activeWorktree ? activeWorktree.id : null,
+    };
+  }, [selectedEncoded, activeWorktree]);
+
+  const [mountTargets, setMountTargets] = useState<MountTarget[]>([]);
+  useEffect(() => {
+    if (!activeTarget) return;
+    setMountTargets((prev) => {
+      // Already focused → nothing to reorder. Returning `prev` (not a fresh
+      // array) is what stops this effect from re-rendering every tick.
+      if (prev[0]?.encoded === activeTarget.encoded) return prev;
+      // Reuse the existing object for this encoded so its identity stays stable
+      // across switches — that's what lets the memoized background hosts skip
+      // re-rendering when you switch away from and back to them.
+      const existing = prev.find((t) => t.encoded === activeTarget.encoded);
+      const head = existing ?? activeTarget;
+      const rest = prev.filter((t) => t.encoded !== activeTarget.encoded);
+      return [head, ...rest].slice(0, MAX_MOUNTED_WORKSPACES);
+    });
+  }, [activeTarget]);
+
+  // What to actually render: the LRU set, plus the active target if the effect
+  // hasn't folded it in yet (first visit) — so switching to a brand-new target
+  // paints it immediately instead of a blank frame while all hosts are hidden.
+  const renderTargets = useMemo<MountTarget[]>(() => {
+    if (!activeTarget) return mountTargets;
+    if (mountTargets.some((t) => t.encoded === activeTarget.encoded))
+      return mountTargets;
+    return [activeTarget, ...mountTargets].slice(0, MAX_MOUNTED_WORKSPACES);
+  }, [mountTargets, activeTarget]);
 
   const handleRemoveWorktree = useCallback(
     async (id: string) => {
@@ -500,12 +514,19 @@ function Shell() {
     });
   }, []);
 
+  // Kept identity-stable (reads the focused project via a ref) so it isn't a
+  // fresh callback on every switch — otherwise it would re-render every mounted
+  // workspace in the pool. Only the visible workspace can trigger a move, and it
+  // is always `effectiveProject`, so the ref is correct at call time.
+  const effectiveProjectRef = useRef(effectiveProject);
+  effectiveProjectRef.current = effectiveProject;
   const handleRequestMoveSession = useCallback(
     (sessionId: string, title: string) => {
-      if (!effectiveProject) return;
-      setMoveSession({ sessionId, title, fromEncoded: effectiveProject.encoded });
+      const ep = effectiveProjectRef.current;
+      if (!ep) return;
+      setMoveSession({ sessionId, title, fromEncoded: ep.encoded });
     },
-    [effectiveProject],
+    [],
   );
 
   // Where a session can move: the project's other worktrees + its live copy,
@@ -660,35 +681,25 @@ function Shell() {
         onOpenClaudeConfig={() => setClaudeConfigScope("project")}
       />
       <main className="flex min-w-0 flex-1 flex-col">
-        {effectiveProject ? (
-          <ProjectWorkspace
-            key={effectiveProject.encoded}
-            project={effectiveProject}
-            repos={effectiveRepos}
-            projectsSidebarOpen={projectsSidebar.open}
-            projects={projects}
-            onSelectProject={selectProject}
-            // Run/Build command lists are project-level: keyed by the parent
-            // project's defaults, so every worktree of this project shares them.
-            runEntries={runEntriesOf(worktrees.defaults)}
-            buildEntries={buildEntriesOf(worktrees.defaults)}
-            isWorktree={activeWorktree != null}
-            onSaveRun={(runCommands) =>
-              worktrees.saveDefaults({
-                ...worktrees.defaults,
-                runCommands,
-                runCommand: undefined,
-              })
-            }
-            onSaveBuild={(buildCommands) =>
-              worktrees.saveDefaults({
-                ...worktrees.defaults,
-                buildCommands,
-                buildCommand: undefined,
-              })
-            }
-            onMoveSession={handleRequestMoveSession}
-          />
+        {renderTargets.length > 0 ? (
+          // Every mounted target renders a host; only the active one is visible
+          // (the rest are display:none). Keyed by encoded so a target keeps its
+          // instance across switches — that's the whole point (no remount).
+          renderTargets.map((t) => (
+            <WorkspaceHost
+              key={t.encoded}
+              target={t}
+              active={t.encoded === activeTarget?.encoded}
+              projects={projects}
+              reposByProject={reposByProject}
+              worktreeRecord={
+                t.worktreeId ? (worktreeById.get(t.worktreeId) ?? null) : null
+              }
+              projectsSidebarOpen={projectsSidebar.open}
+              onSelectProject={selectProject}
+              onMoveSession={handleRequestMoveSession}
+            />
+          ))
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
             {projects.length === 0
