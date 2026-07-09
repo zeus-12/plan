@@ -4,6 +4,11 @@ import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { resolveProjectCwd } from "./claude-projects";
 import { GIT_SCAN_DEPTH } from "./config";
+import type {
+  DiscoveredRepo,
+  GitFileStatus,
+  GitStatusResult,
+} from "../shared-types";
 
 const execFileP = promisify(execFile);
 
@@ -51,24 +56,6 @@ export async function run(
   }
 }
 
-export interface GitFileStatus {
-  path: string;
-  /** Whether the file has changes staged. */
-  staged: boolean;
-  /** Whether the file has unstaged changes in the working tree. */
-  unstaged: boolean;
-  /** XY codes from `git status --porcelain` (e.g. " M", "M ", "MM"). */
-  code: string;
-}
-
-export interface GitStatusResult {
-  available: boolean;
-  branch: string | null;
-  files: GitFileStatus[];
-  ahead: number;
-  hasUpstream: boolean;
-}
-
 async function cwdFromEncoded(
   encoded: string,
   subPath: string = "",
@@ -110,16 +97,6 @@ async function branchAt(cwd: string): Promise<string | null> {
   if (r.code !== 0) return null;
   const name = r.stdout.trim();
   return !name || name === "HEAD" ? null : name;
-}
-
-export interface DiscoveredRepo {
-  /** Absolute path to the repo root. */
-  path: string;
-  /** Path relative to the project's cwd. "" when the project itself is the repo. */
-  subPath: string;
-  /** Canonical git dir — equal across worktrees of the same source repo. */
-  commonDir: string;
-  branch: string | null;
 }
 
 async function inspectRepo(

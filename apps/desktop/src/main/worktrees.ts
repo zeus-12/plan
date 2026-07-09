@@ -6,7 +6,8 @@ import { createHash } from "crypto";
 import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
 import { encodeCwd } from "./manual-projects";
 import { PLAN_DIR } from "./plan-config";
-import { discoverRepos, type DiscoveredRepo } from "./git";
+import { discoverRepos } from "./git";
+import type { DiscoveredRepo } from "../shared-types";
 
 /**
  * Worktree checkouts live under Plan's own state dir (`~/.plan/worktrees`) so
@@ -36,6 +37,7 @@ import type {
   CreatePrInput,
   CreatePrRepoResult,
   CreatePrResult,
+  CreateWorktreeInput,
   AddReposToWorktreeInput,
 } from "../shared-types";
 
@@ -92,16 +94,6 @@ async function projectWorktreesDir(encoded: string): Promise<string> {
   const cwd = await resolveProjectCwd(encoded);
   const hash = createHash("sha1").update(cwd).digest("hex").slice(0, 8);
   return join(WORKTREES_ROOT, `${safeSegment(basename(cwd))}-${hash}`);
-}
-
-export interface CreateWorktreeInput {
-  name: string;
-  branch: string;
-  base: string;
-  /** Per-repo base overrides, keyed by repo subPath ("" = root). */
-  bases?: Record<string, string>;
-  /** SubPaths to include; omit to span every discovered repo. */
-  repos?: string[];
 }
 
 /** A repo plus the exact remote commit its checkout should fork from. */

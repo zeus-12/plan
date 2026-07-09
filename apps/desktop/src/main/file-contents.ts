@@ -3,15 +3,9 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { promisify } from "util";
 import { resolveProjectCwd } from "./claude-projects";
+import type { FileContents, FileView } from "../shared-types";
 
 const execFileP = promisify(execFile);
-
-export interface FileContents {
-  oldText: string;
-  newText: string;
-  /** True if either side appears to be a binary blob (NUL bytes within sample). */
-  binary: boolean;
-}
 
 const BINARY_PROBE_BYTES = 8000;
 
@@ -81,14 +75,6 @@ export async function getFileContents(
   ]);
   const binary = looksBinary(oldText) || looksBinary(newText);
   return { oldText, newText, binary };
-}
-
-export interface FileView {
-  oldText: string;
-  newText: string;
-  /** Unified diff body for just this file in this stage (for per-hunk ops). */
-  diffBody: string;
-  binary: boolean;
 }
 
 /**

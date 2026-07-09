@@ -484,6 +484,45 @@ export interface ClaudeConfigBundle {
   memory: ClaudeConfigFile[];
 }
 
+/** One coalesced burst of pty output for a terminal id. */
+export interface TerminalChunk {
+  id: string;
+  data: string;
+}
+
+/**
+ * What the bottom of the terminal screen looks like right now. EXPERIMENTAL and
+ * heuristic — derived by scanning the rendered grid for Claude Code's TUI
+ * signatures, not from any real protocol. Worded as a guess everywhere it's used.
+ *
+ *   "input"     — a free-text input box is present and ready (safe to type/send)
+ *   "selection" — a numbered menu is up (tool approval / plan accept / question);
+ *                 sending free text + Enter here would mis-navigate the menu
+ *   "unknown"   — couldn't classify (plain shell, Claude mid-render, etc.)
+ */
+export type TerminalInputState = "input" | "selection" | "unknown";
+
+/** One live pty as reported to the sessions dashboard. */
+export interface TerminalInfo {
+  id: string;
+  cwd: string;
+  pid: number;
+}
+
+/** A worktree's scratchpad payload (durable notepad, persisted to ~/.plan). */
+export interface ScratchData {
+  content: string;
+  /** CodeMirror language id (e.g. "json", "javascript"), or "plaintext". */
+  language: string;
+}
+
+/** One project file read for the viewer. */
+export interface ProjectFile {
+  text: string;
+  truncated: boolean;
+  binary: boolean;
+}
+
 /**
  * Switcher trigger codes that MAIN forwards to the renderer as
  * "switcher:cycle" IPC (from before-input-event). Single source of truth for

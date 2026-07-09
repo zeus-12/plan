@@ -1,6 +1,7 @@
 import { readFile, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { PLAN_DIR } from "./plan-config";
+import type { ScratchData } from "../shared-types";
 
 /**
  * Per-worktree scratchpad content, persisted under `~/.plan/scratch/<encoded>.json`.
@@ -12,18 +13,14 @@ import { PLAN_DIR } from "./plan-config";
 
 const SCRATCH_DIR = join(PLAN_DIR, "scratch");
 
-export interface ScratchData {
-  content: string;
-  /** CodeMirror language id (e.g. "json", "javascript"), or "plaintext". */
-  language: string;
-}
-
 function scratchPath(encoded: string): string {
   return join(SCRATCH_DIR, `${encoded}.json`);
 }
 
 /** Read a worktree's scratchpad, or null if it was never written. */
-export async function readScratch(encoded: string): Promise<ScratchData | null> {
+export async function readScratch(
+  encoded: string,
+): Promise<ScratchData | null> {
   try {
     const raw = await readFile(scratchPath(encoded), "utf-8");
     const parsed = JSON.parse(raw) as Partial<ScratchData>;

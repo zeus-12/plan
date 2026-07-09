@@ -5,6 +5,7 @@ import { join, relative } from "path";
 import { resolveProjectCwd } from "./claude-projects";
 import { IGNORED_DIRS } from "./ignored-dirs";
 import type {
+  ProjectFile,
   SearchOptions,
   SearchResult,
   SearchFileResult,
@@ -60,12 +61,6 @@ async function fileList(cwd: string): Promise<string[]> {
   await walk(cwd, "");
   out.sort((a, b) => a.localeCompare(b));
   return out.slice(0, MAX_FILES);
-}
-
-export interface ProjectFile {
-  text: string;
-  truncated: boolean;
-  binary: boolean;
 }
 
 /** Read one project file for the viewer. Guards against path traversal. */

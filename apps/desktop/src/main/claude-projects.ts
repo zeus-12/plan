@@ -1,6 +1,7 @@
 import { readdir, stat, readFile, mkdir, rename, access } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
+import type { ProjectEntry } from "../shared-types";
 
 export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
@@ -34,15 +35,10 @@ export async function moveSessionTranscript(
   await rename(src, join(destDir, `${sessionId}.jsonl`));
 }
 
-export interface ProjectEntry {
-  encoded: string;
-  cwd: string;
-  mtimeMs: number;
-}
-
-// Note: the type exposed to the renderer adds `archived` and is defined in
-// shared-types. listProjects() returns the raw fs-only shape; main/index.ts
-// layers `archived` on top.
+// The renderer-facing ProjectEntry (shared-types) adds `archived`, which only
+// main/index.ts can layer on. listProjects() returns the raw fs-only shape —
+// derived structurally so the two can never drift apart.
+export type RawProjectEntry = Omit<ProjectEntry, "archived">;
 
 /**
  * Claude encodes a project cwd into a directory name by replacing path
@@ -122,10 +118,10 @@ export async function resolveProjectCwd(encoded: string): Promise<string> {
   return fallback;
 }
 
-export async function listProjects(): Promise<ProjectEntry[]> {
+export async function listProjects(): Promise<RawProjectEntry[]> {
   try {
     const entries = await readdir(CLAUDE_PROJECTS_DIR, { withFileTypes: true });
-    const out: ProjectEntry[] = [];
+    const out: RawProjectEntry[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       try {

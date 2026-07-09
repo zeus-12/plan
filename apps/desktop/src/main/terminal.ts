@@ -5,23 +5,11 @@ import { app } from "electron";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { resolveProjectCwd } from "./claude-projects";
-
-export interface TerminalChunk {
-  id: string;
-  data: string;
-}
-
-/**
- * What the bottom of the terminal screen looks like right now. EXPERIMENTAL and
- * heuristic — derived by scanning the rendered grid for Claude Code's TUI
- * signatures, not from any real protocol. Worded as a guess everywhere it's used.
- *
- *   "input"     — a free-text input box is present and ready (safe to type/send)
- *   "selection" — a numbered menu is up (tool approval / plan accept / question);
- *                 sending free text + Enter here would mis-navigate the menu
- *   "unknown"   — couldn't classify (plain shell, Claude mid-render, etc.)
- */
-export type TerminalInputState = "input" | "selection" | "unknown";
+import type {
+  TerminalChunk,
+  TerminalInfo,
+  TerminalInputState,
+} from "../shared-types";
 
 interface Session {
   pty: IPty;
@@ -558,12 +546,6 @@ export function busyTerminalIds(): string[] {
     if (isTerminalBusy(id)) out.push(id);
   }
   return out;
-}
-
-export interface TerminalInfo {
-  id: string;
-  cwd: string;
-  pid: number;
 }
 
 /** Snapshot of every live pty — the source of truth for "what's running". */

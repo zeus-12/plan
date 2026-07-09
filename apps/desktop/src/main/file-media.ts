@@ -5,16 +5,9 @@ import { join } from "path";
 import { promisify } from "util";
 import { app } from "electron";
 import { resolveProjectCwd } from "./claude-projects";
+import type { FileImageDiff } from "../shared-types";
 
 const execFileP = promisify(execFile);
-
-/** Absolute filesystem paths to readable image files for each side of a diff. */
-export interface FileImageDiff {
-  /** "Before" image, or null when the side doesn't exist (e.g. a newly added file). */
-  oldPath: string | null;
-  /** "After" image, or null when the side doesn't exist (e.g. a deleted file). */
-  newPath: string | null;
-}
 
 /** `git show <rev>:<path>` as raw bytes, or null if it doesn't exist there. */
 async function gitShowBuffer(

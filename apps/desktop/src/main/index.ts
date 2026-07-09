@@ -30,8 +30,18 @@ import {
   setSessionName,
 } from "./manual-projects";
 import { readClaudeConfig, writeClaudeConfig } from "./claude-config";
-import { readScratch, writeScratch, type ScratchData } from "./scratch-store";
-import type { ProjectEntry, SwitcherForwardedCode } from "../shared-types";
+import { readScratch, writeScratch } from "./scratch-store";
+import type {
+  ProjectEntry,
+  SessionEvent,
+  SessionListEntry,
+  SwitcherForwardedCode,
+} from "../shared-types";
+import type {
+  IpcEventContract,
+  IpcInvokeContract,
+  IpcSendContract,
+} from "../ipc-contract";
 import {
   setCallbacks,
   startWatching,
@@ -44,11 +54,7 @@ import {
   stopWorktreeWatch,
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
-import {
-  readSessionFile,
-  readSessionMeta,
-  type ParsedSession,
-} from "./jsonl-parser";
+import { readSessionFile, readSessionMeta } from "./jsonl-parser";
 import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
 import { listPrs, getPrDetail, getPrFileView } from "./github";
@@ -62,7 +68,6 @@ import {
 import { listSkills } from "./skills";
 import { getProjectIcons } from "./project-icons";
 import { checkForUpdate } from "./updates";
-import type { SearchOptions } from "../shared-types";
 import { readdir } from "fs/promises";
 import {
   setTerminalCallbacks,
@@ -78,7 +83,6 @@ import {
   killTerminalAndWait,
   killAllTerminals,
   listTerminals,
-  type TerminalChunk,
 } from "./terminal";
 import {
   applyPatch,
@@ -103,25 +107,24 @@ import {
   listAllWorktrees,
   createWorktreePr,
   addReposToWorktree,
-  type CreateWorktreeInput,
 } from "./worktrees";
-import type { CreatePrInput, AddReposToWorktreeInput } from "../shared-types";
-import {
-  getProjectDefaults,
-  setProjectDefaults,
-  type ProjectDefaults,
-} from "./worktrees-store";
+import { getProjectDefaults, setProjectDefaults } from "./worktrees-store";
 
 const isMac = process.platform === "darwin";
 
 let mainWindow: BrowserWindow | null = null;
 
-// ── Menu ───────────────────────────────────────────────────────────
-
-function sendSwitcherCycle(key: string, shift: boolean) {
+/** Typed main→renderer push — the channel and payload are checked against
+ *  IpcEventContract, the same contract the preload subscriptions derive from. */
+function sendToRenderer<K extends keyof IpcEventContract>(
+  channel: K,
+  ...args: IpcEventContract[K]
+) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("switcher:cycle", { key, shift });
+  mainWindow.webContents.send(channel, ...args);
 }
+
+// ── Menu ───────────────────────────────────────────────────────────
 
 // Which modifiers arm each forwarded switcher trigger. Keyed by the shared
 // SWITCHER_FORWARDED_CODES union, so forwarding a new code here without the
@@ -137,14 +140,6 @@ const switcherModifierOk: Record<
   Tab: (input) => input.control && !input.meta,
   Backquote: (input) => input.control || input.meta,
 };
-
-/** Forward a Cmd/Ctrl+R press to the renderer so it can force-refresh a
- * data-fetching page (PR view) instead of reloading the whole app. The renderer
- * falls back to a real reload when no page claims the shortcut. */
-function sendReloadRequest() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("app:reload-request");
-}
 
 function buildMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -188,7 +183,7 @@ function buildMenu() {
         {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
-          click: () => sendReloadRequest(),
+          click: () => sendToRenderer("app:reload-request"),
         },
         { role: "toggleDevTools" as const },
         { type: "separator" as const },
@@ -277,7 +272,7 @@ function createMainWindow(): BrowserWindow {
       // cycles ONLY from this forward (never from the native keydown — see
       // SWITCHER_FORWARDED_CODES usage in use-tab-switcher.ts), so a keystroke
       // that reaches both paths still steps exactly once.
-      sendSwitcherCycle(input.code, input.shift);
+      sendToRenderer("switcher:cycle", { key: input.code, shift: input.shift });
     }
   });
 
@@ -293,17 +288,6 @@ function focusMainWindow() {
 }
 
 // ── Session listing ────────────────────────────────────────────────
-
-interface SessionListEntry {
-  sessionId: string;
-  filePath: string;
-  mtimeMs: number;
-  archived: boolean;
-  title: string | null;
-  derivedTitle: string | null;
-  messageCount: number;
-  updatedAt: number | string | null;
-}
 
 /**
  * Display metadata per session file, cached by mtime. The renderer must NEVER
@@ -438,409 +422,243 @@ async function listAllProjects(): Promise<ProjectEntry[]> {
   );
 }
 
-function registerIpc() {
-  ipcMain.handle("projects:list", async () => listAllProjects());
+// Every invoke channel's handler, keyed and typed by the contract: a missing
+// or mistyped entry — or one whose result disagrees with what the renderer
+// will see — is a compile error, not a runtime surprise.
+const invokeHandlers: {
+  [K in keyof IpcInvokeContract]: (
+    event: Electron.IpcMainInvokeEvent,
+    ...args: IpcInvokeContract[K]["args"]
+  ) => IpcInvokeContract[K]["result"] | Promise<IpcInvokeContract[K]["result"]>;
+} = {
+  "projects:list": () => listAllProjects(),
+  "projects:icons": (_e, encodeds) => getProjectIcons(encodeds),
 
-  ipcMain.handle("projects:icons", (_e, encodeds: string[]) =>
-    getProjectIcons(encodeds),
-  );
+  "projects:addManual": async (event) => {
+    const win =
+      BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined;
+    const res = await dialog.showOpenDialog(
+      win ?? new BrowserWindow({ show: false }),
+      {
+        title: "Add project",
+        properties: ["openDirectory", "createDirectory"],
+      },
+    );
+    if (res.canceled || res.filePaths.length === 0) return null;
+    const cwd = res.filePaths[0];
+    await addManualCwd(cwd);
+    return { encoded: encodeCwd(cwd), cwd, mtimeMs: 0, archived: false };
+  },
 
-  // Update notifier: report whether a newer release exists, and open the
-  // download page in the user's browser. We never install — the app is unsigned.
-  ipcMain.handle("updates:check", () => checkForUpdate());
-  ipcMain.handle("updates:openDownload", (_e, url: string) => {
-    if (/^https:\/\/github\.com\//.test(url)) void shell.openExternal(url);
-  });
+  "projects:setArchived": async (_e, encoded, archived) => {
+    await setArchived(encoded, archived);
+    return { ok: true };
+  },
+  "projects:listSessions": (_e, encoded) => listSessionsForProject(encoded),
+  "sessions:setArchived": async (_e, sessionId, archived) => {
+    await setSessionArchived(sessionId, archived);
+    return { ok: true };
+  },
+  "sessions:rename": async (_e, sessionId, name) => {
+    await setSessionName(sessionId, name);
+    return { ok: true };
+  },
 
-  // Per-worktree scratchpad: durable notepad content persisted to ~/.plan.
-  ipcMain.handle("scratch:read", (_e, encoded: string) => readScratch(encoded));
-  ipcMain.handle("scratch:write", (_e, encoded: string, data: ScratchData) =>
-    writeScratch(encoded, data),
-  );
+  "session:move": async (_e, sessionId, fromEncoded, toEncoded) => {
+    // Kill the source chat's `claude` and WAIT for it to exit before moving
+    // the transcript. A live `claude` writes to a path derived from its cwd,
+    // so if it outlives the rename it re-creates a metadata stub at the old
+    // path — the session then lingers (message-less) in the source worktree.
+    await killTerminalAndWait(`chat:${fromEncoded}:${sessionId}`);
+    await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
+  },
 
-  ipcMain.handle(
-    "projects:addManual",
-    async (event): Promise<ProjectEntry | null> => {
-      const win =
-        BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined;
-      const res = await dialog.showOpenDialog(
-        win ?? new BrowserWindow({ show: false }),
-        {
-          title: "Add project",
-          properties: ["openDirectory", "createDirectory"],
-        },
-      );
-      if (res.canceled || res.filePaths.length === 0) return null;
-      const cwd = res.filePaths[0];
-      await addManualCwd(cwd);
-      return { encoded: encodeCwd(cwd), cwd, mtimeMs: 0, archived: false };
-    },
-  );
+  "session:read": async (_e, encoded, sessionId) => {
+    const filePath = join(CLAUDE_PROJECTS_DIR, encoded, `${sessionId}.jsonl`);
+    try {
+      return await readSessionFile(filePath);
+    } catch {
+      return null;
+    }
+  },
 
-  ipcMain.handle(
-    "projects:setArchived",
-    async (_event, encoded: string, archived: boolean) => {
-      await setArchived(encoded, archived);
-      return { ok: true };
-    },
-  );
+  "project:diff": async (_e, encoded, subPath = "") => {
+    const base = await resolveProjectCwd(encoded);
+    const cwd = subPath ? join(base, subPath) : base;
+    return getWorkingTreeDiff(cwd);
+  },
+  "project:fileContents": (_e, encoded, oldPath, newPath, subPath = "") =>
+    getFileContents(encoded, oldPath, newPath, subPath),
+  "project:fileView": (_e, encoded, path, mode, subPath = "") =>
+    getFileView(encoded, path, mode, subPath),
+  "project:fileImageDiff": (_e, encoded, path, mode, subPath = "") =>
+    getFileImageDiff(encoded, path, mode, subPath),
 
-  ipcMain.handle("projects:listSessions", async (_e, encoded: string) =>
-    listSessionsForProject(encoded),
-  );
+  "github:listPrs": (_e, encoded, subPath = "") => listPrs(encoded, subPath),
+  "github:prDetail": (_e, encoded, subPath, number) =>
+    getPrDetail(encoded, subPath, number),
+  "github:prFileView": (_e, encoded, subPath, headSha, newPath) =>
+    getPrFileView(encoded, subPath, headSha, newPath),
 
-  ipcMain.handle(
-    "sessions:setArchived",
-    async (_e, sessionId: string, archived: boolean) => {
-      await setSessionArchived(sessionId, archived);
-      return { ok: true };
-    },
-  );
-
-  ipcMain.handle(
-    "sessions:rename",
-    async (_e, sessionId: string, name: string) => {
-      await setSessionName(sessionId, name);
-      return { ok: true };
-    },
-  );
-
-  ipcMain.handle(
-    "session:move",
-    async (
-      _e,
-      sessionId: string,
-      fromEncoded: string,
-      toEncoded: string,
-    ): Promise<void> => {
-      // Kill the source chat's `claude` and WAIT for it to exit before moving
-      // the transcript. A live `claude` writes to a path derived from its cwd,
-      // so if it outlives the rename it re-creates a metadata stub at the old
-      // path — the session then lingers (message-less) in the source worktree.
-      await killTerminalAndWait(`chat:${fromEncoded}:${sessionId}`);
-      await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
-    },
-  );
-
-  ipcMain.handle(
-    "session:read",
-    async (
-      _e,
-      encoded: string,
-      sessionId: string,
-    ): Promise<ParsedSession | null> => {
-      const filePath = join(CLAUDE_PROJECTS_DIR, encoded, `${sessionId}.jsonl`);
-      try {
-        return await readSessionFile(filePath);
-      } catch {
-        return null;
-      }
-    },
-  );
-
-  ipcMain.handle(
-    "project:diff",
-    async (_e, encoded: string, subPath: string = "") => {
-      const base = await resolveProjectCwd(encoded);
-      const cwd = subPath ? join(base, subPath) : base;
-      return getWorkingTreeDiff(cwd);
-    },
-  );
-
-  ipcMain.handle(
-    "project:fileContents",
-    async (
-      _e,
-      encoded: string,
-      oldPath: string | null,
-      newPath: string | null,
-      subPath: string = "",
-    ) => getFileContents(encoded, oldPath, newPath, subPath),
-  );
-  ipcMain.handle(
-    "project:fileView",
-    async (
-      _e,
-      encoded: string,
-      path: string,
-      mode: "staged" | "unstaged",
-      subPath: string = "",
-    ) => getFileView(encoded, path, mode, subPath),
-  );
-  ipcMain.handle(
-    "project:fileImageDiff",
-    async (
-      _e,
-      encoded: string,
-      path: string,
-      mode: "staged" | "unstaged",
-      subPath: string = "",
-    ) => getFileImageDiff(encoded, path, mode, subPath),
-  );
-
-  ipcMain.handle(
-    "github:listPrs",
-    async (_e, encoded: string, subPath: string = "") =>
-      listPrs(encoded, subPath),
-  );
-  ipcMain.handle(
-    "github:prDetail",
-    async (_e, encoded: string, subPath: string, number: number) =>
-      getPrDetail(encoded, subPath, number),
-  );
-  ipcMain.handle(
-    "github:prFileView",
-    async (
-      _e,
-      encoded: string,
-      subPath: string,
-      headSha: string | null,
-      newPath: string | null,
-    ) => getPrFileView(encoded, subPath, headSha, newPath),
-  );
-
-  ipcMain.handle("files:list", async (_e, encoded: string) =>
-    listProjectFiles(encoded),
-  );
-  ipcMain.handle("files:read", async (_e, encoded: string, relPath: string) =>
-    readProjectFile(encoded, relPath),
-  );
-  ipcMain.handle("files:path", async (_e, encoded: string, relPath: string) =>
+  "files:list": (_e, encoded) => listProjectFiles(encoded),
+  "files:read": (_e, encoded, relPath) => readProjectFile(encoded, relPath),
+  "files:path": (_e, encoded, relPath) =>
     resolveProjectFilePath(encoded, relPath),
-  );
-  ipcMain.handle("skills:list", async (_e, encoded: string) =>
-    listSkills(encoded),
-  );
-  ipcMain.handle("claudeConfig:read", async (_e, encoded: string | null) =>
-    readClaudeConfig(encoded),
-  );
-  ipcMain.handle("claudeConfig:write", async (_e, path: string, text: string) =>
-    writeClaudeConfig(path, text),
-  );
-  ipcMain.handle(
-    "files:search",
-    async (_e, encoded: string, query: string, opts: SearchOptions) => {
-      // Never let an unexpected throw reject the IPC (which surfaces as an
-      // opaque "Search failed" in the UI) — return it as a structured error.
-      try {
-        return await searchProjectFiles(encoded, query, opts);
-      } catch (err) {
-        return {
-          files: [],
-          totalMatches: 0,
-          truncated: false,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-    },
-  );
+  "files:search": async (_e, encoded, query, opts) => {
+    // Never let an unexpected throw reject the IPC (which surfaces as an
+    // opaque "Search failed" in the UI) — return it as a structured error.
+    try {
+      return await searchProjectFiles(encoded, query, opts);
+    } catch (err) {
+      return {
+        files: [],
+        totalMatches: 0,
+        truncated: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  },
+  "skills:list": (_e, encoded) => listSkills(encoded),
+  "claudeConfig:read": (_e, encoded) => readClaudeConfig(encoded),
+  "claudeConfig:write": (_e, path, text) => writeClaudeConfig(path, text),
 
-  ipcMain.handle("repos:list", async (_e, encoded: string) =>
-    discoverRepos(encoded),
-  );
+  "repos:list": (_e, encoded) => discoverRepos(encoded),
 
   // Worktrees
-  ipcMain.handle("worktrees:list", async (_e, encoded: string) =>
-    listWorktrees(encoded),
-  );
-  ipcMain.handle("worktrees:listAll", async () => listAllWorktrees());
-  ipcMain.handle(
-    "worktrees:create",
-    async (_e, encoded: string, input: CreateWorktreeInput) =>
-      createWorktree(encoded, input),
-  );
-  ipcMain.handle("worktrees:remove", async (_e, id: string) =>
-    removeWorktree(id),
-  );
-  ipcMain.handle(
-    "worktrees:addRepos",
-    async (_e, id: string, input: AddReposToWorktreeInput) =>
-      addReposToWorktree(id, input),
-  );
-  ipcMain.handle(
-    "worktrees:createPr",
-    async (_e, id: string, input: CreatePrInput) => createWorktreePr(id, input),
-  );
-  ipcMain.handle("worktrees:getDefaults", async (_e, encoded: string) =>
-    getProjectDefaults(encoded),
-  );
-  ipcMain.handle(
-    "worktrees:setDefaults",
-    async (_e, encoded: string, defaults: ProjectDefaults) =>
-      setProjectDefaults(encoded, defaults),
-  );
+  "worktrees:list": (_e, encoded) => listWorktrees(encoded),
+  "worktrees:listAll": () => listAllWorktrees(),
+  "worktrees:create": (_e, encoded, input) => createWorktree(encoded, input),
+  "worktrees:remove": (_e, id) => removeWorktree(id),
+  "worktrees:addRepos": (_e, id, input) => addReposToWorktree(id, input),
+  "worktrees:createPr": (_e, id, input) => createWorktreePr(id, input),
+  "worktrees:getDefaults": (_e, encoded) => getProjectDefaults(encoded),
+  "worktrees:setDefaults": (_e, encoded, defaults) =>
+    setProjectDefaults(encoded, defaults),
+
+  // Worktree watching is scoped to whatever project workspace is mounted —
+  // real repos are heavier to watch than the session JSONL dirs, so we only
+  // watch the active one. The renderer calls these on mount/unmount.
+  "worktree:watch": (_e, encoded) => {
+    void startWorktreeWatch(encoded);
+  },
+  "worktree:unwatch": (_e, encoded) => {
+    stopWorktreeWatch(encoded);
+  },
 
   // Git
-  ipcMain.handle(
-    "git:branch",
-    async (_e, encoded: string, subPath: string = "") =>
-      getBranch(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:status",
-    async (_e, encoded: string, subPath: string = "") =>
-      getStatus(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:stage",
-    async (_e, encoded: string, path: string, subPath: string = "") =>
-      stageFile(encoded, path, subPath),
-  );
-  ipcMain.handle(
-    "git:unstage",
-    async (_e, encoded: string, path: string, subPath: string = "") =>
-      unstageFile(encoded, path, subPath),
-  );
-  ipcMain.handle(
-    "git:discard",
-    async (_e, encoded: string, path: string, subPath: string = "") =>
-      discardFile(encoded, path, subPath),
-  );
-  ipcMain.handle(
-    "git:stageAll",
-    async (_e, encoded: string, subPath: string = "") =>
-      stageAll(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:unstageAll",
-    async (_e, encoded: string, subPath: string = "") =>
-      unstageAll(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:discardAll",
-    async (_e, encoded: string, subPath: string = "") =>
-      discardAll(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:stashAll",
-    async (_e, encoded: string, subPath: string = "") =>
-      stashAll(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:push",
-    async (_e, encoded: string, subPath: string = "") =>
-      gitPush(encoded, subPath),
-  );
-  ipcMain.handle(
-    "git:commit",
-    async (_e, encoded: string, message: string, subPath: string = "") =>
-      gitCommit(encoded, message, subPath),
-  );
-  ipcMain.handle(
-    "git:blameContents",
-    async (_e, encoded: string, path: string, contents: string) =>
-      blameContents(encoded, path, contents),
-  );
-  ipcMain.handle(
-    "git:commitDetails",
-    async (_e, encoded: string, path: string, hash: string) =>
-      getCommitDetails(encoded, path, hash),
-  );
-  ipcMain.handle(
-    "git:applyPatch",
-    async (
-      _e,
-      encoded: string,
-      patch: string,
-      mode: "stage" | "unstage" | "discard" | "apply",
-      subPath: string = "",
-    ) => applyPatch(encoded, patch, { mode }, subPath),
-  );
+  "git:branch": (_e, encoded, subPath = "") => getBranch(encoded, subPath),
+  "git:status": (_e, encoded, subPath = "") => getStatus(encoded, subPath),
+  "git:stage": (_e, encoded, path, subPath = "") =>
+    stageFile(encoded, path, subPath),
+  "git:unstage": (_e, encoded, path, subPath = "") =>
+    unstageFile(encoded, path, subPath),
+  "git:discard": (_e, encoded, path, subPath = "") =>
+    discardFile(encoded, path, subPath),
+  "git:stageAll": (_e, encoded, subPath = "") => stageAll(encoded, subPath),
+  "git:unstageAll": (_e, encoded, subPath = "") => unstageAll(encoded, subPath),
+  "git:discardAll": (_e, encoded, subPath = "") => discardAll(encoded, subPath),
+  "git:stashAll": (_e, encoded, subPath = "") => stashAll(encoded, subPath),
+  "git:push": (_e, encoded, subPath = "") => gitPush(encoded, subPath),
+  "git:commit": (_e, encoded, message, subPath = "") =>
+    gitCommit(encoded, message, subPath),
+  "git:applyPatch": (_e, encoded, patch, mode, subPath = "") =>
+    applyPatch(encoded, patch, { mode }, subPath),
+  "git:blameContents": (_e, encoded, path, contents) =>
+    blameContents(encoded, path, contents),
+  "git:commitDetails": (_e, encoded, path, hash) =>
+    getCommitDetails(encoded, path, hash),
 
   // Terminal ptys (keyed by terminal id; cwd resolved from encoded)
-  ipcMain.handle(
-    "terminal:open",
-    async (
-      _e,
-      id: string,
-      encoded: string,
-      cols: number,
-      rows: number,
-      initialCommand?: string,
-      subPath = "",
-    ) => openTerminal(id, encoded, cols, rows, initialCommand, subPath),
-  );
-  ipcMain.on("terminal:input", (_e, id: string, data: string) =>
-    writeTerminal(id, data),
-  );
-  ipcMain.on(
-    "terminal:submit",
-    (_e, id: string, text: string, imagePaths: string[] = []) =>
-      submitToTerminal(id, text, imagePaths),
-  );
-  ipcMain.on("terminal:sendKeys", (_e, id: string, keys: string[]) =>
-    sendKeys(id, keys),
-  );
-  ipcMain.handle("terminal:status", (_e, id: string) => terminalStatus(id));
-  ipcMain.handle("terminal:inputState", (_e, id: string) =>
-    detectInputState(id),
-  );
-  ipcMain.handle("terminal:busyIds", () => busyTerminalIds());
-  ipcMain.on("terminal:resize", (_e, id: string, cols: number, rows: number) =>
-    resizeTerminal(id, cols, rows),
-  );
-  ipcMain.on("terminal:kill", (_e, id: string) => killTerminal(id));
-  ipcMain.handle("terminal:list", () => listTerminals());
+  "terminal:open": (
+    _e,
+    id,
+    encoded,
+    cols,
+    rows,
+    initialCommand,
+    subPath = "",
+  ) => openTerminal(id, encoded, cols, rows, initialCommand, subPath),
+  "terminal:status": (_e, id) => terminalStatus(id),
+  "terminal:inputState": (_e, id) => detectInputState(id),
+  "terminal:busyIds": () => busyTerminalIds(),
+  "terminal:list": () => listTerminals(),
 
   // Write a pasted image to a temp file; the renderer types the path into the
   // terminal (Claude Code reads image paths as attachments).
-  ipcMain.handle(
-    "terminal:saveTempImage",
-    async (_e, data: Uint8Array, ext: string) => {
-      try {
-        const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext : "png";
-        const file = join(tmpdir(), `plan-paste-${randomUUID()}.${safeExt}`);
-        await writeFile(file, Buffer.from(data));
-        return file;
-      } catch {
-        return null;
-      }
-    },
-  );
+  "terminal:saveTempImage": async (_e, data, ext) => {
+    try {
+      const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext : "png";
+      const file = join(tmpdir(), `plan-paste-${randomUUID()}.${safeExt}`);
+      await writeFile(file, Buffer.from(data));
+      return file;
+    } catch {
+      return null;
+    }
+  },
 
   // Does a path still exist on disk? Used to verify a restored draft's pasted
   // images are still present before showing/sending them (the OS can purge tmp).
-  ipcMain.handle("terminal:fileExists", async (_e, path: string) => {
+  "terminal:fileExists": async (_e, path) => {
     try {
       await stat(path);
       return true;
     } catch {
       return false;
     }
-  });
+  },
 
-  // Worktree watching is scoped to whatever project workspace is mounted —
-  // real repos are heavier to watch than the session JSONL dirs, so we only
-  // watch the active one. The renderer calls these on mount/unmount.
-  ipcMain.handle("worktree:watch", (_e, encoded: string) => {
-    void startWorktreeWatch(encoded);
-  });
-  ipcMain.handle("worktree:unwatch", (_e, encoded: string) => {
-    stopWorktreeWatch(encoded);
-  });
+  // Update notifier: report whether a newer release exists, and open the
+  // download page in the user's browser. We never install — the app is unsigned.
+  "updates:check": () => checkForUpdate(),
+  "updates:openDownload": (_e, url) => {
+    if (/^https:\/\/github\.com\//.test(url)) void shell.openExternal(url);
+  },
+
+  // Per-worktree scratchpad: durable notepad content persisted to ~/.plan.
+  "scratch:read": (_e, encoded) => readScratch(encoded),
+  "scratch:write": (_e, encoded, data) => writeScratch(encoded, data),
+};
+
+/** Fire-and-forget channels (`ipcMain.on`), same contract discipline. */
+const sendHandlers: {
+  [K in keyof IpcSendContract]: (
+    event: Electron.IpcMainEvent,
+    ...args: IpcSendContract[K]
+  ) => void;
+} = {
+  "terminal:input": (_e, id, data) => writeTerminal(id, data),
+  "terminal:submit": (_e, id, text, imagePaths = []) =>
+    submitToTerminal(id, text, imagePaths),
+  "terminal:sendKeys": (_e, id, keys) => sendKeys(id, keys),
+  "terminal:resize": (_e, id, cols, rows) => resizeTerminal(id, cols, rows),
+  "terminal:kill": (_e, id) => killTerminal(id),
+};
+
+function registerIpc() {
+  for (const channel of Object.keys(invokeHandlers) as Array<
+    keyof IpcInvokeContract
+  >) {
+    ipcMain.handle(channel, invokeHandlers[channel]);
+  }
+  for (const channel of Object.keys(sendHandlers) as Array<
+    keyof IpcSendContract
+  >) {
+    ipcMain.on(channel, sendHandlers[channel]);
+  }
 }
 
 // ── Watcher → renderer bridge ──────────────────────────────────────
 
 function bridgeWatcher() {
-  const send = (e: unknown) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send("watcher:event", e);
-  };
+  const send = (e: SessionEvent) => sendToRenderer("watcher:event", e);
   setCallbacks({ onEvent: send });
   setWorktreeCallbacks({ onEvent: send });
 }
 
 function bridgeTerminal() {
   setTerminalCallbacks({
-    onData(chunk: TerminalChunk) {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send("terminal:data", chunk);
-    },
-    onExit(id: string) {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send("terminal:exit", id);
-    },
+    onData: (chunk) => sendToRenderer("terminal:data", chunk),
+    onExit: (id) => sendToRenderer("terminal:exit", id),
   });
 }
 
