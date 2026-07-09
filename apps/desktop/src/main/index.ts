@@ -55,7 +55,6 @@ import {
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
 import { readSessionFile, readSessionMeta } from "./jsonl-parser";
-import { getWorkingTreeDiff } from "./git-diff";
 import { getFileContents, getFileView } from "./file-contents";
 import { listPrs, getPrDetail, getPrFileView } from "./github";
 import { getFileImageDiff } from "./file-media";
@@ -92,6 +91,7 @@ import {
   discoverRepos,
   getBranch,
   getStatus,
+  getWorkingTreeDiff,
   push as gitPush,
   stageAll,
   stageFile,

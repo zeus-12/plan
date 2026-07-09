@@ -1,5 +1,5 @@
 import { basename, dirname } from "path";
-import { run } from "./git";
+import { git } from "./git-exec";
 import { resolveProjectFilePath } from "./project-files";
 import type { BlameCommit, BlameResult, CommitDetails } from "../shared-types";
 
@@ -9,7 +9,7 @@ async function runGit(
   args: string[],
   stdin?: string,
 ): Promise<string | null> {
-  const r = await run(cwd, args, stdin);
+  const r = await git(cwd, args, stdin ? { stdin } : undefined);
   return r.code === 0 ? r.stdout : null;
 }
 

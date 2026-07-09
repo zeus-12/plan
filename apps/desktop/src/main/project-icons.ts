@@ -1,14 +1,11 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { access, mkdir, readdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import { net } from "electron";
 import { PLAN_DIR } from "./plan-config";
+import { gitSafe } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
 import { discoverRepos } from "./git";
-
-const execFileP = promisify(execFile);
 
 /** Downloaded GitHub avatars live here, one file per owner, reused forever. */
 const AVATAR_DIR = join(PLAN_DIR, "icons");
@@ -82,19 +79,9 @@ function githubOwner(originUrl: string): string | null {
 }
 
 async function originUrl(repoPath: string): Promise<string | null> {
-  try {
-    const { stdout } = await execFileP("git", [
-      "-C",
-      repoPath,
-      "config",
-      "--get",
-      "remote.origin.url",
-    ]);
-    const url = stdout.trim();
-    return url || null;
-  } catch {
-    return null;
-  }
+  const r = await gitSafe(repoPath, ["config", "--get", "remote.origin.url"]);
+  const url = r.stdout.trim();
+  return r.ok && url ? url : null;
 }
 
 /**

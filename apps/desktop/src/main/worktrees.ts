@@ -1,8 +1,7 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { rm } from "fs/promises";
 import { join, basename } from "path";
 import { createHash } from "crypto";
+import { gitOrThrow as git, gitSafe, gh } from "./git-exec";
 import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
 import { encodeCwd } from "./manual-projects";
 import { PLAN_DIR } from "./plan-config";
@@ -40,42 +39,6 @@ import type {
   CreateWorktreeInput,
   AddReposToWorktreeInput,
 } from "../shared-types";
-
-const execFileP = promisify(execFile);
-const MAX_BUFFER = 32 * 1024 * 1024;
-
-/** Run git in `cwd`; throws on non-zero exit with stderr in the message. */
-async function git(cwd: string, args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileP("git", ["-C", cwd, ...args], {
-      maxBuffer: MAX_BUFFER,
-    });
-    return stdout;
-  } catch (err) {
-    const e = err as { stderr?: string; message?: string };
-    throw new Error((e.stderr || e.message || "git failed").trim());
-  }
-}
-
-/** Run git in `cwd`, capturing the outcome instead of throwing. */
-async function gitSafe(
-  cwd: string,
-  args: string[],
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFileP("git", ["-C", cwd, ...args], {
-      maxBuffer: MAX_BUFFER,
-    });
-    return { ok: true, stdout, stderr };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    return {
-      ok: false,
-      stdout: e.stdout ?? "",
-      stderr: (e.stderr || e.message || "git failed").trim(),
-    };
-  }
-}
 
 /** Remotes configured in a repo. */
 async function listRemotes(repoPath: string): Promise<string[]> {
@@ -334,27 +297,6 @@ export async function removeWorktree(id: string): Promise<void> {
   }
   await rm(rec.rootPath, { recursive: true, force: true }).catch(() => {});
   await deleteWorktreeRecord(id);
-}
-
-/** Run `gh` in `cwd`; never throws — non-zero exit is captured for the caller. */
-async function gh(
-  cwd: string,
-  args: string[],
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFileP("gh", args, {
-      cwd,
-      maxBuffer: MAX_BUFFER,
-    });
-    return { ok: true, stdout, stderr };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    return {
-      ok: false,
-      stdout: e.stdout ?? "",
-      stderr: (e.stderr || e.message || "gh failed").trim(),
-    };
-  }
 }
 
 /** First http(s) URL in a string (gh prints the PR URL on stdout). */

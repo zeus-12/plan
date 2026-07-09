@@ -1,60 +1,14 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
+import { git as run } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
 import { GIT_SCAN_DEPTH } from "./config";
 import type {
   DiscoveredRepo,
+  GitDiffResult,
   GitFileStatus,
   GitStatusResult,
 } from "../shared-types";
-
-const execFileP = promisify(execFile);
-
-const MAX_BUFFER = 32 * 1024 * 1024;
-
-interface GitResult {
-  stdout: string;
-  stderr: string;
-  code: number;
-}
-
-/** Run git with the given args in cwd. Never throws — non-zero exit is captured. */
-export async function run(
-  cwd: string,
-  args: string[],
-  stdin?: string,
-): Promise<GitResult> {
-  try {
-    const proc = execFile("git", ["-C", cwd, ...args], {
-      maxBuffer: MAX_BUFFER,
-    });
-    if (stdin) {
-      proc.stdin?.on("error", () => {}); // EPIPE when git exits early
-      proc.stdin?.write(stdin);
-      proc.stdin?.end();
-    }
-    const { stdout, stderr } = await new Promise<{
-      stdout: string;
-      stderr: string;
-    }>((resolve, reject) => {
-      let out = "";
-      let err = "";
-      proc.stdout?.on("data", (c) => (out += c.toString()));
-      proc.stderr?.on("data", (c) => (err += c.toString()));
-      proc.on("error", reject);
-      proc.on("close", () => resolve({ stdout: out, stderr: err }));
-    });
-    return { stdout, stderr, code: proc.exitCode ?? 0 };
-  } catch (err) {
-    return {
-      stdout: "",
-      stderr: err instanceof Error ? err.message : String(err),
-      code: 1,
-    };
-  }
-}
 
 async function cwdFromEncoded(
   encoded: string,
@@ -409,14 +363,34 @@ export async function applyPatch(
   }
   // "apply" → no extra flags (forward apply to the working tree).
   args.push("-");
-  const r = await run(cwd, args, patch);
+  const r = await run(cwd, args, { stdin: patch });
   if (r.code !== 0) {
     // Retry without --unidiff-zero in case the patch already has context.
     const args2 = args.filter((a) => a !== "--unidiff-zero");
-    const r2 = await run(cwd, args2, patch);
+    const r2 = await run(cwd, args2, { stdin: patch });
     if (r2.code !== 0) {
       return { ok: false, error: r2.stderr || r.stderr || "git apply failed" };
     }
   }
   return { ok: true };
+}
+
+/**
+ * Returns the working-tree diff against HEAD for the given cwd. Includes both
+ * staged and unstaged changes. Returns `available: false` if the path isn't a
+ * git repo or git isn't installed.
+ */
+export async function getWorkingTreeDiff(cwd: string): Promise<GitDiffResult> {
+  const check = await run(cwd, ["rev-parse", "--is-inside-work-tree"]);
+  if (check.code !== 0) return { available: false, diff: "" };
+
+  const r = await run(cwd, ["diff", "HEAD", "--no-color"]);
+  if (r.code !== 0) {
+    return {
+      available: true,
+      diff: "",
+      error: r.stderr.trim() || "git diff failed",
+    };
+  }
+  return { available: true, diff: r.stdout };
 }

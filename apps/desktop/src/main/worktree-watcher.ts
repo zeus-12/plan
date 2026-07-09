@@ -1,13 +1,10 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { readFile } from "fs/promises";
 import { relative, sep, isAbsolute, join } from "path";
 import chokidar, { type FSWatcher } from "chokidar";
 import ignore, { type Ignore } from "ignore";
+import { git } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
 import { IGNORED_DIRS } from "./ignored-dirs";
-
-const execFileP = promisify(execFile);
 
 /**
  * Watches a project's actual git worktree (the real repo on disk) so the UI
@@ -83,21 +80,18 @@ function isInside(dir: string, p: string): boolean {
  * (shared refs/objects), so we may watch both.
  */
 async function resolveGitDirs(cwd: string): Promise<string[]> {
-  try {
-    const { stdout } = await execFileP(
-      "git",
-      ["-C", cwd, "rev-parse", "--absolute-git-dir", "--git-common-dir"],
-      { timeout: 5000 },
-    );
-    const lines = stdout
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((l) => (isAbsolute(l) ? l : join(cwd, l)));
-    return [...new Set(lines)];
-  } catch {
-    return [];
-  }
+  const r = await git(
+    cwd,
+    ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+    { timeoutMs: 5000 },
+  );
+  if (r.code !== 0) return [];
+  const lines = r.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => (isAbsolute(l) ? l : join(cwd, l)));
+  return [...new Set(lines)];
 }
 
 async function loadGitignore(cwd: string): Promise<Ignore> {

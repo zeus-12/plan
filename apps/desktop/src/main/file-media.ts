@@ -1,31 +1,10 @@
-import { execFile } from "child_process";
 import { createHash } from "crypto";
 import { access, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
-import { promisify } from "util";
 import { app } from "electron";
+import { gitShowBuffer } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
 import type { FileImageDiff } from "../shared-types";
-
-const execFileP = promisify(execFile);
-
-/** `git show <rev>:<path>` as raw bytes, or null if it doesn't exist there. */
-async function gitShowBuffer(
-  cwd: string,
-  rev: string,
-  path: string,
-): Promise<Buffer | null> {
-  try {
-    const { stdout } = await execFileP(
-      "git",
-      ["-C", cwd, "show", `${rev}:${path}`],
-      { maxBuffer: 64 * 1024 * 1024, encoding: "buffer" },
-    );
-    return stdout as Buffer;
-  } catch {
-    return null;
-  }
-}
 
 function extOf(path: string): string {
   const slash = path.lastIndexOf("/");

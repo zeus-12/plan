@@ -1,6 +1,5 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { discoverRepos } from "./git";
+import { gh, gitSafe, gitShow, looksBinary } from "./git-exec";
 import type {
   PrChecks,
   PrComment,
@@ -12,69 +11,6 @@ import type {
   PrSummary,
   PrFileView,
 } from "../shared-types";
-
-const execFileP = promisify(execFile);
-const MAX_BUFFER = 32 * 1024 * 1024;
-
-/** Run `gh` in `cwd`; never throws — non-zero exit is captured for the caller. */
-async function gh(
-  cwd: string,
-  args: string[],
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFileP("gh", args, {
-      cwd,
-      maxBuffer: MAX_BUFFER,
-    });
-    return { ok: true, stdout, stderr };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    return {
-      ok: false,
-      stdout: e.stdout ?? "",
-      stderr: (e.stderr || e.message || "gh failed").trim(),
-    };
-  }
-}
-
-/** Run git in `cwd`, capturing the outcome instead of throwing. */
-async function gitSafe(
-  cwd: string,
-  args: string[],
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFileP("git", ["-C", cwd, ...args], {
-      maxBuffer: MAX_BUFFER,
-    });
-    return { ok: true, stdout, stderr };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    return {
-      ok: false,
-      stdout: e.stdout ?? "",
-      stderr: (e.stderr || e.message || "git failed").trim(),
-    };
-  }
-}
-
-/** `git show <rev>:<path>` → blob text, or "" if it doesn't exist there. */
-async function gitShow(
-  cwd: string,
-  rev: string,
-  path: string,
-): Promise<string> {
-  const r = await gitSafe(cwd, ["show", `${rev}:${path}`]);
-  return r.ok ? r.stdout : "";
-}
-
-const BINARY_PROBE_BYTES = 8000;
-function looksBinary(s: string): boolean {
-  const sample = s.slice(0, BINARY_PROBE_BYTES);
-  for (let i = 0; i < sample.length; i++) {
-    if (sample.charCodeAt(i) === 0) return true;
-  }
-  return false;
-}
 
 /** Absolute cwd for the repo at `subPath` within a project, or null if none. */
 async function repoCwd(

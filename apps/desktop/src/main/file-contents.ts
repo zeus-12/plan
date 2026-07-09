@@ -1,56 +1,20 @@
-import { execFile } from "child_process";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { promisify } from "util";
+import { git, gitShow, looksBinary } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
 import type { FileContents, FileView } from "../shared-types";
 
-const execFileP = promisify(execFile);
-
-const BINARY_PROBE_BYTES = 8000;
-
-function looksBinary(s: string): boolean {
-  const sample = s.slice(0, BINARY_PROBE_BYTES);
-  for (let i = 0; i < sample.length; i++) {
-    if (sample.charCodeAt(i) === 0) return true;
-  }
-  return false;
-}
-
-/** `git show <rev>:<path>` → blob text, or "" if it doesn't exist there. */
-async function gitShow(
-  cwd: string,
-  rev: string,
-  path: string,
-): Promise<string> {
-  try {
-    const { stdout } = await execFileP(
-      "git",
-      ["-C", cwd, "show", `${rev}:${path}`],
-      { maxBuffer: 32 * 1024 * 1024 },
-    );
-    return stdout;
-  } catch {
-    return "";
-  }
-}
-
+/** Unified diff for one file in one stage; "" when git fails (e.g. no repo). */
 async function gitDiff(
   cwd: string,
   path: string,
   cached: boolean,
 ): Promise<string> {
-  try {
-    const args = ["-C", cwd, "diff", "--no-color"];
-    if (cached) args.push("--cached");
-    args.push("--", path);
-    const { stdout } = await execFileP("git", args, {
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    return stdout;
-  } catch {
-    return "";
-  }
+  const args = ["diff", "--no-color"];
+  if (cached) args.push("--cached");
+  args.push("--", path);
+  const r = await git(cwd, args);
+  return r.code === 0 ? r.stdout : "";
 }
 
 async function readWorking(cwd: string, path: string): Promise<string> {
