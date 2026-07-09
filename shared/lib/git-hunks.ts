@@ -91,3 +91,41 @@ export function buildSingleHunkPatch(
   // `git apply` needs a trailing newline.
   return `${parsed.fileHeader}\n${hunk.header}\n${hunk.body}\n`;
 }
+
+/**
+ * A 1-based line span in hunk coordinates — the same space GitHunk's
+ * start/count describe, expressed as an inclusive range per side. Null on a
+ * side that has no lines there (a pure insertion has no old span, a pure
+ * deletion no new span). The diff UI reports change blocks in this shape so
+ * callers can match them back to a stageable git hunk.
+ */
+export interface HunkRange {
+  oldStart: number | null;
+  oldEnd: number | null;
+  newStart: number | null;
+  newEnd: number | null;
+}
+
+/**
+ * Match a line range to one of the parsed hunks. Both derive from the same
+ * diff, so an overlap on either the old- or new-line span uniquely identifies
+ * the hunk. Returns the hunk's index, or -1 when nothing overlaps.
+ */
+export function findHunkIndexForRange(
+  hunks: GitHunk[],
+  range: HunkRange,
+): number {
+  return hunks.findIndex((h) => {
+    const oldOverlap =
+      range.oldStart != null &&
+      range.oldEnd != null &&
+      h.oldStart <= range.oldEnd &&
+      range.oldStart <= h.oldStart + Math.max(h.oldCount, 1) - 1;
+    const newOverlap =
+      range.newStart != null &&
+      range.newEnd != null &&
+      h.newStart <= range.newEnd &&
+      range.newStart <= h.newStart + Math.max(h.newCount, 1) - 1;
+    return oldOverlap || newOverlap;
+  });
+}

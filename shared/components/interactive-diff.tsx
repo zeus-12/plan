@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  memo,
   useRef,
   useState,
   useMemo,
@@ -10,11 +9,10 @@ import {
   useEffect,
   useLayoutEffect,
   Fragment,
-  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import type { Annotation } from "../lib/store";
-import { type DiffSettings, FONT_SIZE_OPTIONS } from "../lib/settings";
+import type { DiffSettings } from "../lib/settings";
 import {
   type DiffLine,
   type FilteredItem,
@@ -32,7 +30,7 @@ import {
   buildLineToChangeMap,
   computeChanges,
 } from "../lib/diff-merge";
-import type { GitHunk } from "../lib/git-hunks";
+import type { GitHunk, HunkRange } from "../lib/git-hunks";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import {
   SYNC_HIGHLIGHT_MAX_CHARS,
@@ -44,6 +42,18 @@ import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
 import { FindWidget } from "./find-widget";
+import {
+  LineContent,
+  EMPTY_TOKENS,
+  EMPTY_HLS,
+  type Hl,
+} from "./diff/line-content";
+import { MergeOverlay } from "./diff/merge-overlay";
+import { DiffSettingsControls } from "./diff/settings-controls";
+import { useReadonlyCaretHost } from "./diff/use-readonly-caret-host";
+
+/** Re-exported: HunkRange is part of the hunkActions contract below. */
+export type { HunkRange } from "../lib/git-hunks";
 
 /* ── Constants ────────────────────────────────────────────── */
 
@@ -148,24 +158,9 @@ interface Props {
 
 export interface DiffBlame {
   labelFor: (side: "left" | "right", lineNum: number) => string | null;
-  onChipEnter: (
-    side: "left" | "right",
-    lineNum: number,
-    rect: DOMRect,
-  ) => void;
+  onChipEnter: (side: "left" | "right", lineNum: number, rect: DOMRect) => void;
   onChipLeave: () => void;
-  onChipClick: (
-    side: "left" | "right",
-    lineNum: number,
-    rect: DOMRect,
-  ) => void;
-}
-
-export interface HunkRange {
-  oldStart: number | null;
-  oldEnd: number | null;
-  newStart: number | null;
-  newEnd: number | null;
+  onChipClick: (side: "left" | "right", lineNum: number, rect: DOMRect) => void;
 }
 
 /* ── Style helpers ────────────────────────────────────────── */
@@ -264,332 +259,7 @@ interface HunkBlock {
   range: HunkRange;
 }
 
-/* ── Merge overlay (lifted card over a change) ────────────── */
-
-interface MergeOverlayProps {
-  top: number;
-  height: number;
-  currentIdx: number;
-  totalChanges: number;
-  onClose: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-  onApplyLeftToRight: () => void;
-  onApplyRightToLeft: () => void;
-}
-
-/** Header/footer strip heights — kept narrow so the overlay barely intrudes. */
-const STRIP_H = 26;
-
-function MergeOverlay({
-  top,
-  height,
-  currentIdx,
-  totalChanges,
-  onClose,
-  onPrev,
-  onNext,
-  onApplyLeftToRight,
-  onApplyRightToLeft,
-}: MergeOverlayProps) {
-  // Total absolute slot: a thin strip ABOVE the change + the change rows
-  // themselves (transparent middle, the diff lines beneath show through) + a
-  // thin strip BELOW. Strips overlap whatever context row was immediately
-  // adjacent to the change.
-  return (
-    <div
-      data-merge-overlay
-      className="pointer-events-none absolute inset-x-0 z-20"
-      style={{ top: top - STRIP_H, height: height + STRIP_H * 2 }}
-    >
-      {/* Frame: just a ring around the whole slot, no background */}
-      <div className="pointer-events-none absolute inset-x-2 inset-y-0 rounded-md shadow-[0_6px_18px_rgba(0,0,0,0.18)] ring-2 ring-[var(--accent)]" />
-
-      {/* Header strip (above the change) */}
-      <div
-        className="pointer-events-auto absolute inset-x-2 top-0 flex items-center justify-between gap-2 rounded-t-md border-b border-[var(--accent)]/30 bg-[var(--bg-surface)] px-2"
-        style={{ height: STRIP_H }}
-      >
-        <div className="flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)]">
-          <span>
-            Change {currentIdx + 1}{" "}
-            <span className="text-[var(--text-tertiary)]">
-              of {totalChanges}
-            </span>
-          </span>
-          <button
-            onClick={onPrev}
-            className="ml-2 rounded px-1.5 py-0.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]"
-            aria-label="Previous change"
-            title="Previous change"
-          >
-            ↑
-          </button>
-          <button
-            onClick={onNext}
-            className="rounded px-1.5 py-0.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]"
-            aria-label="Next change"
-            title="Next change"
-          >
-            ↓
-          </button>
-        </div>
-        <button
-          onClick={onClose}
-          className="flex h-5 w-5 items-center justify-center rounded text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-          aria-label="Close"
-          title="Close (Esc)"
-        >
-          ×
-        </button>
-      </div>
-
-      {/* Footer strip (below the change). Each button sits on its own side and
-          its arrow points the way the change is copied: the left button takes
-          the LEFT version and applies it to the RIGHT (→); the right button
-          takes the RIGHT version and applies it to the LEFT (←). */}
-      <div
-        className="pointer-events-auto absolute inset-x-2 bottom-0 flex items-center justify-between gap-3 rounded-b-md border-t border-[var(--accent)]/30 bg-[var(--bg-surface)] px-2"
-        style={{ height: STRIP_H }}
-      >
-        <button
-          onClick={onApplyLeftToRight}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--diff-add-bar)] px-2.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-white transition-opacity hover:opacity-90"
-          title="Copy the left side's version to the right"
-        >
-          <span>Merge</span>
-          <span aria-hidden>→</span>
-        </button>
-        <button
-          onClick={onApplyRightToLeft}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--diff-remove-bar)] px-2.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-white transition-opacity hover:opacity-90"
-          title="Copy the right side's version to the left"
-        >
-          <span aria-hidden>←</span>
-          <span>Merge</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /* ── Component ────────────────────────────────────────────── */
-
-/* ── Per-line content (memoized) ──────────────────────────────
- * One source line's rendered spans. Extracted into a memoized component so the
- * frequent transient re-renders of the whole diff — mouse-move hunk hover, the
- * merge overlay, comment editing, find stepping — DON'T rebuild every line's
- * spans. A line only re-renders when its own inputs change (its syntax tokens,
- * its overlapping highlights, or — if it carries an annotation — the hovered
- * annotation). The shared EMPTY_* constants keep the common "no decorations"
- * line referentially stable so it bails out of every re-render. */
-
-type Hl = {
-  s: number;
-  e: number;
-  kind: "ann" | "pending" | "find" | "find-current";
-  annId?: string;
-};
-
-const EMPTY_TOKENS: SyntaxToken[] = [];
-const EMPTY_HLS: Hl[] = [];
-
-interface LineContentProps {
-  text: string;
-  lineType: DiffLine["type"];
-  /** Syntax tokens for this line (a stable ref; EMPTY_TOKENS when none). */
-  syntax: SyntaxToken[];
-  /** Word-diff segments, or null when this line has none / is whitespace-only. */
-  wordSegments: WordSegment[] | null;
-  /** Annotation / pending-selection / find highlights (EMPTY_HLS when none). */
-  hls: Hl[];
-  hoveredAnnId: string | null;
-  onClickAnn: (annId: string, rect: DOMRect) => void;
-  onHoverAnn: (annId: string | null) => void;
-}
-
-function lineContentEqual(a: LineContentProps, b: LineContentProps): boolean {
-  if (
-    a.text !== b.text ||
-    a.lineType !== b.lineType ||
-    a.syntax !== b.syntax ||
-    a.wordSegments !== b.wordSegments ||
-    a.hls !== b.hls ||
-    a.onClickAnn !== b.onClickAnn ||
-    a.onHoverAnn !== b.onHoverAnn
-  ) {
-    return false;
-  }
-  // hoveredAnnId only changes the paint of a line that carries an annotation.
-  if (
-    b.hls.some((h) => h.kind === "ann") &&
-    a.hoveredAnnId !== b.hoveredAnnId
-  ) {
-    return false;
-  }
-  return true;
-}
-
-const LineContent = memo(function LineContent({
-  text,
-  lineType,
-  syntax,
-  wordSegments,
-  hls,
-  hoveredAnnId,
-  onClickAnn,
-  onHoverAnn,
-}: LineContentProps): ReactNode {
-  if (!text) return " ";
-
-  const wordBgVar =
-    lineType === "add"
-      ? "var(--diff-add-word)"
-      : lineType === "remove"
-        ? "var(--diff-remove-word)"
-        : null;
-
-  if (hls.length === 0 && syntax.length === 0 && !wordSegments) {
-    return text;
-  }
-
-  // Build flat list of breakpoints (every range start/end), then walk segments.
-  const bounds = new Set<number>([0, text.length]);
-  for (const t of syntax) {
-    bounds.add(t.start);
-    bounds.add(t.end);
-  }
-  if (wordSegments) {
-    let off = 0;
-    for (const w of wordSegments) {
-      bounds.add(off);
-      off += w.text.length;
-      bounds.add(off);
-    }
-  }
-  for (const h of hls) {
-    bounds.add(h.s);
-    bounds.add(h.e);
-  }
-  const sorted = [...bounds]
-    .filter((b) => b >= 0 && b <= text.length)
-    .sort((a, b) => a - b);
-
-  // Pre-index word-segment offsets so we can look up per char.
-  const wordOffsets: { start: number; end: number; changed: boolean }[] = [];
-  if (wordSegments) {
-    let off = 0;
-    for (const w of wordSegments) {
-      wordOffsets.push({
-        start: off,
-        end: off + w.text.length,
-        changed: w.changed,
-      });
-      off += w.text.length;
-    }
-  }
-
-  function findSyntax(pos: number) {
-    for (const t of syntax) if (t.start <= pos && pos < t.end) return t;
-    return null;
-  }
-  function findAnn(pos: number) {
-    for (const h of hls) if (h.s <= pos && pos < h.e) return h;
-    return null;
-  }
-  function findWord(pos: number) {
-    for (const w of wordOffsets) if (w.start <= pos && pos < w.end) return w;
-    return null;
-  }
-
-  const parts: ReactNode[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const s = sorted[i];
-    const e = sorted[i + 1];
-    if (s >= e) continue;
-    const slice = text.slice(s, e);
-
-    const synTok = findSyntax(s);
-    const annHl = findAnn(s);
-    const wordSeg = findWord(s);
-
-    const isAnn = annHl?.kind === "ann";
-    const isPending = annHl?.kind === "pending";
-    const isFind = annHl?.kind === "find";
-    const isFindCurrent = annHl?.kind === "find-current";
-    const hovered = isAnn && hoveredAnnId === annHl?.annId;
-
-    const wantsBg =
-      isAnn ||
-      isPending ||
-      isFind ||
-      isFindCurrent ||
-      (wordSeg && wordSeg.changed);
-    const background = isFindCurrent
-      ? "var(--find-current-bg, rgba(249,115,22,0.6))"
-      : isFind
-        ? "var(--find-match-bg, rgba(234,179,8,0.32))"
-        : hovered
-          ? "var(--highlight-bg-hover)"
-          : isAnn
-            ? "var(--highlight-bg)"
-            : isPending
-              ? "var(--selection-bg)"
-              : wordSeg && wordSeg.changed && wordBgVar
-                ? wordBgVar
-                : undefined;
-
-    const classNames: string[] = [];
-    if (synTok?.className) classNames.push(synTok.className);
-    if (synTok?.color) classNames.push("shiki-tok");
-    // Round only the discrete word-diff pills. A range highlight (selection,
-    // annotation, find) spans many syntax-token segments, so rounding each one
-    // scallops the highlight into separate boxes with gaps — it must read as a
-    // single continuous bar (square edges, like a native text selection).
-    const isRangeHl = isAnn || isPending || isFind || isFindCurrent;
-    if (wantsBg && !isRangeHl) classNames.push("rounded-sm");
-    if (isAnn)
-      classNames.push(
-        "cursor-pointer",
-        "border-b-[1.5px]",
-        "border-[var(--text-tertiary)]",
-      );
-
-    const style: React.CSSProperties & Record<string, string | undefined> = {};
-    if (background) style.background = background;
-    if (isFindCurrent)
-      style.outline = "1px solid var(--find-current-border, #f59e0b)";
-    if (synTok?.color) style["--shiki-color"] = synTok.color;
-    if (synTok?.italic) style.fontStyle = "italic";
-    if (synTok?.bold) style.fontWeight = "600";
-
-    const annId = isAnn ? annHl?.annId : undefined;
-
-    parts.push(
-      <span
-        key={`p${s}`}
-        className={classNames.join(" ") || undefined}
-        style={Object.keys(style).length > 0 ? style : undefined}
-        onClick={
-          isAnn && annId
-            ? (event) => {
-                event.stopPropagation();
-                onClickAnn(
-                  annId,
-                  (event.currentTarget as HTMLElement).getBoundingClientRect(),
-                );
-              }
-            : undefined
-        }
-        onMouseEnter={isAnn && annId ? () => onHoverAnn(annId) : undefined}
-        onMouseLeave={isAnn ? () => onHoverAnn(null) : undefined}
-      >
-        {slice}
-      </span>,
-    );
-  }
-  return <>{parts}</>;
-}, lineContentEqual);
 
 export function InteractiveDiff({
   oldText,
@@ -627,20 +297,6 @@ export function InteractiveDiff({
   );
   // Start lines (DiffLine.idx) of the regions the user has collapsed.
   const [collapsedFolds, setCollapsedFolds] = useState<Set<number>>(new Set());
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
-
-  // Dismiss the settings popover on any click outside it (incl. the trigger).
-  useEffect(() => {
-    if (!settingsOpen) return;
-    function onPointerDown(e: PointerEvent) {
-      if (!settingsRef.current?.contains(e.target as Node)) {
-        setSettingsOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [settingsOpen]);
 
   const interactive = !!onAddAnnotation;
   const effectiveViewMode = isFirstVersion ? "unified" : settings.viewMode;
@@ -1451,68 +1107,14 @@ export function InteractiveDiff({
     return () => window.removeEventListener("mouseup", release);
   }, []);
 
-  /* ── Caret / read-only editing host ─────────────────────────
-   * Each side is a `contentEditable` region so it gets a real blinking caret on
-   * click and native caret navigation (arrows / shift+arrows to extend a
-   * selection), and so ⌘A is scoped by the browser to just that side's text —
-   * the centre gutter (stage/revert/unstage controls) and the other column live
-   * outside the focused host, so they're never swept into the selection.
-   *
-   * It must stay strictly read-only: cancel every mutation at the source via the
-   * native `beforeinput` event (covers typing, Enter, Backspace/Delete, format
-   * shortcuts, IME commits and paste-insertion alike), plus paste/cut/drop. We
-   * listen natively (not via React's onBeforeInput) because only the native
-   * InputEvent is cancelable across the cases above. */
-  useEffect(() => {
-    const block = (e: Event) => e.preventDefault();
-    const hosts = [
-      leftColRef.current,
-      rightColRef.current,
-      unifiedRef.current,
-    ].filter((el): el is HTMLDivElement => el !== null);
-    for (const el of hosts) {
-      el.addEventListener("beforeinput", block);
-      el.addEventListener("paste", block);
-      el.addEventListener("cut", block);
-      el.addEventListener("drop", block);
-    }
-    return () => {
-      for (const el of hosts) {
-        el.removeEventListener("beforeinput", block);
-        el.removeEventListener("paste", block);
-        el.removeEventListener("cut", block);
-        el.removeEventListener("drop", block);
-      }
-    };
-    // Re-attach when the columns remount (view-mode switch swaps which refs exist).
-  }, [effectiveViewMode]);
-
-  // Attributes that turn a region into a read-only caret host (see the effect
-  // above for how edits are blocked). `caret-color` makes the caret visible
-  // against the diff background; the outline is suppressed in favour of the
-  // subtle focus ring on the surrounding column wrapper.
-  // `beforeinput` can't cancel `insertCompositionText`, so an IME attempt on a
-  // read-only host could mutate the DOM out from under React. That never makes
-  // sense here (the diff isn't typeable), so abort composition the instant it
-  // starts by dropping focus — nothing is ever committed.
-  const abortComposition = useCallback((e: React.CompositionEvent) => {
-    (e.target as HTMLElement).blur();
-  }, []);
-  const editableHostProps = {
-    contentEditable: true,
-    suppressContentEditableWarning: true,
-    spellCheck: false,
-    role: "textbox" as const,
-    "aria-readonly": true,
-    "aria-multiline": true,
-    onCompositionStart: abortComposition,
-    // The contentEditable host is itself the horizontal scroller (like the
-    // unified view's) so native selection auto-scrolls it when you drag past the
-    // right edge — with the scroller on the wrapper instead, selection couldn't
-    // reach text wider than the screen.
-    className:
-      "overflow-x-auto outline-none [caret-color:var(--text)] [container-type:inline-size]",
-  };
+  // Read-only caret hosts: each side is a contentEditable region (real caret,
+  // native caret navigation, browser-scoped ⌘A) with every mutation blocked at
+  // the source — see useReadonlyCaretHost. Re-attaches when a view-mode switch
+  // swaps which refs exist.
+  const editableHostProps = useReadonlyCaretHost(
+    [leftColRef, rightColRef, unifiedRef],
+    effectiveViewMode,
+  );
 
   /* ── Selection ──────────────────────────────────────────── */
 
@@ -1805,192 +1407,6 @@ export function InteractiveDiff({
     );
   }
 
-  /* ── Settings controls ──────────────────────────────────── */
-
-  // Each control is its own element so the bar (web) and the popover (desktop)
-  // can lay out the *same* widgets differently without duplicating their logic.
-
-  function renderViewModeToggle() {
-    if (isFirstVersion || !onSettingsChange) return null;
-    return (
-      <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
-        {(["split", "unified"] as const).map((mode) => (
-          <button
-            key={mode}
-            onClick={() => onSettingsChange({ viewMode: mode })}
-            className={`px-2.5 py-1 transition-colors ${mode === "split" ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
-              settings.viewMode === mode
-                ? "bg-[var(--accent)] text-[var(--bg)]"
-                : "text-[var(--text-tertiary)]"
-            }`}
-          >
-            {mode === "split" ? "Split" : "Unified"}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  function renderFontSizeSelect() {
-    if (!onSettingsChange) return null;
-    return (
-      <select
-        value={settings.fontSize}
-        onChange={(e) =>
-          onSettingsChange({
-            fontSize: Number(e.target.value) as DiffSettings["fontSize"],
-          })
-        }
-        className="cursor-pointer appearance-none rounded-md border border-[var(--border)] bg-transparent px-2 py-1 pr-5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E")`,
-          backgroundRepeat: "no-repeat",
-          backgroundPosition: "right 4px center",
-        }}
-      >
-        {FONT_SIZE_OPTIONS.map((size) => (
-          <option key={size} value={size}>
-            {size}px
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  function renderHideUnchangedToggle() {
-    if (!onSettingsChange) return null;
-    return (
-      <div className="inline-flex rounded-md border border-[var(--border)] font-[family-name:var(--font-mono)] text-[11px]">
-        {([true, false] as const).map((hide) => {
-          // When the user has manually expanded "N unchanged lines" sections
-          // we're in a mixed state — neither toggle reflects reality.
-          const isCustomized = expandedSeparators.size > 0;
-          const isActive = !isCustomized && settings.hideUnchanged === hide;
-          return (
-            <button
-              key={String(hide)}
-              onClick={() => {
-                if (hide && settings.hideUnchanged && isCustomized) {
-                  // Already in changes-only mode but with expansions —
-                  // collapse them back without re-firing hideUnchanged.
-                  setExpandedSeparators(new Set());
-                  return;
-                }
-                onSettingsChange({ hideUnchanged: hide });
-              }}
-              className={`px-2.5 py-1 transition-colors ${hide ? "rounded-l-md" : "rounded-r-md border-l border-[var(--border)]"} ${
-                isActive
-                  ? "bg-[var(--accent)] text-[var(--bg)]"
-                  : "text-[var(--text-tertiary)]"
-              }`}
-            >
-              {hide ? "Changes only" : "All lines"}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
-  function renderLineWrapButton() {
-    if (!onSettingsChange) return null;
-    return (
-      <button
-        onClick={() => onSettingsChange({ lineWrap: !settings.lineWrap })}
-        className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
-          settings.lineWrap
-            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-            : "border-[var(--border)] text-[var(--text-tertiary)]"
-        }`}
-      >
-        Line wrap
-      </button>
-    );
-  }
-
-  function renderIgnoreWhitespaceButton() {
-    if (!onSettingsChange) return null;
-    return (
-      <button
-        onClick={() =>
-          onSettingsChange({ ignoreWhitespace: !settings.ignoreWhitespace })
-        }
-        className={`rounded-md border px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] transition-colors ${
-          settings.ignoreWhitespace
-            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-            : "border-[var(--border)] text-[var(--text-tertiary)]"
-        }`}
-      >
-        Ignore whitespace
-      </button>
-    );
-  }
-
-  /** Inline row of controls — the web surface. */
-  function renderSettingsBar() {
-    if (!onSettingsChange) return null;
-    return (
-      <div className="mb-2 flex items-center justify-end gap-2">
-        {renderViewModeToggle()}
-        {renderFontSizeSelect()}
-        {renderHideUnchangedToggle()}
-        {renderLineWrapButton()}
-        {renderIgnoreWhitespaceButton()}
-      </div>
-    );
-  }
-
-  /**
-   * Gear button + popover — the desktop surface. Portaled into a header slot
-   * (beside "Format") so its logic stays co-located with the diff state it
-   * reads, while the trigger lives where the user expects it.
-   */
-  function renderSettingsPopover() {
-    if (!onSettingsChange || !settingsPortalTarget) return null;
-    const rows: { label: string; control: ReactNode }[] = [
-      { label: "View", control: renderViewModeToggle() },
-      { label: "Font size", control: renderFontSizeSelect() },
-      { label: "Lines", control: renderHideUnchangedToggle() },
-      { label: "Wrap", control: renderLineWrapButton() },
-      { label: "Whitespace", control: renderIgnoreWhitespaceButton() },
-    ].filter((r) => r.control);
-
-    const menu = (
-      <div ref={settingsRef} className="relative">
-        <button
-          onClick={() => setSettingsOpen((o) => !o)}
-          title="Diff settings"
-          aria-label="Diff settings"
-          aria-expanded={settingsOpen}
-          className={`flex h-8 w-8 items-center justify-center rounded-md border text-[15px] transition-colors ${
-            settingsOpen
-              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-              : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
-          }`}
-        >
-          ⚙
-        </button>
-        {settingsOpen && (
-          <div className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5 shadow-lg">
-            {rows.map(({ label, control }) => (
-              <div
-                key={label}
-                className="flex items-center justify-between gap-4"
-              >
-                <span className="text-[11px] text-[var(--text-tertiary)]">
-                  {label}
-                </span>
-                {control}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-
-    return createPortal(menu, settingsPortalTarget);
-  }
-
   /* ── Separator row ─────────────────────────────────────── */
 
   function renderSeparatorTd(
@@ -2025,17 +1441,7 @@ export function InteractiveDiff({
     const colCount = isFirstVersion ? 3 : 4;
 
     return (
-      <div
-        ref={unifiedRef}
-        contentEditable
-        suppressContentEditableWarning
-        spellCheck={false}
-        role="textbox"
-        aria-readonly
-        aria-multiline
-        onCompositionStart={abortComposition}
-        className="overflow-x-auto outline-none [caret-color:var(--text)] [container-type:inline-size]"
-      >
+      <div ref={unifiedRef} {...editableHostProps}>
         <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
           <tbody>
             {expandedFiltered.map((item, i) => {
@@ -2186,7 +1592,9 @@ export function InteractiveDiff({
         <td
           data-dline={line.idx}
           style={contentCellStyle(vt)}
-          onClick={blame ? () => setBlameSel({ side, idx: line.idx }) : undefined}
+          onClick={
+            blame ? () => setBlameSel({ side, idx: line.idx }) : undefined
+          }
         >
           {foldKey != null && renderFoldToggle(foldKey)}
           <LineContent
@@ -2401,9 +1809,15 @@ export function InteractiveDiff({
           <FindWidget find={find} revealTrigger={findReveal} />
         </div>
       )}
-      {settingsVariant === "popover"
-        ? renderSettingsPopover()
-        : renderSettingsBar()}
+      <DiffSettingsControls
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        isFirstVersion={isFirstVersion}
+        variant={settingsVariant}
+        portalTarget={settingsPortalTarget}
+        separatorsCustomized={expandedSeparators.size > 0}
+        onCollapseSeparators={() => setExpandedSeparators(new Set())}
+      />
 
       <div
         ref={contentRef}

@@ -4,6 +4,7 @@ import { reconstructOldText } from "../../../shared/lib/diff-reconstruct";
 import { parseUnifiedDiff } from "../../../shared/lib/diff-parser";
 import {
   buildSingleHunkPatch,
+  findHunkIndexForRange,
   parseFileDiff,
 } from "../../../shared/lib/git-hunks";
 import {
@@ -240,6 +241,43 @@ describe("buildSingleHunkPatch", () => {
   it("throws on a missing hunk index", () => {
     const parsed = parseFileDiff(TWO_HUNK_BODY);
     expect(() => buildSingleHunkPatch(parsed, 5)).toThrow();
+  });
+});
+
+describe("findHunkIndexForRange", () => {
+  const { hunks } = parseFileDiff(TWO_HUNK_BODY); // @@ -1,3 +1,3 @@ and @@ -10,2 +10,3 @@
+
+  it("matches by new-side overlap (an insertion has no old span)", () => {
+    expect(
+      findHunkIndexForRange(hunks, {
+        oldStart: null,
+        oldEnd: null,
+        newStart: 11,
+        newEnd: 11,
+      }),
+    ).toBe(1);
+  });
+
+  it("matches by old-side overlap (a deletion has no new span)", () => {
+    expect(
+      findHunkIndexForRange(hunks, {
+        oldStart: 2,
+        oldEnd: 2,
+        newStart: null,
+        newEnd: null,
+      }),
+    ).toBe(0);
+  });
+
+  it("returns -1 when nothing overlaps", () => {
+    expect(
+      findHunkIndexForRange(hunks, {
+        oldStart: 100,
+        oldEnd: 120,
+        newStart: 100,
+        newEnd: 120,
+      }),
+    ).toBe(-1);
   });
 });
 

@@ -6,7 +6,6 @@ import { useDiffSettings } from "@plan/shared/lib/settings";
 import {
   InteractiveDiff,
   type DiffBlame,
-  type HunkRange,
 } from "@plan/shared/components/interactive-diff";
 import { blameLineInfo, tagBlame, type TextBlame } from "../lib/blame";
 import { useBlameCard } from "../lib/use-blame-card";
@@ -28,7 +27,9 @@ import {
 } from "@plan/shared/lib/format";
 import {
   buildSingleHunkPatch,
+  findHunkIndexForRange,
   parseFileDiff,
+  type HunkRange,
 } from "@plan/shared/lib/git-hunks";
 
 interface Props {
@@ -101,33 +102,11 @@ function FileDiffViewerImpl({
     { action: "stage" | "unstage" | "discard"; patch: string }[]
   >([]);
 
-  /**
-   * Match an InteractiveDiff change block (given as a line range) to one of
-   * git's own hunks. Both derive from the same diff, so an overlap on either
-   * the old- or new-line span uniquely identifies the hunk.
-   */
-  const findHunkIndex = useCallback(
-    (range: HunkRange): number => {
-      return parsedHunks.hunks.findIndex((h) => {
-        const oldOverlap =
-          range.oldStart != null &&
-          range.oldEnd != null &&
-          h.oldStart <= range.oldEnd &&
-          range.oldStart <= h.oldStart + Math.max(h.oldCount, 1) - 1;
-        const newOverlap =
-          range.newStart != null &&
-          range.newEnd != null &&
-          h.newStart <= range.newEnd &&
-          range.newStart <= h.newStart + Math.max(h.newCount, 1) - 1;
-        return oldOverlap || newOverlap;
-      });
-    },
-    [parsedHunks],
-  );
-
   const applyHunk = useCallback(
     async (range: HunkRange, mode: "stage" | "unstage" | "discard") => {
-      const idx = findHunkIndex(range);
+      // Match the diff UI's change block back to git's own hunk (the real
+      // stageable unit) — see findHunkIndexForRange in shared/lib/git-hunks.
+      const idx = findHunkIndexForRange(parsedHunks.hunks, range);
       if (idx < 0) {
         console.warn("no git hunk matched range", range);
         return;
@@ -156,7 +135,7 @@ function FileDiffViewerImpl({
       setReloadKey((k) => k + 1);
       onChanged();
     },
-    [findHunkIndex, parsedHunks, encoded, subPath, onChanged, confirm],
+    [parsedHunks, encoded, subPath, onChanged, confirm],
   );
 
   // ⌘Z reverses the last per-hunk op:
