@@ -176,6 +176,38 @@ export interface GitOpResult {
   error?: string;
 }
 
+/** One commit's identity as reported by `git blame --porcelain`. */
+export interface BlameCommit {
+  hash: string;
+  author: string;
+  /** Author email without the surrounding <>. */
+  authorMail: string;
+  /** Author time in epoch milliseconds. */
+  authorTime: number;
+  /** Commit subject (first line of the message). */
+  summary: string;
+}
+
+/** All-zero hash git blame assigns to lines not yet committed. */
+export const UNCOMMITTED_BLAME_HASH = "0".repeat(40);
+
+export interface BlameResult {
+  /** Commit hash per file line; index = line number − 1. */
+  lineHashes: string[];
+  commits: Record<string, BlameCommit>;
+  /** The repo's user.email — lets the UI label the user's own commits "You". */
+  userEmail: string | null;
+}
+
+/**
+ * The blame hover card's lazy fetch: just the full commit message — author,
+ * date, and hash are already on the BlameCommit the blame pass returned.
+ */
+export interface CommitDetails {
+  /** Full commit message: subject + body. */
+  message: string;
+}
+
 export interface DiscoveredRepo {
   /** Absolute repo root. */
   path: string;

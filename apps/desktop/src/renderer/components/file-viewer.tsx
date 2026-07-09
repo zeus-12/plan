@@ -47,6 +47,8 @@ import { cn } from "@plan/shared/lib/utils";
 import { FileIcon } from "./file-icon";
 import { ImageLightbox } from "./image-lightbox";
 import { useWorktreeRevision } from "../lib/worktree-revision";
+import { blameLineInfo, tagBlame, type TextBlame } from "../lib/blame";
+import { useBlameCard } from "../lib/use-blame-card";
 
 const LINE_HEIGHT = 20;
 const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
@@ -90,6 +92,7 @@ function makeBoolSetting(key: string, defaultOn: boolean) {
 const stickyScrollSetting = makeBoolSetting("fileViewer.stickyScroll", false);
 const bracketColorSetting = makeBoolSetting("fileViewer.bracketColors", true);
 const lineWrapSetting = makeBoolSetting("fileViewer.lineWrap", false);
+const inlineBlameSetting = makeBoolSetting("fileViewer.inlineBlame", true);
 // Stable empty token array — `perLine[i]` resolving to undefined renders plain.
 const EMPTY_PER_LINE: SyntaxToken[][] = [];
 const POPOVER_VIEWPORT_PAD = 380;
@@ -419,6 +422,22 @@ function FileViewerImpl({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
 
+  // Inline git blame: per-line authorship shown as a muted trailing annotation
+  // on the caret/clicked line, with a hover card for the full commit message.
+  const blameEnabled = inlineBlameSetting.use();
+  const [blame, setBlame] = useState<TextBlame | null>(null);
+  // Active line for the read-only virtualized view (no caret there — a click
+  // picks the line). Editor mode derives the line from the caret instead.
+  const [clickedLine, setClickedLine] = useState<number | null>(null);
+  const {
+    card: blameCard,
+    hasCard: hasBlameCard,
+    chipEnter: blameChipEnter,
+    chipLeave: blameChipLeave,
+    open: blameOpen,
+    close: blameClose,
+  } = useBlameCard(encoded, path);
+
   const isImage = useMemo(() => isImagePath(path), [path]);
   // Bumps when the worktree changes on disk. For text it re-reads; for images
   // it doubles as a cache-buster — Chromium caches a `file://` URL forever, so
@@ -466,6 +485,27 @@ function FileViewerImpl({
       cancelled = true;
     };
   }, [encoded, path, isImage, revision]);
+
+  // Blame the exact text being rendered (`--contents`), tagged with it, so
+  // authorship structurally cannot drift from what's on screen. Worktree
+  // revision bumps flow through `data.text`, so this re-runs only when the
+  // content really changed — not for every unrelated file event. Cleared
+  // first — stale blame must never paint on new text.
+  const blameText =
+    blameEnabled && !buffer && data && !data.binary && !data.truncated
+      ? data.text
+      : null;
+  useEffect(() => {
+    setBlame(null);
+    if (!blameText) return;
+    let cancelled = false;
+    window.electronAPI.blameContents(encoded, path, blameText).then((r) => {
+      if (!cancelled) setBlame(tagBlame(r, blameText));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [encoded, path, blameText]);
 
   const language = buffer
     ? buffer.language
@@ -851,7 +891,9 @@ function FileViewerImpl({
     setSymbolOpen(false);
     setSymbols([]);
     setSymbolQuery("");
-  }, [encoded, path]);
+    setClickedLine(null);
+    blameClose();
+  }, [encoded, path, blameClose]);
 
   const caretPopoverPos = useCallback(
     (offset: number) => {
@@ -920,6 +962,68 @@ function FileViewerImpl({
     setEditorSel({ start, end });
     return { start, end };
   }, []);
+
+  /* ── Inline blame (trailing annotation + hover card) ──────────── */
+
+  // A blame is trusted only while its tag IS the rendered text (reference
+  // equality in the steady state) — an in-flight fetch racing a disk change
+  // fails the check by construction and renders nothing.
+  const usableBlame = blame && blame.forText === text ? blame : null;
+
+  // The annotated line: caret line in editor mode, last clicked line otherwise.
+  const activeBlameLine = editorMode
+    ? editorSel
+      ? lineOfOffset(Math.max(editorSel.start, editorSel.end))
+      : null
+    : clickedLine;
+
+  const blameChip = useMemo(() => {
+    if (!usableBlame || activeBlameLine == null) return null;
+    const info = blameLineInfo(usableBlame, activeBlameLine);
+    if (!info) return null;
+    const pos = posOfLine[activeBlameLine];
+    if (pos < 0) return null; // folded away
+    return { line: activeBlameLine, top: pos * LINE_HEIGHT, ...info };
+  }, [usableBlame, activeBlameLine, posOfLine]);
+
+  // Editor mode only: the caret textarea covers the rows, so the annotation
+  // must be an absolutely-positioned sibling ABOVE it to stay hoverable. Its
+  // x is measured from the row's content span (exact even for tabs and wide
+  // glyphs); if the row is virtualized out of the DOM the chip would be
+  // off-screen anyway, so it just hides. The read-only view has no overlay,
+  // so there the chip renders inline in the row instead (which also handles
+  // wrapped, variable-height rows).
+  const [blameChipLeft, setBlameChipLeft] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el =
+      blameChip && editorMode
+        ? parentRef.current?.querySelector<HTMLElement>(
+            `[data-line-index="${blameChip.line}"] [data-line-content]`,
+          )
+        : null;
+    // The span's width already includes its pl-3 and pr-6 (a built-in gap).
+    setBlameChipLeft(
+      el ? gutterWidthPx + el.getBoundingClientRect().width : null,
+    );
+  }, [blameChip, editorMode, gutterWidthPx]);
+
+  // The card is fixed-position — close it when the code under it scrolls away
+  // or the annotation moves to another line/commit.
+  useEffect(() => {
+    if (!hasBlameCard) return;
+    const el = parentRef.current;
+    el?.addEventListener("scroll", blameClose);
+    window.addEventListener("resize", blameClose);
+    return () => {
+      el?.removeEventListener("scroll", blameClose);
+      window.removeEventListener("resize", blameClose);
+    };
+  }, [hasBlameCard, blameClose]);
+  const chipLine = blameChip?.line;
+  const chipHash = blameChip?.commit?.hash;
+  useEffect(() => {
+    blameClose();
+  }, [chipLine, chipHash, blameClose]);
 
   /* ── DOM selection (virtualized read-only fallback) ───────────── */
 
@@ -1810,7 +1914,17 @@ function FileViewerImpl({
                       on: bracketEnabled,
                       set: bracketColorSetting.set,
                     },
-                  ] as const
+                    // A scratch buffer has no git history to annotate.
+                    ...(buffer
+                      ? []
+                      : [
+                          {
+                            label: "Inline blame",
+                            on: blameEnabled,
+                            set: inlineBlameSetting.set,
+                          },
+                        ]),
+                  ] as { label: string; on: boolean; set: (on: boolean) => void }[]
                 ).map(({ label, on, set }) => (
                   <div
                     key={label}
@@ -1904,6 +2018,11 @@ function FileViewerImpl({
                       height: lineWrapEnabled ? undefined : LINE_HEIGHT,
                       transform: `translateY(${vi.start}px)`,
                     }}
+                    // No caret in the read-only fallback — a click marks the
+                    // line as active for the inline blame annotation instead.
+                    onClick={
+                      editorMode ? undefined : () => setClickedLine(lineIdx)
+                    }
                   >
                     {gutterCell(lineIdx)}
                     <span
@@ -1949,6 +2068,37 @@ function FileViewerImpl({
                         >
                           ⋯
                         </span>
+                      )}
+                      {/* Read-only view: no textarea covers the rows, so the
+                          blame annotation anchors at the end of the text.
+                          `absolute` with auto offsets = the browser's static
+                          position (exactly where the text ends, even mid-wrap)
+                          while taking ZERO layout space — in-flow versions
+                          reflowed the code (a flex sibling squeezed it to a
+                          1-char column; an inline span forced earlier wraps).
+                          It must not add a text node either — the label lives
+                          in the .blame-chip ::after pseudo, so selection
+                          offsets and copying are untouched. (Editor mode uses
+                          the overlay below.) */}
+                      {!editorMode && blameChip?.line === lineIdx && (
+                        <span
+                          data-blame-label={blameChip.label}
+                          className="blame-chip"
+                          onMouseEnter={(e) =>
+                            blameChipEnter(
+                              e.currentTarget.getBoundingClientRect(),
+                              blameChip,
+                            )
+                          }
+                          onMouseLeave={blameChipLeave}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            blameOpen(
+                              e.currentTarget.getBoundingClientRect(),
+                              blameChip,
+                            );
+                          }}
+                        />
                       )}
                     </span>
                   </div>
@@ -2052,6 +2202,35 @@ function FileViewerImpl({
                   }}
                 />
               )}
+              {/* Inline blame, editor mode: muted authorship after the caret
+                  line's text. Rendered AFTER the textarea so it paints (and
+                  hovers) above the caret overlay; the layer's mono font/size
+                  is inherited, so it sits pixel-aligned with the code row. */}
+              {editorMode && blameChip && blameChipLeft != null && (
+                <div
+                  className="absolute z-10 flex select-none items-center whitespace-pre text-[var(--text-tertiary)] opacity-60 transition-opacity hover:opacity-100"
+                  style={{
+                    top: blameChip.top,
+                    left: blameChipLeft,
+                    height: LINE_HEIGHT,
+                  }}
+                  onMouseEnter={(e) =>
+                    blameChipEnter(
+                      e.currentTarget.getBoundingClientRect(),
+                      blameChip,
+                    )
+                  }
+                  onMouseLeave={blameChipLeave}
+                  onClick={(e) =>
+                    blameOpen(
+                      e.currentTarget.getBoundingClientRect(),
+                      blameChip,
+                    )
+                  }
+                >
+                  {blameChip.label}
+                </div>
+              )}
             </div>
           </div>
           {/* Sticky scroll: enclosing scope headers pinned at the top, each a
@@ -2119,6 +2298,7 @@ function FileViewerImpl({
           onClose={() => setEditing(null)}
         />
       )}
+      {blameCard}
       {lightbox && imageUrl && (
         <ImageLightbox src={imageUrl} onClose={() => setLightbox(false)} />
       )}

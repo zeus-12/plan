@@ -9,6 +9,8 @@ import type {
   FileImageDiff,
   GitStatusResult,
   GitOpResult,
+  BlameResult,
+  CommitDetails,
   DiscoveredRepo,
   SearchOptions,
   SearchResult,
@@ -133,6 +135,22 @@ interface ElectronAPI {
   discardAll: (encoded: string, subPath?: string) => Promise<GitOpResult>;
   stashAll: (encoded: string, subPath?: string) => Promise<GitOpResult>;
   push: (encoded: string, subPath?: string) => Promise<GitOpResult>;
+  /**
+   * Per-line authorship for `contents`, blamed as the file's working-tree
+   * version — callers pass exactly the text they render, so the result can
+   * never drift from what's on screen. Null: untracked / no repo.
+   */
+  blameContents: (
+    encoded: string,
+    relPath: string,
+    contents: string,
+  ) => Promise<BlameResult | null>;
+  /** Full message for one commit (for the blame hover card). */
+  commitDetails: (
+    encoded: string,
+    relPath: string,
+    hash: string,
+  ) => Promise<CommitDetails | null>;
 
   terminalOpen: (
     id: string,

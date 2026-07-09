@@ -16,7 +16,7 @@ interface GitResult {
 }
 
 /** Run git with the given args in cwd. Never throws — non-zero exit is captured. */
-async function run(
+export async function run(
   cwd: string,
   args: string[],
   stdin?: string,
@@ -26,6 +26,7 @@ async function run(
       maxBuffer: MAX_BUFFER,
     });
     if (stdin) {
+      proc.stdin?.on("error", () => {}); // EPIPE when git exits early
       proc.stdin?.write(stdin);
       proc.stdin?.end();
     }

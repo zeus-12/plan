@@ -135,6 +135,30 @@ interface Props {
    * settingsVariant is "popover".
    */
   settingsPortalTarget?: HTMLElement | null;
+  /**
+   * Opt-in inline git blame. Clicking a row shows a muted trailing annotation
+   * (`labelFor`'s text) after that row's code; hovering/clicking the
+   * annotation reports back so the caller can raise a commit-details card.
+   * Line numbers are 1-based within the given side's source text. The label
+   * text is rendered via a CSS pseudo-element, so selecting/copying diff text
+   * never captures it.
+   */
+  blame?: DiffBlame;
+}
+
+export interface DiffBlame {
+  labelFor: (side: "left" | "right", lineNum: number) => string | null;
+  onChipEnter: (
+    side: "left" | "right",
+    lineNum: number,
+    rect: DOMRect,
+  ) => void;
+  onChipLeave: () => void;
+  onChipClick: (
+    side: "left" | "right",
+    lineNum: number,
+    rect: DOMRect,
+  ) => void;
 }
 
 export interface HunkRange {
@@ -583,6 +607,7 @@ export function InteractiveDiff({
   findEnabled = true,
   settingsVariant = "bar",
   settingsPortalTarget,
+  blame,
 }: Props) {
   const mergeEnabled = !!onMergeChange;
   const hunkActionsEnabled = !!hunkActions;
@@ -623,6 +648,42 @@ export function InteractiveDiff({
   useEffect(() => {
     setExpandedSeparators(new Set());
   }, [oldText, newText, settings.hideUnchanged]);
+
+  // The row whose inline blame annotation is showing (set by clicking a row).
+  // Keyed by DiffLine.idx + side; cleared whenever the underlying text changes
+  // so a stale annotation can never describe new content.
+  const [blameSel, setBlameSel] = useState<{
+    side: "left" | "right";
+    idx: number;
+  } | null>(null);
+  useEffect(() => {
+    setBlameSel(null);
+  }, [oldText, newText]);
+
+  /** The clicked row's trailing blame annotation, or null. */
+  function renderBlameChip(side: "left" | "right", line: DiffLine) {
+    if (!blame || !blameSel) return null;
+    if (blameSel.side !== side || blameSel.idx !== line.idx) return null;
+    const num = side === "left" ? line.oldNum : line.newNum;
+    if (num == null) return null;
+    const label = blame.labelFor(side, num);
+    if (!label) return null;
+    return (
+      <span
+        contentEditable={false}
+        data-blame-label={label}
+        className="blame-chip"
+        onMouseEnter={(e) =>
+          blame.onChipEnter(side, num, e.currentTarget.getBoundingClientRect())
+        }
+        onMouseLeave={() => blame.onChipLeave()}
+        onClick={(e) => {
+          e.stopPropagation();
+          blame.onChipClick(side, num, e.currentTarget.getBoundingClientRect());
+        }}
+      />
+    );
+  }
 
   /* ── Diff computation ───────────────────────────────────── */
 
@@ -2016,7 +2077,21 @@ export function InteractiveDiff({
                         borderRight: "1px solid var(--border)",
                       }}
                     />
-                    <td data-dline={item.idx} style={contentCellStyle(vt)}>
+                    <td
+                      data-dline={item.idx}
+                      style={contentCellStyle(vt)}
+                      // Unified rows: removed lines only exist in the old
+                      // text, everything else is annotated via the new text.
+                      onClick={
+                        blame
+                          ? () =>
+                              setBlameSel({
+                                side: item.type === "remove" ? "left" : "right",
+                                idx: item.idx,
+                              })
+                          : undefined
+                      }
+                    >
                       {fold && renderFoldToggle(fold.key)}
                       <LineContent
                         text={item.content}
@@ -2033,6 +2108,10 @@ export function InteractiveDiff({
                         onHoverAnn={handleHoverAnn}
                       />
                       {fold && renderFoldEllipsis(fold.key)}
+                      {renderBlameChip(
+                        item.type === "remove" ? "left" : "right",
+                        item,
+                      )}
                     </td>
                   </tr>
                   {lineAnns?.map(({ annotation: ann, index }) => (
@@ -2104,7 +2183,11 @@ export function InteractiveDiff({
           }}
         />
         <td contentEditable={false} style={barCellStyle(vt)} />
-        <td data-dline={line.idx} style={contentCellStyle(vt)}>
+        <td
+          data-dline={line.idx}
+          style={contentCellStyle(vt)}
+          onClick={blame ? () => setBlameSel({ side, idx: line.idx }) : undefined}
+        >
           {foldKey != null && renderFoldToggle(foldKey)}
           <LineContent
             text={line.content}
@@ -2121,6 +2204,7 @@ export function InteractiveDiff({
             onHoverAnn={handleHoverAnn}
           />
           {foldKey != null && renderFoldEllipsis(foldKey)}
+          {renderBlameChip(side, line)}
         </td>
       </tr>
     );

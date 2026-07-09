@@ -95,6 +95,7 @@ import {
   unstageAll,
   unstageFile,
 } from "./git";
+import { blameContents, getCommitDetails } from "./git-blame";
 import {
   createWorktree,
   removeWorktree,
@@ -685,6 +686,16 @@ function registerIpc() {
     "git:commit",
     async (_e, encoded: string, message: string, subPath: string = "") =>
       gitCommit(encoded, message, subPath),
+  );
+  ipcMain.handle(
+    "git:blameContents",
+    async (_e, encoded: string, path: string, contents: string) =>
+      blameContents(encoded, path, contents),
+  );
+  ipcMain.handle(
+    "git:commitDetails",
+    async (_e, encoded: string, path: string, hash: string) =>
+      getCommitDetails(encoded, path, hash),
   );
   ipcMain.handle(
     "git:applyPatch",

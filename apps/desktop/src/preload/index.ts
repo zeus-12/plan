@@ -134,6 +134,10 @@ const electronAPI = {
     ipcRenderer.invoke("git:stashAll", encoded, subPath),
   push: (encoded: string, subPath: string = "") =>
     ipcRenderer.invoke("git:push", encoded, subPath),
+  blameContents: (encoded: string, relPath: string, contents: string) =>
+    ipcRenderer.invoke("git:blameContents", encoded, relPath, contents),
+  commitDetails: (encoded: string, relPath: string, hash: string) =>
+    ipcRenderer.invoke("git:commitDetails", encoded, relPath, hash),
 
   // Terminal (keyed by terminal id; cwd resolved from encoded in main)
   terminalOpen: (

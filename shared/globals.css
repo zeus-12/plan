@@ -40,6 +40,31 @@ body {
 }
 
 /*
+ * Inline git blame annotations use the same trick, for the same reason: the
+ * label lives in generated content so selecting/copying code can never
+ * capture "You, 2 days ago • …" alongside it. The chip is absolutely
+ * positioned with auto offsets — the browser resolves that to the "static
+ * position" (exactly where the line's text ends, even mid-wrap) while taking
+ * zero layout space, so showing it can never reflow the code.
+ */
+.blame-chip {
+  position: absolute;
+  padding-left: 1.5rem;
+  color: var(--text-tertiary);
+  opacity: 0.6;
+  transition: opacity 150ms;
+  cursor: default;
+  user-select: none;
+}
+.blame-chip:hover {
+  opacity: 1;
+}
+.blame-chip::after {
+  content: attr(data-blame-label);
+  white-space: pre;
+}
+
+/*
  * Chat annotation / find highlights use the CSS Custom Highlight API, whose
  * `::highlight()` pseudo-element only the desktop renderer registers. Its rules
  * are injected at runtime there (see message-list.tsx) rather than living here,
