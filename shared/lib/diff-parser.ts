@@ -1,3 +1,5 @@
+import { parseFileDiff } from "./git-hunks";
+
 export type FileStatus = "added" | "deleted" | "renamed" | "modified";
 
 export interface FileDiff {
@@ -50,8 +52,6 @@ function parseSingleFile(lines: string[]): FileDiff | null {
   let newPath: string | null = null;
   let status: FileStatus = "modified";
   let binary = false;
-  let additions = 0;
-  let deletions = 0;
 
   const first = lines[0];
   const m = first.match(/^diff --git a\/(.+) b\/(.+)$/);
@@ -81,10 +81,6 @@ function parseSingleFile(lines: string[]): FileDiff | null {
       newPath = newPath ?? line.slice(6);
     } else if (line.startsWith("Binary files ") && line.includes("differ")) {
       binary = true;
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      additions++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      deletions++;
     }
   }
 
@@ -93,12 +89,19 @@ function parseSingleFile(lines: string[]): FileDiff | null {
       ? (oldPath ?? newPath ?? "?")
       : (newPath ?? oldPath ?? "?");
 
+  const body = lines.join("\n");
+  // One counter for the whole codebase: the per-hunk parse (git-hunks) already
+  // classifies every +/- line, so the per-file totals are just the hunk sums.
+  const { hunks } = parseFileDiff(body);
+  const additions = hunks.reduce((n, h) => n + h.additions, 0);
+  const deletions = hunks.reduce((n, h) => n + h.deletions, 0);
+
   return {
     path,
     oldPath,
     newPath,
     status,
-    body: lines.join("\n"),
+    body,
     additions,
     deletions,
     binary,
