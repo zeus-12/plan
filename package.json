@@ -8,10 +8,11 @@
     "build:web": "pnpm --filter @plan/web build",
     "build:desktop": "pnpm --filter @plan/desktop build",
     "typecheck": "npm --prefix apps/web run typecheck && npm --prefix apps/desktop run typecheck",
-    "lint": "pnpm -r --if-present run lint",
-    "format": "pnpm -r --if-present run format",
-    "format:check": "pnpm -r --if-present run format:check",
-    "release": "bash scripts/release.sh"
+    "lint": "npm --prefix apps/web run lint",
+    "format": "npm --prefix apps/web run format && npm --prefix apps/desktop run format && npm --prefix shared run format",
+    "format:check": "npm --prefix apps/web run format:check && npm --prefix apps/desktop run format:check && npm --prefix shared run format:check",
+    "release": "bash scripts/release.sh",
+    "test": "npm --prefix apps/desktop run test"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
