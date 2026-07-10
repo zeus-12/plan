@@ -13,6 +13,17 @@ import { cn } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { useTextFind } from "@plan/shared/lib/use-text-find";
+import {
+  ancestorWithAttr,
+  collectTextSegments,
+  lastLineRect,
+  offsetWithin,
+  rangeForOffsets,
+  rangeFromSegments,
+  selectedOffsetsWithin,
+  textOf,
+  type TextSegment,
+} from "@plan/shared/lib/dom-text";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
@@ -151,8 +162,6 @@ interface EditingAnn {
   annotation: ChatAnnotation;
   pos: { top: number; left: number };
 }
-
-const POPOVER_VIEWPORT_PAD = 380;
 
 function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n) + "…" : s;
@@ -593,135 +602,20 @@ function getFindHighlights(): { match: Highlight; current: Highlight } | null {
   return { match: findHighlight, current: findCurrentHighlight! };
 }
 
-interface FindSeg {
-  node: Text;
-  start: number;
-}
-
 /**
- * Walk `root` collecting searchable text + the text-node segments it came from,
- * skipping any subtree marked `data-find-skip` (tool-call args/output — bulky and
- * not worth searching; the tool name in the header stays searchable). The
- * returned `segs` let a match offset map back to a DOM Range without re-walking.
+ * The chat surface's *annotatable* text space — the visible prose and
+ * tool-summary lines. Subtrees marked `data-anno-skip` (collapsible raw bodies,
+ * plan-card chrome, the in-card diff) contribute no characters, so this one
+ * offset space is shared by selection capture, highlight painting, and click
+ * hit-testing, and a comment never swallows a collapsed block's hidden dump.
+ * The find (⌘F) space uses `data-find-skip` instead (tool-call args/output —
+ * bulky and not worth searching; the tool name in the header stays searchable).
  */
-function collectFindable(root: HTMLElement): { text: string; segs: FindSeg[] } {
-  const segs: FindSeg[] = [];
-  let text = "";
-  const walk = (el: Node) => {
-    for (let n = el.firstChild; n; n = n.nextSibling) {
-      if (n.nodeType === Node.TEXT_NODE) {
-        segs.push({ node: n as Text, start: text.length });
-        text += (n as Text).data;
-      } else if (n.nodeType === Node.ELEMENT_NODE) {
-        if ((n as Element).hasAttribute("data-find-skip")) continue;
-        walk(n);
-      }
-    }
-  };
-  walk(root);
-  return { text, segs };
-}
+const ANNO_SKIP = "data-anno-skip";
+const FIND_SKIP = "data-find-skip";
 
-/** Build a DOM Range for [start, end) over collected segments. */
-function rangeFromSegs(
-  segs: FindSeg[],
-  start: number,
-  end: number,
-): Range | null {
-  if (segs.length === 0 || end <= start) return null;
-  const seg = (off: number) => {
-    let lo = 0;
-    let hi = segs.length - 1;
-    let ans = 0;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (segs[mid].start <= off) {
-        ans = mid;
-        lo = mid + 1;
-      } else hi = mid - 1;
-    }
-    return segs[ans];
-  };
-  const a = seg(start);
-  const b = seg(end - 1);
-  const r = document.createRange();
-  try {
-    r.setStart(a.node, Math.min(start - a.start, a.node.data.length));
-    r.setEnd(b.node, Math.min(end - b.start, b.node.data.length));
-  } catch {
-    return null;
-  }
-  return r;
-}
-
-/**
- * Text-node walker over a part's *annotatable* text — the visible prose and
- * tool-summary lines — skipping any `[data-anno-skip]` subtree (collapsible raw
- * bodies, plan-card chrome, the in-card diff). This one character-offset space
- * is shared by selection capture, highlight painting, and click hit-testing, so
- * a comment never swallows a collapsed block's hidden dump.
- */
-function annoTextWalker(root: HTMLElement): TreeWalker {
-  return document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      for (
-        let el = node.parentElement;
-        el && el !== root;
-        el = el.parentElement
-      ) {
-        if (el.hasAttribute("data-anno-skip")) return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-}
-
-/** The concatenated annotatable text of `root` (see {@link annoTextWalker}). */
-function annoText(root: HTMLElement): string {
-  const walker = annoTextWalker(root);
-  let s = "";
-  for (let n = walker.nextNode(); n; n = walker.nextNode())
-    s += n.textContent ?? "";
-  return s;
-}
-
-/** Build a DOM Range for [start, end) character offsets into `root`'s text. */
-function rangeForOffsets(
-  root: HTMLElement,
-  start: number,
-  end: number,
-): Range | null {
-  const walker = annoTextWalker(root);
-  let acc = 0;
-  let startNode: Node | null = null;
-  let startNodeOff = 0;
-  let endNode: Node | null = null;
-  let endNodeOff = 0;
-  let n = walker.nextNode();
-  while (n) {
-    const len = n.textContent?.length ?? 0;
-    if (startNode === null && acc + len > start) {
-      startNode = n;
-      startNodeOff = start - acc;
-    }
-    if (acc + len >= end) {
-      endNode = n;
-      endNodeOff = end - acc;
-      break;
-    }
-    acc += len;
-    n = walker.nextNode();
-  }
-  if (!startNode || !endNode) return null;
-  const range = document.createRange();
-  try {
-    range.setStart(startNode, startNodeOff);
-    range.setEnd(endNode, endNodeOff);
-  } catch {
-    return null;
-  }
-  return range;
-}
+/** The concatenated annotatable text of `root`. */
+const annoText = (root: HTMLElement): string => textOf(root, ANNO_SKIP);
 
 /** DOM Range for the covered region of a part. An open-ended cover (`end: null`)
  *  extends to the current end of the part's annotatable text — recomputed each
@@ -729,7 +623,7 @@ function rangeForOffsets(
 function rangeForCover(root: HTMLElement, cover: PartCover): Range | null {
   const end = cover.end ?? annoText(root).length;
   if (end <= cover.start) return null;
-  return rangeForOffsets(root, cover.start, end);
+  return rangeForOffsets(root, cover.start, end, ANNO_SKIP);
 }
 
 /**
@@ -1302,7 +1196,12 @@ const PartView = memo(
         if (!root) return;
         const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
         if (!caret) return;
-        const off = offsetWithin(root, caret.startContainer, caret.startOffset);
+        const off = offsetWithin(
+          root,
+          caret.startContainer,
+          caret.startOffset,
+          ANNO_SKIP,
+        );
         if (off === -1) return;
         const hit = partAnns.find((pa) => {
           const end = pa.cover.end ?? annoText(root).length;
@@ -1667,10 +1566,12 @@ export const MessageList = memo(function MessageList({
 
     // Offset of each endpoint within its part. The range's boundaries lie in the
     // document-first and document-last parts respectively.
-    const firstOffs = selectedOffsetsWithin(firstEl, range);
+    const firstOffs = selectedOffsetsWithin(firstEl, range, ANNO_SKIP);
     if (!firstOffs) return null;
     const lastOffs =
-      firstEl === lastEl ? firstOffs : selectedOffsetsWithin(lastEl, range);
+      firstEl === lastEl
+        ? firstOffs
+        : selectedOffsetsWithin(lastEl, range, ANNO_SKIP);
 
     const start: ChatSpan = {
       messageUuid: msgUuidOf(firstEl),
@@ -1714,18 +1615,12 @@ export const MessageList = memo(function MessageList({
     // Anchor the popover to the LAST visible line of the selection, not the raw
     // bounding box: a tall multi-line range's box picks up a zero-size rect at
     // its end boundary that can sit far below the last line, dropping the popover
-    // way down. Clamp into the viewport so it's always reachable.
+    // way down. CommentPopover clamps itself into the viewport.
     const anchor = lastLineRect(range);
     return {
       data: { start, end },
       selectedText,
-      position: {
-        top: Math.max(8, Math.min(anchor.bottom + 8, window.innerHeight - 260)),
-        left: Math.max(
-          8,
-          Math.min(anchor.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
-        ),
-      },
+      position: { top: anchor.bottom + 8, left: anchor.left },
     };
   }, []);
 
@@ -1759,13 +1654,7 @@ export const MessageList = memo(function MessageList({
     (ann: ChatAnnotation, rect: DOMRect) =>
       setEditing({
         annotation: ann,
-        pos: {
-          top: rect.bottom + 8,
-          left: Math.max(
-            8,
-            Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
-          ),
-        },
+        pos: { top: rect.bottom + 8, left: rect.left },
       }),
     [],
   );
@@ -1780,7 +1669,7 @@ export const MessageList = memo(function MessageList({
   const [findReveal, setFindReveal] = useState(0);
   // Text-node segments captured alongside `findDomText`, so a match offset maps
   // back to a DOM Range (and tool-call args excluded via `data-find-skip`).
-  const findSegsRef = useRef<FindSeg[]>([]);
+  const findSegsRef = useRef<TextSegment[]>([]);
 
   // (Re)snapshot the transcript text whenever find is open and the content
   // settles, so offsets line up with what's currently on screen. The snapshot
@@ -1799,7 +1688,7 @@ export const MessageList = memo(function MessageList({
     const id = setTimeout(() => {
       const el = parentRef.current;
       if (!el) return;
-      const { text, segs } = collectFindable(el);
+      const { text, segs } = collectTextSegments(el, FIND_SKIP);
       findSegsRef.current = segs;
       setFindDomText(text);
     }, 120);
@@ -1814,7 +1703,7 @@ export const MessageList = memo(function MessageList({
     hl.current.clear();
     if (!find.open) return;
     find.matches.forEach((m, i) => {
-      const r = rangeFromSegs(findSegsRef.current, m.start, m.end);
+      const r = rangeFromSegments(findSegsRef.current, m.start, m.end);
       if (r) (i === find.current ? hl.current : hl.match).add(r);
     });
   }, [find.open, find.matches, find.current, findDomText]);
@@ -1825,7 +1714,7 @@ export const MessageList = memo(function MessageList({
     const root = parentRef.current;
     const m = find.matches[find.current];
     if (!root || !m) return;
-    const r = rangeFromSegs(findSegsRef.current, m.start, m.end);
+    const r = rangeFromSegments(findSegsRef.current, m.start, m.end);
     const rect = r?.getBoundingClientRect();
     if (!rect) return;
     const pr = root.getBoundingClientRect();
@@ -2089,19 +1978,6 @@ function TypingIndicator() {
   );
 }
 
-/**
- * The rect of a selection's last visible line — the last of `getClientRects()`
- * with real area. `getBoundingClientRect()` unions in a zero-size rect at the
- * range's end boundary, which for a tall multi-line selection can sit far below
- * the last line and mis-place anything anchored to it.
- */
-function lastLineRect(range: Range): DOMRect {
-  const rects = Array.from(range.getClientRects()).filter(
-    (r) => r.width > 0 && r.height > 0,
-  );
-  return rects[rects.length - 1] ?? range.getBoundingClientRect();
-}
-
 /** Read a part wrapper's `data-part-index` as a number (0 if missing). */
 function partIndexOf(el: HTMLElement): number {
   return parseInt(el.getAttribute("data-part-index") ?? "0", 10);
@@ -2110,61 +1986,4 @@ function partIndexOf(el: HTMLElement): number {
 /** Read a part wrapper's owning message uuid (`data-message-uuid`). */
 function msgUuidOf(el: HTMLElement): string {
   return el.getAttribute("data-message-uuid") ?? "";
-}
-
-function ancestorWithAttr(node: Node, attr: string): HTMLElement | null {
-  let el: HTMLElement | null =
-    node instanceof HTMLElement ? node : node.parentElement;
-  while (el) {
-    if (el.hasAttribute(attr)) return el;
-    el = el.parentElement;
-  }
-  return null;
-}
-
-function offsetWithin(root: HTMLElement, node: Node, nodeOff: number): number {
-  const walker = annoTextWalker(root);
-  let acc = 0;
-  let cur: Node | null = walker.nextNode();
-  while (cur) {
-    if (cur === node) return acc + nodeOff;
-    acc += cur.textContent?.length ?? 0;
-    cur = walker.nextNode();
-  }
-  return -1;
-}
-
-/**
- * Character offsets [start, end) of the part of `range` that lies inside `root`,
- * in the same text-content space as {@link rangeForOffsets} / `offsetWithin`.
- *
- * Walks `root`'s text nodes and keeps only the portion each one contributes to
- * the selection, so endpoints that fall outside `root` (or on element nodes, as
- * a triple-click's end boundary does) are clamped to what's actually covered
- * rather than to the whole part. Returns null if the range covers no text here.
- */
-function selectedOffsetsWithin(
-  root: HTMLElement,
-  range: Range,
-): { start: number; end: number } | null {
-  const walker = annoTextWalker(root);
-  let acc = 0;
-  let start = -1;
-  let end = -1;
-  let cur: Node | null = walker.nextNode();
-  while (cur) {
-    const len = cur.textContent?.length ?? 0;
-    if (len > 0 && range.intersectsNode(cur)) {
-      const localStart = cur === range.startContainer ? range.startOffset : 0;
-      const localEnd = cur === range.endContainer ? range.endOffset : len;
-      // Skip a node the range only touches at a boundary (no chars covered).
-      if (localStart < localEnd) {
-        if (start === -1) start = acc + localStart;
-        end = acc + localEnd;
-      }
-    }
-    acc += len;
-    cur = walker.nextNode();
-  }
-  return start === -1 ? null : { start, end };
 }

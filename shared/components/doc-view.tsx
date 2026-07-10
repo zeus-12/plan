@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
 import { useShikiReady, useActiveShikiTheme } from "../lib/shiki";
 import { useCommentSelection } from "../lib/use-comment-selection";
+import { ancestorWithAttr, offsetOfBoundary } from "../lib/dom-text";
 import { CommentPopover } from "./comment-popover";
 import type { DocComment } from "../lib/doc-share-url";
 
@@ -82,27 +83,6 @@ function buildSegments(
   return segments;
 }
 
-/** Closest code cell ancestor of a DOM node, or null. */
-function cellOf(node: Node): HTMLElement | null {
-  const el =
-    node.nodeType === Node.ELEMENT_NODE
-      ? (node as HTMLElement)
-      : node.parentElement;
-  return el?.closest<HTMLElement>("[data-line-start]") ?? null;
-}
-
-/** Number of characters within `cell` before (node, offset). */
-function offsetWithinCell(
-  cell: Element,
-  node: Node,
-  nodeOffset: number,
-): number {
-  const r = document.createRange();
-  r.selectNodeContents(cell);
-  r.setEnd(node, nodeOffset);
-  return r.toString().length;
-}
-
 export function DocView({
   text,
   language,
@@ -165,18 +145,28 @@ export function DocView({
       const container = containerRef.current;
       if (!container || !container.contains(range.commonAncestorContainer))
         return null;
-      const startCell = cellOf(range.startContainer);
-      const endCell = cellOf(range.endContainer);
+      const startCell = ancestorWithAttr(
+        range.startContainer,
+        "data-line-start",
+      );
+      const endCell = ancestorWithAttr(range.endContainer, "data-line-start");
       if (!startCell || !endCell) return null;
       const startBase = Number(startCell.dataset.lineStart);
       const endBase = Number(endCell.dataset.lineStart);
       if (Number.isNaN(startBase) || Number.isNaN(endBase)) return null;
-      const start =
-        startBase +
-        offsetWithinCell(startCell, range.startContainer, range.startOffset);
-      const end =
-        endBase +
-        offsetWithinCell(endCell, range.endContainer, range.endOffset);
+      const startWithin = offsetOfBoundary(
+        startCell,
+        range.startContainer,
+        range.startOffset,
+      );
+      const endWithin = offsetOfBoundary(
+        endCell,
+        range.endContainer,
+        range.endOffset,
+      );
+      if (startWithin === -1 || endWithin === -1) return null;
+      const start = startBase + startWithin;
+      const end = endBase + endWithin;
       const lo = Math.min(start, end);
       const hi = Math.max(start, end);
       if (hi <= lo) return null;

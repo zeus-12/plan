@@ -41,6 +41,7 @@ import type { Annotation } from "@plan/shared/lib/store";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { useTextFind } from "@plan/shared/lib/use-text-find";
+import { offsetOfBoundary } from "@plan/shared/lib/dom-text";
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { buildDocUrl } from "@plan/shared/lib/doc-share-url";
 import { cn } from "@plan/shared/lib/utils";
@@ -97,7 +98,6 @@ const lineWrapSetting = makeBoolSetting("fileViewer.lineWrap", false);
 const inlineBlameSetting = makeBoolSetting("fileViewer.inlineBlame", true);
 // Stable empty token array — `perLine[i]` resolving to undefined renders plain.
 const EMPTY_PER_LINE: SyntaxToken[][] = [];
-const POPOVER_VIEWPORT_PAD = 380;
 
 /**
  * Editor surface: a transparent textarea overlaid on the highlighted layer, so
@@ -888,13 +888,8 @@ function FileViewerImpl({
         col * charWidth -
         parent.scrollLeft;
       const y = rect.top + (ln + 1) * LINE_HEIGHT - parent.scrollTop;
-      return {
-        top: y + 8,
-        left: Math.max(
-          8,
-          Math.min(x, window.innerWidth - POPOVER_VIEWPORT_PAD),
-        ),
-      };
+      // CommentPopover clamps itself into the viewport.
+      return { top: y + 8, left: x };
     },
     [lineOfOffset, lineStarts, gutterWidthPx, charWidth],
   );
@@ -1047,12 +1042,19 @@ function FileViewerImpl({
       const bEl = contentElOf(range.endContainer);
       if (aIdx == null || bIdx == null || !aEl || !bEl) return null;
 
-      let startOffset =
-        lineStarts[aIdx] +
-        offsetWithinContent(aEl, range.startContainer, range.startOffset);
-      let endOffset =
-        lineStarts[bIdx] +
-        offsetWithinContent(bEl, range.endContainer, range.endOffset);
+      const aWithin = offsetOfBoundary(
+        aEl,
+        range.startContainer,
+        range.startOffset,
+      );
+      const bWithin = offsetOfBoundary(
+        bEl,
+        range.endContainer,
+        range.endOffset,
+      );
+      if (aWithin === -1 || bWithin === -1) return null;
+      let startOffset = lineStarts[aIdx] + aWithin;
+      let endOffset = lineStarts[bIdx] + bWithin;
       if (startOffset > endOffset)
         [startOffset, endOffset] = [endOffset, startOffset];
 
@@ -2302,23 +2304,6 @@ function FileViewerImpl({
       />
     </div>
   );
-}
-
-/** Sum text length within a content span up to (node, nodeOffset). */
-function offsetWithinContent(
-  contentEl: Element,
-  node: Node,
-  nodeOffset: number,
-): number {
-  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
-  let within = 0;
-  let cur: Node | null = walker.nextNode();
-  while (cur) {
-    if (cur === node) return within + nodeOffset;
-    within += cur.textContent?.length ?? 0;
-    cur = walker.nextNode();
-  }
-  return within;
 }
 
 function Centered({ children }: { children: ReactNode }) {

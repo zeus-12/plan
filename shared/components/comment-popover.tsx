@@ -114,7 +114,12 @@ export function CommentPopover({
       ? selectedText.slice(0, SELECTED_TEXT_TRUNCATE_LEN) + "..."
       : selectedText;
 
-  const top = Math.min(position.top, window.innerHeight - MIN_BOTTOM_CLEARANCE);
+  // Clamp into the viewport — callers pass a raw anchor (below the selection /
+  // annotation / caret) and placement policy lives here, in one place.
+  const top = Math.max(
+    8,
+    Math.min(position.top, window.innerHeight - MIN_BOTTOM_CLEARANCE),
+  );
   const left = Math.max(
     8,
     Math.min(position.left, window.innerWidth - POPOVER_WIDTH - 30),

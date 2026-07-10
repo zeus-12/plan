@@ -66,7 +66,6 @@ const LINE_HEIGHT_PX = 22;
 const SEPARATOR_HEIGHT_PX = 32;
 const COMMENT_TRUNCATE_LEN = 55;
 const INLINE_COMMENT_ROW_HEIGHT_PX = 32;
-const POPOVER_VIEWPORT_PAD = 380;
 const NUM_DIGIT_WIDTH = 8;
 const NUM_COL_PAD = 12;
 const BAR_WIDTH_PX = 3;
@@ -1185,17 +1184,12 @@ export function InteractiveDiff({
       if (dLines[lineIdx]?.type === "remove") side = "left";
     }
 
+    // CommentPopover clamps itself into the viewport.
     const rect = range.getBoundingClientRect();
     return {
       data: { startOffset: start, endOffset: end, side },
       selectedText,
-      position: {
-        top: rect.bottom + 8,
-        left: Math.max(
-          8,
-          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
-        ),
-      },
+      position: { top: rect.bottom + 8, left: rect.left },
     };
   }
 
@@ -1229,13 +1223,7 @@ export function InteractiveDiff({
     if (!ann) return;
     setEditing({
       annotation: ann,
-      pos: {
-        top: rect.bottom + 8,
-        left: Math.max(
-          8,
-          Math.min(rect.left, window.innerWidth - POPOVER_VIEWPORT_PAD),
-        ),
-      },
+      pos: { top: rect.bottom + 8, left: rect.left },
     });
   }, []);
   const handleHoverAnn = useCallback(
