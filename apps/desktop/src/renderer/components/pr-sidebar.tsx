@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import type { DiscoveredRepo, PrSummary } from "../../shared-types";
 import { usePrList } from "../lib/pr-store";
+import { Chevron } from "./chevron";
 
 interface Props {
   encoded: string;
@@ -48,12 +49,7 @@ export function PrSidebar({
   }
 
   const toggle = (subPath: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(subPath)) next.delete(subPath);
-      else next.add(subPath);
-      return next;
-    });
+    setExpanded((prev) => toggleInSet(prev, subPath));
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -66,7 +62,7 @@ export function PrSidebar({
                 onClick={() => toggle(repo.subPath)}
                 className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
               >
-                <Chevron open={open} />
+                <Chevron open={open} className="duration-150" />
                 <span className="truncate">{repoName(repo)}</span>
               </button>
             )}
@@ -231,26 +227,5 @@ function ShimmerRows() {
         </div>
       ))}
     </div>
-  );
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={cn(
-        "shrink-0 transition-transform duration-150",
-        open && "rotate-90",
-      )}
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
   );
 }

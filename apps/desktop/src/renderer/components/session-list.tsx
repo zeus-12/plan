@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
 import { Button } from "@plan/shared/components/ui/button";
+import { ChevronLeft } from "./chevron";
 
 export interface SessionListItem {
   sessionId: string;
@@ -90,7 +91,7 @@ export function SessionList({
           className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
           title="Back to sessions"
         >
-          <ChevronLeftIcon />
+          <ChevronLeft size={13} />
           <span className="flex-1">Archived chats</span>
           <span>{archived.length}</span>
         </button>
@@ -273,23 +274,6 @@ const SessionRow = memo(function SessionRow({
     </ContextMenu>
   );
 });
-
-function ChevronLeftIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  );
-}
 
 function TrashIcon() {
   return (

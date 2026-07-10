@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -44,9 +43,10 @@ import { useTextFind } from "@plan/shared/lib/use-text-find";
 import { offsetOfBoundary } from "@plan/shared/lib/dom-text";
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { buildDocUrl } from "@plan/shared/lib/doc-share-url";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
 import { isImagePath } from "../lib/image-paths";
+import { createPersistedValue } from "../lib/external-value";
 import { FileIcon } from "./file-icon";
 import { ImageLightbox } from "./image-lightbox";
 import { useWorktreeRevision } from "../lib/worktree-revision";
@@ -61,41 +61,16 @@ const STICKY_MAX = 8;
 /* ── View settings (shared across all file viewers, persisted) ──── */
 
 /** A boolean setting persisted in localStorage and reactive everywhere. */
-function makeBoolSetting(key: string, defaultOn: boolean) {
-  let value = (() => {
-    try {
-      const v = localStorage.getItem(key);
-      return v == null ? defaultOn : v === "1";
-    } catch {
-      return defaultOn;
-    }
-  })();
-  const listeners = new Set<() => void>();
-  const set = (on: boolean) => {
-    value = on;
-    try {
-      localStorage.setItem(key, on ? "1" : "0");
-    } catch {
-      /* ignore storage failures */
-    }
-    listeners.forEach((l) => l());
-  };
-  const use = () =>
-    useSyncExternalStore(
-      (cb) => {
-        listeners.add(cb);
-        return () => listeners.delete(cb);
-      },
-      () => value,
-      () => value,
-    );
-  return { use, set };
+function boolSetting(key: string, defaultOn: boolean) {
+  return createPersistedValue<boolean>(key, (raw) =>
+    typeof raw === "boolean" ? raw : defaultOn,
+  );
 }
 
-const stickyScrollSetting = makeBoolSetting("fileViewer.stickyScroll", false);
-const bracketColorSetting = makeBoolSetting("fileViewer.bracketColors", true);
-const lineWrapSetting = makeBoolSetting("fileViewer.lineWrap", false);
-const inlineBlameSetting = makeBoolSetting("fileViewer.inlineBlame", true);
+const stickyScrollSetting = boolSetting("fileViewer.stickyScroll", false);
+const bracketColorSetting = boolSetting("fileViewer.bracketColors", true);
+const lineWrapSetting = boolSetting("fileViewer.lineWrap", false);
+const inlineBlameSetting = boolSetting("fileViewer.inlineBlame", true);
 // Stable empty token array — `perLine[i]` resolving to undefined renders plain.
 const EMPTY_PER_LINE: SyntaxToken[][] = [];
 
@@ -367,14 +342,14 @@ function FileViewerImpl({
     null,
   );
   // Sticky scroll: pin enclosing scope headers at the top as you scroll.
-  const stickyEnabled = stickyScrollSetting.use();
-  const bracketEnabled = bracketColorSetting.use();
+  const stickyEnabled = stickyScrollSetting.useValue();
+  const bracketEnabled = bracketColorSetting.useValue();
   // Line wrap. A file uses the shared, persisted setting; an editable buffer
   // keeps its OWN wrap (default off) instead — otherwise a globally-on wrap would
   // silently disable editing (the flat caret textarea can't mirror wrapped rows,
   // so wrap forces the read-only view). Editing is the whole point of a buffer,
   // so it must not inherit a setting that turns it off.
-  const globalLineWrap = lineWrapSetting.use();
+  const globalLineWrap = lineWrapSetting.useValue();
   const [bufferWrap, setBufferWrap] = useState(false);
   const lineWrapEnabled = buffer ? bufferWrap : globalLineWrap;
   const setLineWrap = (v: boolean) =>
@@ -404,7 +379,7 @@ function FileViewerImpl({
 
   // Inline git blame: per-line authorship shown as a muted trailing annotation
   // on the caret/clicked line, with a hover card for the full commit message.
-  const blameEnabled = inlineBlameSetting.use();
+  const blameEnabled = inlineBlameSetting.useValue();
   const [blame, setBlame] = useState<TextBlame | null>(null);
   // Active line for the read-only virtualized view (no caret there — a click
   // picks the line). Editor mode derives the line from the caret instead.
@@ -554,12 +529,7 @@ function FileViewerImpl({
   }, [settingsOpen]);
 
   const toggleFold = useCallback((startLine: number) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(startLine)) next.delete(startLine);
-      else next.add(startLine);
-      return next;
-    });
+    setCollapsed((prev) => toggleInSet(prev, startLine));
   }, []);
 
   // Open any collapsed regions hiding `line`, then queue a scroll to it once the

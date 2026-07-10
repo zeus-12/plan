@@ -38,7 +38,7 @@ import {
   useShikiReady,
 } from "../lib/shiki";
 import { computeFoldRanges } from "../lib/folding";
-import { cn } from "../lib/utils";
+import { cn, toggleInSet } from "../lib/utils";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
 import { CommentPopover } from "./comment-popover";
@@ -360,12 +360,7 @@ export function InteractiveDiff({
   // row, so a fold survives switching between unified and split.
 
   const toggleFold = useCallback((key: number) => {
-    setCollapsedFolds((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setCollapsedFolds((prev) => toggleInSet(prev, key));
   }, []);
   // A real change to the texts invalidates the old fold starts entirely.
   useEffect(() => {
@@ -1035,15 +1030,7 @@ export function InteractiveDiff({
   /* ── Separator toggle ───────────────────────────────────── */
 
   const toggleSeparator = useCallback((idx: number) => {
-    setExpandedSeparators((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
+    setExpandedSeparators((prev) => toggleInSet(prev, idx));
   }, []);
 
   /* ── Offset calculation ─────────────────────────────────── */

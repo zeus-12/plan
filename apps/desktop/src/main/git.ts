@@ -1,6 +1,7 @@
 import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { git as run } from "./git-exec";
+import { pathExists } from "./fs-util";
 import { resolveProjectCwd } from "./claude-projects";
 import { GIT_SCAN_DEPTH } from "./config";
 import type {
@@ -16,15 +17,6 @@ async function cwdFromEncoded(
 ): Promise<string> {
   const base = await resolveProjectCwd(encoded);
   return subPath ? join(base, subPath) : base;
-}
-
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await stat(p);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** Cheap pre-check: is there a `.git` file or directory at this path? */

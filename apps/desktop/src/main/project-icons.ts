@@ -6,6 +6,7 @@ import { PLAN_DIR } from "./plan-config";
 import { gitSafe } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
 import { discoverRepos } from "./git";
+import { pathExists } from "./fs-util";
 
 /** Downloaded GitHub avatars live here, one file per owner, reused forever. */
 const AVATAR_DIR = join(PLAN_DIR, "icons");
@@ -29,19 +30,10 @@ const ICON_CANDIDATES = [
   "build/icon.png",
 ] as const;
 
-async function exists(p: string): Promise<boolean> {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function findIconIn(root: string): Promise<string | null> {
   for (const rel of ICON_CANDIDATES) {
     const p = join(root, rel);
-    if (await exists(p)) return p;
+    if (await pathExists(p)) return p;
   }
   return null;
 }
@@ -94,7 +86,7 @@ async function githubAvatarFile(owner: string): Promise<string | null> {
   // Owner comes from a git URL, but never let a weird one escape the dir.
   if (!/^[A-Za-z0-9-]+$/.test(owner)) return null;
   const file = join(AVATAR_DIR, `github-${owner}.png`);
-  if (await exists(file)) return file;
+  if (await pathExists(file)) return file;
 
   try {
     const res = await net.fetch(`https://github.com/${owner}.png?size=128`, {

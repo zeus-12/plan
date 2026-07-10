@@ -1,6 +1,7 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { git, gitShow, looksBinary } from "./git-exec";
+import { git, gitShow } from "./git-exec";
+import { looksBinary } from "./fs-util";
 import { resolveProjectCwd } from "./claude-projects";
 import type { FileContents, FileView } from "../shared-types";
 

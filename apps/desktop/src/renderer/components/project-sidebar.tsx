@@ -6,7 +6,7 @@ import {
   Plus,
   Settings as SettingsGear,
 } from "lucide-react";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { lastSegment } from "@plan/shared/lib/path";
 import {
   Sidebar,
@@ -52,6 +52,7 @@ import {
 } from "../lib/project-tree";
 import { useApprovalEncodedSet } from "../lib/session-approval-store";
 import { ApprovalDot } from "./approval-dot";
+import { ChevronLeft } from "./chevron";
 
 interface Props {
   projects: ProjectEntry[];
@@ -186,23 +187,6 @@ function GlobeIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-    </svg>
-  );
-}
-
-function ChevronLeftIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="15 18 9 12 15 6" />
     </svg>
   );
 }
@@ -354,9 +338,7 @@ export function ProjectSidebar({
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      const next = toggleInSet(prev, key);
       persistExpanded(next);
       return next;
     });
@@ -505,7 +487,7 @@ export function ProjectSidebar({
             className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
             title="Back to projects"
           >
-            <ChevronLeftIcon />
+            <ChevronLeft />
             <span>Archived projects</span>
             <span className="text-[var(--text-tertiary)]">
               {archived.length}

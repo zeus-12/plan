@@ -1,16 +1,11 @@
 import { createHash } from "crypto";
-import { access, mkdir, writeFile } from "fs/promises";
+import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { app } from "electron";
 import { gitShowBuffer } from "./git-exec";
+import { extOf, pathExists } from "./fs-util";
 import { resolveProjectCwd } from "./claude-projects";
 import type { FileImageDiff } from "../shared-types";
-
-function extOf(path: string): string {
-  const slash = path.lastIndexOf("/");
-  const dot = path.lastIndexOf(".");
-  return dot > slash ? path.slice(dot) : "";
-}
 
 /**
  * Write a git blob's bytes to a content-addressed temp file so the renderer can
@@ -23,11 +18,7 @@ async function materialize(buf: Buffer, ext: string): Promise<string> {
   await mkdir(dir, { recursive: true });
   const hash = createHash("sha1").update(buf).digest("hex");
   const full = join(dir, `${hash}${ext}`);
-  try {
-    await access(full);
-  } catch {
-    await writeFile(full, buf);
-  }
+  if (!(await pathExists(full))) await writeFile(full, buf);
   return full;
 }
 
@@ -38,17 +29,13 @@ async function blobPath(
 ): Promise<string | null> {
   const buf = await gitShowBuffer(cwd, rev, path);
   if (!buf) return null;
-  return materialize(buf, extOf(path));
+  const ext = extOf(path);
+  return materialize(buf, ext ? `.${ext}` : "");
 }
 
 async function workingPath(cwd: string, path: string): Promise<string | null> {
   const full = join(cwd, path);
-  try {
-    await access(full);
-    return full;
-  } catch {
-    return null;
-  }
+  return (await pathExists(full)) ? full : null;
 }
 
 /**

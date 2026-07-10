@@ -10,7 +10,7 @@ import {
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
-import { stat, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import {
   listProjects,
   resolveProjectCwd,
@@ -22,6 +22,7 @@ import {
   listSessions,
   sessionFilePath,
 } from "./claude-sessions";
+import { pathExists } from "./fs-util";
 import {
   getManualCwds,
   addManualCwd,
@@ -523,14 +524,7 @@ const invokeHandlers: {
 
   // Does a path still exist on disk? Used to verify a restored draft's pasted
   // images are still present before showing/sending them (the OS can purge tmp).
-  "terminal:fileExists": async (_e, path) => {
-    try {
-      await stat(path);
-      return true;
-    } catch {
-      return false;
-    }
-  },
+  "terminal:fileExists": (_e, path) => pathExists(path),
 
   // Update notifier: report whether a newer release exists, and open the
   // download page in the user's browser. We never install — the app is unsigned.

@@ -1,5 +1,6 @@
 import { discoverRepos } from "./git";
-import { gh, gitSafe, gitShow, looksBinary } from "./git-exec";
+import { gh, gitSafe, gitShow } from "./git-exec";
+import { looksBinary } from "./fs-util";
 import type {
   PrChecks,
   PrComment,

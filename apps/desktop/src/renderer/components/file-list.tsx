@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename, dirname } from "@plan/shared/lib/path";
 import {
   Tooltip,
@@ -9,6 +9,7 @@ import {
 } from "@plan/shared/components/ui/tooltip";
 import { usePersistentString } from "../lib/use-persistent-string";
 import { FileIcon, FolderIcon } from "./file-icon";
+import { Chevron } from "./chevron";
 
 type ViewMode = "list" | "tree";
 const VIEW_MODES: readonly ViewMode[] = ["list", "tree"];
@@ -182,27 +183,6 @@ function statusColor(letter: FileEntry["letter"]) {
 /** Git marks untracked files "?"; VSCode shows them as "U". */
 function displayLetter(letter: FileEntry["letter"]): string {
   return letter === "?" ? "U" : letter;
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={cn(
-        "shrink-0 text-[var(--text-tertiary)] transition-transform",
-        open && "rotate-90",
-      )}
-    >
-      <polyline points="9 6 15 12 9 18" />
-    </svg>
-  );
 }
 
 /* ── Section-action icons (14px, currentColor) ──────────────── */
@@ -501,23 +481,11 @@ export function FileList({
   }
 
   const toggleRepo = (key: string) =>
-    setCollapsedRepos((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+    setCollapsedRepos((prev) => toggleInSet(prev, key));
   const toggleSection = (key: string) =>
-    setCollapsedSections((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+    setCollapsedSections((prev) => toggleInSet(prev, key));
   const toggleFolder = (key: string) =>
-    setCollapsedFolders((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+    setCollapsedFolders((prev) => toggleInSet(prev, key));
 
   return (
     <div ref={parentRef} className="h-full min-h-0 overflow-auto">
@@ -568,7 +536,10 @@ export function FileList({
                 className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--bg-surface-hover)] px-3 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface)]"
               >
                 <div className="flex min-w-0 items-center gap-2">
-                  <Chevron open={open} />
+                  <Chevron
+                    open={open}
+                    className="text-[var(--text-tertiary)]"
+                  />
                   <span className="truncate font-semibold">
                     {row.group.repoName}
                   </span>
@@ -603,7 +574,10 @@ export function FileList({
                   onClick={() => toggleSection(sKey)}
                   className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 text-left font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
                 >
-                  <Chevron open={open} />
+                  <Chevron
+                    open={open}
+                    className="text-[var(--text-tertiary)]"
+                  />
                   <span className="truncate">
                     {isStaged ? "Staged Changes" : "Changes"}
                   </span>
@@ -658,7 +632,10 @@ export function FileList({
                   style={{ paddingLeft: INDENT + row.depth * INDENT }}
                   className="flex h-full min-w-0 flex-1 items-center gap-1.5 pr-2 text-left"
                 >
-                  <Chevron open={open} />
+                  <Chevron
+                    open={open}
+                    className="text-[var(--text-tertiary)]"
+                  />
                   <FolderIcon open={open} />
                   <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)]">
                     {row.name}

@@ -37,6 +37,7 @@ import type {
   ChatAnnotation,
   ChatSpan,
 } from "../lib/annotation-store";
+import { Chevron } from "./chevron";
 
 /** How far (px) above the bottom the user must scroll before the "jump to
  *  latest" button appears. */
@@ -404,27 +405,6 @@ function CopyButton({ getText }: { getText: () => string }) {
   );
 }
 
-function ChevronRight({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={cn(
-        "shrink-0 text-[var(--text-tertiary)] transition-transform duration-200",
-        open && "rotate-90",
-      )}
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  );
-}
-
 /**
  * A tool call → a short verb + target for the header line, e.g.
  * Read → ("Read", "file.ts"), Bash → ("Ran", "<description>"). Tools without a
@@ -498,7 +478,11 @@ function ToolCallBlock({
             {target}
           </span>
         )}
-        <ChevronRight open={open} />
+        <Chevron
+          open={open}
+          size={12}
+          className="text-[var(--text-tertiary)] duration-200"
+        />
       </button>
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out"
@@ -820,7 +804,11 @@ function TaskNotificationBlock({ n }: { n: TaskNotification }) {
             </span>
           )}
         </span>
-        <ChevronRight open={open} />
+        <Chevron
+          open={open}
+          size={12}
+          className="text-[var(--text-tertiary)] duration-200"
+        />
       </button>
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out"
@@ -913,7 +901,11 @@ function SystemMetaBlock({ text }: { text: string }) {
             {target}
           </span>
         )}
-        <ChevronRight open={open} />
+        <Chevron
+          open={open}
+          size={12}
+          className="text-[var(--text-tertiary)] duration-200"
+        />
       </button>
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out"

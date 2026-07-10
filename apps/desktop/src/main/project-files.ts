@@ -4,6 +4,7 @@ import { StringDecoder } from "string_decoder";
 import { join, relative } from "path";
 import { resolveProjectCwd } from "./claude-projects";
 import { IGNORED_DIRS, IGNORED_FILES } from "./ignored-dirs";
+import { extOf, looksBinary } from "./fs-util";
 import type {
   ProjectFile,
   SearchOptions,
@@ -76,7 +77,7 @@ export async function readProjectFile(
   if (rel.startsWith("..") || rel === "") return null;
   try {
     const buf = await readFile(full);
-    const binary = isBinary(buf);
+    const binary = looksBinary(buf);
     const truncated = buf.length > MAX_READ_BYTES;
     return {
       text: binary ? "" : buf.subarray(0, MAX_READ_BYTES).toString("utf-8"),
@@ -86,12 +87,6 @@ export async function readProjectFile(
   } catch {
     return null;
   }
-}
-
-function isBinary(buf: Buffer): boolean {
-  const n = Math.min(buf.length, 8000);
-  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
-  return false;
 }
 
 /**
@@ -174,12 +169,6 @@ const BINARY_EXTS = new Set([
   "ai",
 ]);
 
-function extOf(path: string): string {
-  const slash = path.lastIndexOf("/");
-  const dot = path.lastIndexOf(".");
-  return dot > slash ? path.slice(dot + 1).toLowerCase() : "";
-}
-
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -222,7 +211,7 @@ function lineRanges(
  * size never gates whether a match is found. Reads fixed-size chunks, decodes
  * UTF-8 safely across chunk boundaries, and splits on "\n" (keeping any "\r" so
  * offsets match the file viewer). Bails before yielding anything if the first
- * chunk looks binary (contains a NUL byte), mirroring {@link isBinary}.
+ * chunk looks binary (contains a NUL byte), mirroring {@link looksBinary}.
  */
 async function* streamLines(full: string): AsyncGenerator<string> {
   const stream = createReadStream(full, { highWaterMark: 1 << 16 });
@@ -233,10 +222,7 @@ async function* streamLines(full: string): AsyncGenerator<string> {
     for await (const chunk of stream as AsyncIterable<Buffer>) {
       if (first) {
         first = false;
-        const n = Math.min(chunk.length, 8000);
-        for (let i = 0; i < n; i++) {
-          if (chunk[i] === 0) return; // binary — skip the whole file
-        }
+        if (looksBinary(chunk)) return; // binary — skip the whole file
       }
       rem += decoder.write(chunk);
       let nl = rem.indexOf("\n");

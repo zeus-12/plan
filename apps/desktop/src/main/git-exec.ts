@@ -138,14 +138,3 @@ export async function gh(
     };
   }
 }
-
-const BINARY_PROBE_BYTES = 8000;
-
-/** True when the text appears to be a binary blob (NUL bytes in the sample). */
-export function looksBinary(s: string): boolean {
-  const sample = s.slice(0, BINARY_PROBE_BYTES);
-  for (let i = 0; i < sample.length; i++) {
-    if (sample.charCodeAt(i) === 0) return true;
-  }
-  return false;
-}

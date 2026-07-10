@@ -7,10 +7,11 @@ import {
   type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename, dirname } from "@plan/shared/lib/path";
 import type { SearchFileResult, SearchOptions } from "../../shared-types";
 import { FileIcon } from "./file-icon";
+import { Chevron } from "./chevron";
 
 interface Props {
   encoded: string;
@@ -185,12 +186,7 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
   );
 
   const toggleFile = useCallback((path: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+    setCollapsed((prev) => toggleInSet(prev, path));
   }, []);
 
   const rows = useMemo<Row[]>(() => {
@@ -310,7 +306,10 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
                   onClick={() => toggleFile(row.file.path)}
                   className="flex items-center gap-1.5 px-2 text-left transition-colors hover:bg-[var(--bg-surface-hover)]"
                 >
-                  <Chevron open={!isCollapsed} />
+                  <Chevron
+                    open={!isCollapsed}
+                    className="text-[var(--text-tertiary)]"
+                  />
                   <FileIcon name={basename(row.file.path)} />
                   <span className="truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
                     {basename(row.file.path)}
@@ -352,26 +351,5 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
         </div>
       </div>
     </div>
-  );
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={cn(
-        "shrink-0 text-[var(--text-tertiary)] transition-transform",
-        open ? "rotate-90" : "",
-      )}
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
   );
 }

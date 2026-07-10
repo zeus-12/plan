@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename, dirname } from "@plan/shared/lib/path";
 import { FileIcon, FolderIcon } from "./file-icon";
+import { Chevron } from "./chevron";
 
 interface Props {
   files: string[];
@@ -142,12 +143,7 @@ export function ProjectFileList({
   });
 
   const toggle = (path: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+    setExpanded((prev) => toggleInSet(prev, path));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -201,7 +197,9 @@ export function ProjectFileList({
                   }}
                 >
                   <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[var(--text-tertiary)]">
-                    {isDir ? <Chevron open={!!isOpen} /> : null}
+                    {isDir ? (
+                      <Chevron open={!!isOpen} size={9} strokeWidth={3} />
+                    ) : null}
                   </span>
                   {isDir ? (
                     <FolderIcon open={!!isOpen} />
@@ -229,24 +227,6 @@ export function ProjectFileList({
         </div>
       )}
     </div>
-  );
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="9"
-      height="9"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={cn("transition-transform", open && "rotate-90")}
-    >
-      <polyline points="9 6 15 12 9 18" />
-    </svg>
   );
 }
 
