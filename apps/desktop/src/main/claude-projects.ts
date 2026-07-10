@@ -1,9 +1,11 @@
 import { readdir, stat, readFile, mkdir, rename, access } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
 import type { ProjectEntry } from "../shared-types";
-
-export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+import {
+  CLAUDE_PROJECTS_DIR,
+  newestSessionFile,
+  sessionFilePath,
+} from "./claude-sessions";
 
 /**
  * Physically relocate a session's transcript from one project dir to another —
@@ -23,16 +25,15 @@ export async function moveSessionTranscript(
   toEncoded: string,
 ): Promise<void> {
   if (fromEncoded === toEncoded) return;
-  const src = join(CLAUDE_PROJECTS_DIR, fromEncoded, `${sessionId}.jsonl`);
+  const src = sessionFilePath(fromEncoded, sessionId);
   try {
     await access(src);
   } catch {
     return; // transcript not materialized yet — nothing to relocate
   }
-  const destDir = join(CLAUDE_PROJECTS_DIR, toEncoded);
-  await mkdir(destDir, { recursive: true });
+  await mkdir(join(CLAUDE_PROJECTS_DIR, toEncoded), { recursive: true });
   // Same filesystem (both under ~/.claude), so rename is atomic and cheap.
-  await rename(src, join(destDir, `${sessionId}.jsonl`));
+  await rename(src, sessionFilePath(toEncoded, sessionId));
 }
 
 // The renderer-facing ProjectEntry (shared-types) adds `archived`, which only
@@ -84,25 +85,11 @@ export async function resolveProjectCwd(encoded: string): Promise<string> {
   const cached = cwdCache.get(encoded);
   if (cached) return cached;
 
-  const dir = join(CLAUDE_PROJECTS_DIR, encoded);
   try {
-    const entries = await readdir(dir);
-    const jsonls = entries.filter((e) => e.endsWith(".jsonl"));
-    // Pick the most recently modified session file.
-    let newest: { path: string; mtimeMs: number } | null = null;
-    for (const name of jsonls) {
-      const p = join(dir, name);
-      try {
-        const s = await stat(p);
-        if (!newest || s.mtimeMs > newest.mtimeMs) {
-          newest = { path: p, mtimeMs: s.mtimeMs };
-        }
-      } catch {
-        // skip
-      }
-    }
+    // The most recently modified session file has the freshest cwd.
+    const newest = await newestSessionFile(encoded);
     if (newest) {
-      const body = await readFile(newest.path, "utf-8");
+      const body = await readFile(newest.filePath, "utf-8");
       const cwd = extractCwd(body);
       if (cwd) {
         cwdCache.set(encoded, cwd);

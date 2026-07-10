@@ -1,7 +1,8 @@
 import { readFile, writeFile, readdir, mkdir } from "fs/promises";
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
-import { resolveProjectCwd, CLAUDE_PROJECTS_DIR } from "./claude-projects";
+import { resolveProjectCwd } from "./claude-projects";
+import { CLAUDE_PROJECTS_DIR } from "./claude-sessions";
 import type {
   ClaudeConfigBundle,
   ClaudeConfigFile,

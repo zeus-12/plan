@@ -1,6 +1,6 @@
-import { watch, readdir, stat } from "fs/promises";
+import { watch, stat } from "fs/promises";
 import { join } from "path";
-import { CLAUDE_PROJECTS_DIR } from "./claude-projects";
+import { CLAUDE_PROJECTS_DIR, listSessionFiles } from "./claude-sessions";
 import type { SessionEvent } from "../shared-types";
 
 const DEBOUNCE_MS = 300;
@@ -34,15 +34,8 @@ export async function startWatching(encoded: string): Promise<void> {
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   projectWatchers.set(encoded, { abort, knownFiles, debounceTimers });
 
-  try {
-    const entries = await readdir(dir);
-    for (const name of entries) {
-      if (name.endsWith(".jsonl")) {
-        knownFiles.add(join(dir, name));
-      }
-    }
-  } catch {
-    // dir may not exist yet
+  for (const f of await listSessionFiles(encoded)) {
+    knownFiles.add(f.filePath);
   }
 
   void runProjectWatch(encoded, dir, abort.signal, knownFiles, debounceTimers);

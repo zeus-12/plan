@@ -16,8 +16,12 @@ import {
   resolveProjectCwd,
   primeProjectCwd,
   moveSessionTranscript,
-  CLAUDE_PROJECTS_DIR,
 } from "./claude-projects";
+import {
+  latestActivity,
+  listSessions,
+  sessionFilePath,
+} from "./claude-sessions";
 import {
   getManualCwds,
   addManualCwd,
@@ -55,7 +59,7 @@ import {
   stopWorktreeWatch,
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
-import { readSessionFile, readSessionMeta } from "./jsonl-parser";
+import { readSessionFile } from "./jsonl-parser";
 import { getFileContents, getFileView } from "./file-contents";
 import { listPrs, getPrDetail, getPrFileView } from "./github";
 import { getFileImageDiff } from "./file-media";
@@ -68,7 +72,6 @@ import {
 import { listSkills } from "./skills";
 import { getProjectIcons } from "./project-icons";
 import { checkForUpdate } from "./updates";
-import { readdir } from "fs/promises";
 import {
   setTerminalCallbacks,
   openTerminal,
@@ -292,108 +295,28 @@ function focusMainWindow() {
 // ── Session listing ────────────────────────────────────────────────
 
 /**
- * Display metadata per session file, cached by mtime. The renderer must NEVER
- * fetch full transcripts just to label the list — that shipped megabytes over
- * IPC on every watcher tick and froze the renderer. Only files whose mtime
- * changed (i.e. the actively-streaming session) are re-parsed, in main.
+ * claude-sessions gives the fs-only entries; the archived flag and the
+ * user-assigned name live in the manual-projects store, layered on here —
+ * same split as RawProjectEntry/ProjectEntry.
  */
-const sessionMetaCache = new Map<
-  string,
-  {
-    mtimeMs: number;
-    title: string | null;
-    messageCount: number;
-    updatedAt: number | string | null;
-  }
->();
-
-async function sessionMeta(filePath: string, mtimeMs: number) {
-  const cached = sessionMetaCache.get(filePath);
-  if (cached && cached.mtimeMs === mtimeMs) return cached;
-  let meta;
-  try {
-    // Incremental: parses only the bytes appended since the last call, so the
-    // actively-streaming session's growing file isn't fully re-parsed on every
-    // watcher tick — just the few new lines.
-    const lite = await readSessionMeta(filePath);
-    meta = {
-      mtimeMs,
-      title: lite.title ?? null,
-      messageCount: lite.messageCount ?? 0,
-      updatedAt: lite.updatedAt ?? mtimeMs,
-    };
-  } catch {
-    meta = cached
-      ? { ...cached, mtimeMs }
-      : { mtimeMs, title: null, messageCount: 0, updatedAt: mtimeMs };
-  }
-  sessionMetaCache.set(filePath, meta);
-  return meta;
-}
-
 async function listSessionsForProject(
   encoded: string,
 ): Promise<SessionListEntry[]> {
-  const dir = join(CLAUDE_PROJECTS_DIR, encoded);
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    const [archivedIds, names] = await Promise.all([
-      getArchivedSessions(),
-      getSessionNames(),
-    ]);
-    const archived = new Set(archivedIds);
-    const out: SessionListEntry[] = [];
-    for (const e of entries) {
-      if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
-      const filePath = join(dir, e.name);
-      try {
-        const s = await stat(filePath);
-        const sessionId = e.name.replace(/\.jsonl$/, "");
-        const meta = await sessionMeta(filePath, s.mtimeMs);
-        out.push({
-          sessionId,
-          filePath,
-          mtimeMs: s.mtimeMs,
-          archived: archived.has(sessionId),
-          // A user-assigned name wins over the derived title.
-          title: names[sessionId] ?? meta.title,
-          derivedTitle: meta.title,
-          messageCount: meta.messageCount,
-          updatedAt: meta.updatedAt,
-        });
-      } catch {
-        // skip
-      }
-    }
-    out.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return out;
-  } catch {
-    return [];
-  }
+  const [entries, archivedIds, names] = await Promise.all([
+    listSessions(encoded),
+    getArchivedSessions(),
+    getSessionNames(),
+  ]);
+  const archived = new Set(archivedIds);
+  return entries.map((e) => ({
+    ...e,
+    archived: archived.has(e.sessionId),
+    // A user-assigned name wins over the derived title.
+    title: names[e.sessionId] ?? e.derivedTitle,
+  }));
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────
-
-/** Most recent session-file mtime for a project (for activity sorting). */
-async function latestActivity(encoded: string): Promise<number> {
-  const dir = join(CLAUDE_PROJECTS_DIR, encoded);
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    let max = 0;
-    for (const e of entries) {
-      if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
-      try {
-        const s = await stat(join(dir, e.name));
-        if (s.mtimeMs > max) max = s.mtimeMs;
-      } catch {
-        // skip
-      }
-    }
-    return max;
-  } catch {
-    return 0;
-  }
-}
 
 // Only manually-added projects are shown (persisted in plan-desktop.json), so
 // the sidebar starts empty and the user curates it via "Add project". Sessions
@@ -476,9 +399,8 @@ const invokeHandlers: {
   },
 
   "session:read": async (_e, encoded, sessionId) => {
-    const filePath = join(CLAUDE_PROJECTS_DIR, encoded, `${sessionId}.jsonl`);
     try {
-      return await readSessionFile(filePath);
+      return await readSessionFile(sessionFilePath(encoded, sessionId));
     } catch {
       return null;
     }
