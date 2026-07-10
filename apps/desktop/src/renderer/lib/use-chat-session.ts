@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ParsedSession, TerminalInputState } from "../../shared-types";
+import type { ParsedSession } from "../../shared-types";
 import { chatTerminalId, chatTerminalPrefix } from "../../terminal-ids";
 import { useTerminalWorking } from "./terminal-activity-store";
+import { useSessionNeedsApproval } from "./session-approval-store";
 import { useAutoModeEnabled } from "./auto-mode-settings";
 import { isNewSession } from "./new-session-ids";
 import { osNotify, pushToast } from "./toast-store";
@@ -216,42 +217,14 @@ export function useChatSession(opts: {
     selectedSessionId ? chatTerminalId(encoded, selectedSessionId) : null,
   );
 
-  // ── Input-box vs. selection-menu detection ───────────────────────────
-  // Heuristic read of the chat terminal's rendered screen (a headless emulator
-  // in main scans the bottom rows for Claude's TUI box). "selection" means a
-  // numbered approval/plan/question menu is up — there's NO free-text box, so
-  // sending a message + Enter would mis-navigate the menu.
-  const [inputState, setInputState] = useState<TerminalInputState>("unknown");
-  useEffect(() => {
-    if (!chatTerminalReady || !selectedSessionId) {
-      setInputState("unknown");
-      return;
-    }
-    const tid = chatTerminalId(encoded, selectedSessionId);
-    let alive = true;
-    const poll = async () => {
-      try {
-        const res = await window.electronAPI.terminalInputState(tid);
-        if (!alive) return;
-        setInputState(res.state);
-      } catch {
-        if (alive) setInputState("unknown");
-      }
-    };
-    void poll();
-    const interval = setInterval(poll, 1_500);
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, [chatTerminalReady, selectedSessionId, encoded]);
-
-  // A rendered selection menu IS the "waiting for you" signal — it must win
-  // over the output-recency "working" heuristic, NOT be gated by it: Claude
-  // keeps repainting the prompt (cursor blink / box redraw) while it waits, so
-  // `chatWorking` stays true the whole time the menu is up. We only require the
-  // agent process to be live (a stray menu in a dead shell isn't actionable).
-  const awaitingSelection = agentLive && inputState === "selection";
+  // ── Selection-menu detection ─────────────────────────────────────────
+  // "Waiting on a menu" comes from the approval store — the same fleet-wide
+  // scan (Claude's rendered screen, gated on a live agent process in main)
+  // that drives the sidebar badges and the approval notifier. One signal, one
+  // poll, instead of a per-workspace terminalInputState interval. A rendered
+  // menu wins over the "working" heuristic: Claude keeps repainting the prompt
+  // while it waits, so `chatWorking` stays true the whole time the menu is up.
+  const awaitingSelection = useSessionNeedsApproval(activeTerminalId);
 
   // Auto-reveal the terminal when a menu appears so the user can respond —
   // only once per transition into the selection state (not on every poll). The
