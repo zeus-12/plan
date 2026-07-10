@@ -56,7 +56,10 @@ export function ScratchEditor({
   useEffect(() => {
     if (!loaded) return;
     const id = setTimeout(() => {
-      void window.electronAPI.writeScratch(encoded, { content: text, language });
+      void window.electronAPI.writeScratch(encoded, {
+        content: text,
+        language,
+      });
     }, 400);
     return () => clearTimeout(id);
   }, [text, language, loaded, encoded]);

@@ -15,7 +15,9 @@ import type { DiscoveredRepo } from "../../shared-types";
  */
 const cache = new Map<string, DiscoveredRepo[]>();
 
-export function getCachedWorktreeRepos(encoded: string): DiscoveredRepo[] | null {
+export function getCachedWorktreeRepos(
+  encoded: string,
+): DiscoveredRepo[] | null {
   return cache.get(encoded) ?? null;
 }
 

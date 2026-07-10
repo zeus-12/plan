@@ -134,7 +134,9 @@ export default function Home() {
 
   const detected = useMemo(() => {
     const sample =
-      deferredRight.length >= deferredLeft.length ? deferredRight : deferredLeft;
+      deferredRight.length >= deferredLeft.length
+        ? deferredRight
+        : deferredLeft;
     if (!sample.trim()) return null;
     const lang = detectLanguage(sample);
     return lang === "plaintext" ? null : lang;

@@ -68,7 +68,10 @@ function WorkspaceHostImpl({
   const wt = useWorktrees(target.projectEncoded);
 
   const runEntries = useMemo(() => runEntriesOf(wt.defaults), [wt.defaults]);
-  const buildEntries = useMemo(() => buildEntriesOf(wt.defaults), [wt.defaults]);
+  const buildEntries = useMemo(
+    () => buildEntriesOf(wt.defaults),
+    [wt.defaults],
+  );
   const onSaveRun = useCallback(
     (runCommands: ReturnType<typeof runEntriesOf>) =>
       wt.saveDefaults({
@@ -92,7 +95,9 @@ function WorkspaceHostImpl({
   // map). Seed from the shared cache so a re-mounted worktree paints with repos
   // immediately, then refresh in the background.
   const [wtRepos, setWtRepos] = useState<DiscoveredRepo[]>(() =>
-    isWorktree ? (getCachedWorktreeRepos(target.encoded) ?? EMPTY_REPOS) : EMPTY_REPOS,
+    isWorktree
+      ? (getCachedWorktreeRepos(target.encoded) ?? EMPTY_REPOS)
+      : EMPTY_REPOS,
   );
   const worktreeRepoCount = worktreeRecord?.repos.length;
   useEffect(() => {

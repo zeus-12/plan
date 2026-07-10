@@ -391,9 +391,7 @@ export default function DocPage() {
                 onClick={handleShare}
                 aria-disabled={!author.trim()}
                 className={!author.trim() ? "opacity-50" : undefined}
-                title={
-                  !author.trim() ? "Add your name to share" : undefined
-                }
+                title={!author.trim() ? "Add your name to share" : undefined}
               >
                 {copied ? "Link copied!" : "Share"}
               </Button>

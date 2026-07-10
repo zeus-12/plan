@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { BlameHoverCard } from "../components/blame-hover-card";
 import type { BlameLineInfo } from "./blame";
 

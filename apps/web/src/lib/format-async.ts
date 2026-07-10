@@ -14,7 +14,8 @@ const pending = new Map<number, (r: FormatResult) => void>();
 
 function getWorker(): Worker | null {
   if (workerBroken) return null;
-  if (typeof window === "undefined" || typeof Worker === "undefined") return null;
+  if (typeof window === "undefined" || typeof Worker === "undefined")
+    return null;
   if (worker) return worker;
   try {
     const w = new Worker(new URL("./format-worker.ts", import.meta.url), {

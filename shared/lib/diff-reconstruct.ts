@@ -27,7 +27,8 @@ export function reconstructOldText(newText: string, fileBody: string): string {
   // Conflating the two is what makes trailing-newline edits reconstruct wrong.
   const endsWithNewline = newText.endsWith("\n");
   const all = newText.length ? newText.split("\n") : [];
-  const contentLen = endsWithNewline && all.length ? all.length - 1 : all.length;
+  const contentLen =
+    endsWithNewline && all.length ? all.length - 1 : all.length;
 
   const oldLines: string[] = [];
   let cursor = 0; // 0-based index into content lines

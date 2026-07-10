@@ -13,23 +13,27 @@ export interface ScratchLanguage {
   prettierParser?: string;
 }
 
-export const LANGUAGES: readonly (ScratchLanguage & { formattable: boolean })[] =
-  (
-    [
-      { id: "plaintext", label: "Plain Text" },
-      { id: "json", label: "JSON", prettierParser: "json" },
-      { id: "javascript", label: "JavaScript", prettierParser: "babel" },
-      { id: "typescript", label: "TypeScript", prettierParser: "typescript" },
-      { id: "jsx", label: "JSX", prettierParser: "babel" },
-      { id: "tsx", label: "TSX", prettierParser: "typescript" },
-      { id: "markdown", label: "Markdown", prettierParser: "markdown" },
-      { id: "css", label: "CSS", prettierParser: "css" },
-      { id: "html", label: "HTML", prettierParser: "html" },
-      { id: "python", label: "Python" },
-      { id: "yaml", label: "YAML", prettierParser: "yaml" },
-      { id: "xml", label: "XML" },
-    ] as const
-  ).map((l) => ({ ...l, formattable: "prettierParser" in l && !!l.prettierParser }));
+export const LANGUAGES: readonly (ScratchLanguage & {
+  formattable: boolean;
+})[] = (
+  [
+    { id: "plaintext", label: "Plain Text" },
+    { id: "json", label: "JSON", prettierParser: "json" },
+    { id: "javascript", label: "JavaScript", prettierParser: "babel" },
+    { id: "typescript", label: "TypeScript", prettierParser: "typescript" },
+    { id: "jsx", label: "JSX", prettierParser: "babel" },
+    { id: "tsx", label: "TSX", prettierParser: "typescript" },
+    { id: "markdown", label: "Markdown", prettierParser: "markdown" },
+    { id: "css", label: "CSS", prettierParser: "css" },
+    { id: "html", label: "HTML", prettierParser: "html" },
+    { id: "python", label: "Python" },
+    { id: "yaml", label: "YAML", prettierParser: "yaml" },
+    { id: "xml", label: "XML" },
+  ] as const
+).map((l) => ({
+  ...l,
+  formattable: "prettierParser" in l && !!l.prettierParser,
+}));
 
 const BY_ID = new Map(LANGUAGES.map((l) => [l.id, l]));
 
@@ -64,7 +68,10 @@ export async function prettify(
   const lang = BY_ID.get(languageId);
   const parser = lang?.prettierParser;
   if (!parser) {
-    return { ok: false, error: `No formatter for ${lang?.label ?? languageId}` };
+    return {
+      ok: false,
+      error: `No formatter for ${lang?.label ?? languageId}`,
+    };
   }
   try {
     const [{ format }, plugins] = await Promise.all([

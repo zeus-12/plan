@@ -564,7 +564,9 @@ export function ProjectSidebar({
                         <span className="min-w-0 flex-1 truncate">
                           {row.node.name}
                         </span>
-                        {groupNeedsApproval && <ApprovalDot className="mr-0.5" />}
+                        {groupNeedsApproval && (
+                          <ApprovalDot className="mr-0.5" />
+                        )}
                         <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                           {row.node.children.length}
                         </span>

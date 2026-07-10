@@ -47,7 +47,8 @@ export function blameLineInfo(
   const commit = blame.commits[hash] ?? null;
   if (!uncommitted && !commit) return null;
   const isYou =
-    uncommitted || (!!blame.userEmail && commit?.authorMail === blame.userEmail);
+    uncommitted ||
+    (!!blame.userEmail && commit?.authorMail === blame.userEmail);
   const who = isYou ? "You" : commit!.author;
   let label = uncommitted
     ? `${who} • Uncommitted changes`

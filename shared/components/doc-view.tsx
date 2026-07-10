@@ -235,7 +235,11 @@ export function DocView({
           const ls = lineStarts[i];
           const le = ls + lineText.length;
           let ranges = rangesByLine.get(i) ?? [];
-          if (pendingRange && pendingRange.start < le && pendingRange.end > ls) {
+          if (
+            pendingRange &&
+            pendingRange.start < le &&
+            pendingRange.end > ls
+          ) {
             ranges = [
               ...ranges,
               {
