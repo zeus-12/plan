@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, sameJson } from "@plan/shared/lib/utils";
 import type { ConversationMessage, MessagePart } from "../../shared-types";
 
 /** How many px of a message must be on screen before it counts as "visible"
@@ -70,13 +70,22 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   const directionRef = useRef<"up" | "down">("down");
   const [maxListHeight, setMaxListHeight] = useState<number>();
 
-  const userMessages = useMemo<UserMessage[]>(
+  // Identity-stable across streaming ticks: `messages` is a new array every
+  // transcript update, but the USER turns rarely change — keeping the old
+  // array when content matches means the observer effect below isn't torn
+  // down and rebuilt 4×/second while Claude streams.
+  const computedUserMessages = useMemo<UserMessage[]>(
     () =>
       messages
         .filter(isUserTurn)
         .map((m) => ({ uuid: m.uuid, text: previewText(m) })),
     [messages],
   );
+  const stableUserMessages = useRef(computedUserMessages);
+  if (!sameJson(stableUserMessages.current, computedUserMessages)) {
+    stableUserMessages.current = computedUserMessages;
+  }
+  const userMessages = stableUserMessages.current;
 
   const uuidSet = useMemo(
     () => new Set(userMessages.map((m) => m.uuid)),
@@ -86,60 +95,91 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   // Highlight the message entering at the leading edge of the scroll: the
   // bottom-most visible turn when scrolling down (and on open), the top-most
   // visible turn when scrolling up. So a sliver peeking in claims the highlight.
+  //
+  // Visibility is PUSHED by an IntersectionObserver rather than measured per
+  // frame — the old scroll handler ran querySelectorAll over every row plus a
+  // getBoundingClientRect per user row on every animation frame, layout thrash
+  // that grew with transcript length. The scroll listener now only tracks
+  // direction (one scrollTop read); picking the highlight is pure iteration
+  // over the pushed visibility set. This also stays correct under
+  // content-visibility row-height shifts, which the observer re-reports.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || userMessages.length === 0) return;
+    const visible = new Set<string>();
     let raf = 0;
-    const update = () => {
+
+    // One-time fallback when no user row is on screen and nothing was ever
+    // highlighted (opened mid-way through a long assistant stretch): nearest
+    // off-screen turn. A single measured pass, not per-frame.
+    const nearestOffscreen = () => {
+      const containerTop = el.getBoundingClientRect().top;
+      let lastAbove: string | null = null;
+      let firstBelow: string | null = null;
+      for (const row of el.querySelectorAll<HTMLElement>("[data-msg-row]")) {
+        const uuid = row.dataset.msgRow;
+        if (!uuid || !uuidSet.has(uuid)) continue;
+        const r = row.getBoundingClientRect();
+        if (r.bottom - containerTop <= VISIBLE_MARGIN_PX) lastAbove = uuid;
+        else if (firstBelow === null) firstBelow = uuid;
+      }
+      return (
+        lastAbove ??
+        firstBelow ??
+        userMessages[userMessages.length - 1]?.uuid ??
+        null
+      );
+    };
+
+    const choose = () => {
       raf = 0;
+      let firstVisible: string | null = null;
+      let lastVisible: string | null = null;
+      for (const m of userMessages) {
+        if (!visible.has(m.uuid)) continue;
+        if (firstVisible === null) firstVisible = m.uuid;
+        lastVisible = m.uuid;
+      }
+      const chosen = directionRef.current === "up" ? firstVisible : lastVisible;
+      // When no user message is on screen (scrolling through a long stretch of
+      // assistant/tool output) keep the last highlight — don't snap.
+      setActiveUuid((prev) => chosen ?? prev ?? nearestOffscreen());
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(choose);
+    };
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const uuid = (e.target as HTMLElement).dataset.msgRow;
+          if (!uuid) continue;
+          if (e.isIntersecting) visible.add(uuid);
+          else visible.delete(uuid);
+        }
+        schedule();
+      },
+      // The negative margin mirrors VISIBLE_MARGIN_PX: a row counts as visible
+      // only once more than a sliver overlaps the viewport.
+      { root: el, rootMargin: `-${VISIBLE_MARGIN_PX}px 0px` },
+    );
+    for (const row of el.querySelectorAll<HTMLElement>("[data-msg-row]")) {
+      const uuid = row.dataset.msgRow;
+      if (uuid && uuidSet.has(uuid)) io.observe(row);
+    }
+
+    const onScroll = () => {
       const st = el.scrollTop;
       if (st > lastScrollTopRef.current + 0.5) directionRef.current = "down";
       else if (st < lastScrollTopRef.current - 0.5) directionRef.current = "up";
       lastScrollTopRef.current = st;
-
-      const containerTop = el.getBoundingClientRect().top;
-      const viewHeight = el.clientHeight;
-      let firstVisible: string | null = null;
-      let lastVisible: string | null = null;
-      // For the very first pick (no prior highlight): the nearest user message
-      // off-screen — the last one above the viewport, else the first below.
-      let lastAbove: string | null = null;
-      let firstBelow: string | null = null;
-      const rows = el.querySelectorAll<HTMLElement>("[data-msg-row]");
-      for (const row of rows) {
-        const uuid = row.dataset.msgRow;
-        if (!uuid || !uuidSet.has(uuid)) continue;
-        const r = row.getBoundingClientRect();
-        const top = r.top - containerTop;
-        const bottom = r.bottom - containerTop;
-        const visible =
-          bottom > VISIBLE_MARGIN_PX && top < viewHeight - VISIBLE_MARGIN_PX;
-        if (visible) {
-          if (firstVisible === null) firstVisible = uuid;
-          lastVisible = uuid;
-        } else if (bottom <= VISIBLE_MARGIN_PX) {
-          lastAbove = uuid;
-        } else if (firstBelow === null) {
-          firstBelow = uuid;
-        }
-      }
-      const chosen = directionRef.current === "up" ? firstVisible : lastVisible;
-      // Nearest off-screen turn, falling back to the bottom-most message.
-      const nearest =
-        lastAbove ??
-        firstBelow ??
-        userMessages[userMessages.length - 1]?.uuid ??
-        null;
-      // When no user message is on screen (scrolling through a long stretch of
-      // assistant/tool output) keep the last highlight — don't snap.
-      setActiveUuid((prev) => chosen ?? prev ?? nearest);
-    };
-    const onScroll = () => {
-      if (!raf) raf = requestAnimationFrame(update);
+      // Direction flips change which end of the visible set wins, so re-pick
+      // even when visibility didn't change. Pure JS — no layout reads.
+      schedule();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    update();
     return () => {
+      io.disconnect();
       el.removeEventListener("scroll", onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
