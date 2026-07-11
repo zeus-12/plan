@@ -89,6 +89,26 @@ function isSystemMetaMessage(m: ConversationMessage): boolean {
   );
 }
 
+// Row alignment is a pure function of the message, but deriving it runs regex
+// over every part — and the render loop derives it for EVERY row on every
+// streaming tick. Message objects are immutable (mergeSession swaps the object
+// on any content change), so a per-object cache is exact: a tick classifies
+// only the rows it actually replaced.
+const isUserRowCache = new WeakMap<ConversationMessage, boolean>();
+
+function isUserRow(m: ConversationMessage): boolean {
+  let v = isUserRowCache.get(m);
+  if (v === undefined) {
+    v =
+      !isBashMessage(m) &&
+      !isTaskNotificationMessage(m) &&
+      !isSystemMetaMessage(m) &&
+      classify(m) === "user-real";
+    isUserRowCache.set(m, v);
+  }
+  return v;
+}
+
 interface Props {
   messages: ConversationMessage[];
   /** Project key — lets plan cards reach the shared annotation store for
@@ -1783,11 +1803,7 @@ export const MessageList = memo(function MessageList({
               // iMessage-style: user turns are a right-aligned bubble capped in
               // width; assistant turns run full-width with no bubble. Bash-mode
               // turns read as terminal output, so they go left/full-width too.
-              const isUser =
-                !isBashMessage(m) &&
-                !isTaskNotificationMessage(m) &&
-                !isSystemMetaMessage(m) &&
-                classify(m) === "user-real";
+              const isUser = isUserRow(m);
               return (
                 <div
                   key={m.uuid || idx}

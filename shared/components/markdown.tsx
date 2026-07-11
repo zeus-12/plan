@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import {
   highlightToHtml,
   stripComments,
+  SYNC_HIGHLIGHT_MAX_CHARS,
   useActiveShikiTheme,
   useShikiReady,
 } from "../lib/highlight";
@@ -47,7 +48,15 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   const code = codeText(codeProps.children);
 
   const html = useMemo(
-    () => highlightToHtml(code, lang),
+    // Oversized blocks (a pasted file dump — or one still streaming in, which
+    // re-runs this on every growth tick) skip tokenization and render as
+    // escaped plain text: same size budget as the file/diff/scratch surfaces.
+    // Within budget, tokenization is a sub-frame cost.
+    () =>
+      highlightToHtml(
+        code,
+        code.length > SYNC_HIGHLIGHT_MAX_CHARS ? "plaintext" : lang,
+      ),
     // Re-render once shiki finishes loading, and re-tokenize on theme change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [code, lang, shikiReady, shikiTheme],
@@ -198,7 +207,7 @@ export const Markdown = memo(function Markdown({
   return (
     <div
       className={cn(
-        "text-[13.5px] leading-relaxed text-[var(--text)] [word-break:break-word]",
+        "text-[14px] leading-[1.7] text-[var(--text)] antialiased [word-break:break-word]",
         className,
       )}
     >
@@ -213,7 +222,7 @@ type Props<T extends ElementType> = ComponentPropsWithoutRef<T>;
 
 const COMPONENTS = {
   p: ({ className, ...p }: Props<"p">) => (
-    <p className={cn("my-2 first:mt-0 last:mb-0", className)} {...p} />
+    <p className={cn("my-3 first:mt-0 last:mb-0", className)} {...p} />
   ),
   h1: ({ className, ...p }: Props<"h1">) => (
     <h1
@@ -249,10 +258,13 @@ const COMPONENTS = {
     />
   ),
   ul: ({ className, ...p }: Props<"ul">) => (
-    <ul className={cn("my-2 list-disc space-y-1 pl-5", className)} {...p} />
+    <ul className={cn("my-3 list-disc space-y-1.5 pl-5", className)} {...p} />
   ),
   ol: ({ className, ...p }: Props<"ol">) => (
-    <ol className={cn("my-2 list-decimal space-y-1 pl-5", className)} {...p} />
+    <ol
+      className={cn("my-3 list-decimal space-y-1.5 pl-5", className)}
+      {...p}
+    />
   ),
   li: ({ className, ...p }: Props<"li">) => (
     <li className={cn("[&>ul]:my-1 [&>ol]:my-1", className)} {...p} />
@@ -298,7 +310,7 @@ const COMPONENTS = {
     return (
       <code
         className={cn(
-          "rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5 font-[family-name:var(--font-mono)] text-[0.88em]",
+          "rounded-[5px] border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.85em]",
           className,
         )}
         {...p}
