@@ -5,6 +5,7 @@ import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
 import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
 import { reconstructOldText } from "@plan/shared/lib/diff-reconstruct";
+import { useDiffBlame } from "../lib/use-diff-blame";
 
 interface Props {
   encoded: string;
@@ -120,6 +121,29 @@ export const PrFileDiff = memo(function PrFileDiff({
   const viewOldText = contents?.oldText ?? "";
   const viewNewText = contents?.newText ?? "";
 
+  // Inline blame for the head (right) side only, at the PR's head commit —
+  // which resolveHeadSha fetched into the local object store, so every line
+  // attributes to a real commit. The old side is RECONSTRUCTED text with no
+  // commit to anchor honest blame to (base is deliberately never resolved —
+  // see resolveHeadSha), so it gets no annotation rather than a guess.
+  const blameRelPath = useMemo(() => {
+    const p = file.newPath ?? file.path;
+    return subPath ? `${subPath}/${p}` : p;
+  }, [subPath, file.newPath, file.path]);
+  const {
+    blame,
+    card: blameCard,
+    hasCard: hasBlameCard,
+    closeCard: blameClose,
+  } = useDiffBlame(
+    encoded,
+    blameRelPath,
+    null,
+    headSha && contents && !contents.binary && contents.newText
+      ? { kind: "rev", rev: headSha, text: contents.newText }
+      : null,
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2">
@@ -141,7 +165,11 @@ export const PrFileDiff = memo(function PrFileDiff({
         <div ref={setSettingsSlot} className="flex h-8 items-center" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div
+        className="min-h-0 flex-1 overflow-auto p-3"
+        // The blame card is fixed-position; close it when the rows scroll away.
+        onScroll={hasBlameCard ? blameClose : undefined}
+      >
         {file.binary ? (
           <Placeholder>Binary file</Placeholder>
         ) : !headSha ? (
@@ -178,9 +206,11 @@ export const PrFileDiff = memo(function PrFileDiff({
             }}
             onUpdateAnnotation={onUpdate}
             onRemoveAnnotation={onRemove}
+            blame={blame}
           />
         )}
       </div>
+      {blameCard}
     </div>
   );
 });

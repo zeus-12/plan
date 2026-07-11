@@ -261,6 +261,14 @@ export interface IpcInvokeContract {
     args: [encoded: string, relPath: string, contents: string];
     result: BlameResult | null;
   };
+  /**
+   * Per-line authorship for the file AS OF `rev` — for viewers rendering a
+   * committed blob (e.g. a PR head fetched into the local object store).
+   */
+  "git:blameRev": {
+    args: [encoded: string, relPath: string, rev: string];
+    result: BlameResult | null;
+  };
   /** Full message for one commit (for the blame hover card). */
   "git:commitDetails": {
     args: [encoded: string, relPath: string, hash: string];
@@ -391,6 +399,7 @@ export const API_INVOKE = {
   commit: "git:commit",
   applyPatch: "git:applyPatch",
   blameContents: "git:blameContents",
+  blameRev: "git:blameRev",
   commitDetails: "git:commitDetails",
 
   terminalOpen: "terminal:open",

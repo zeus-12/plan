@@ -3,12 +3,8 @@ import type { FileDiff } from "@plan/shared/lib/diff-parser";
 import type { FileView, FileImageDiff } from "../../shared-types";
 import { useProjectAnnotations } from "../lib/annotation-store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
-import {
-  InteractiveDiff,
-  type DiffBlame,
-} from "@plan/shared/components/interactive-diff";
-import { blameLineInfo, tagBlame, type TextBlame } from "../lib/blame";
-import { useBlameCard } from "../lib/use-blame-card";
+import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
+import { useDiffBlame } from "../lib/use-diff-blame";
 import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
 import {
@@ -283,76 +279,28 @@ function FileDiffViewerImpl({
 
   /* ── Inline blame (click a row → trailing annotation + hover card) ── */
 
-  // One blame per side, each computed against EXACTLY the text that side
-  // renders (`--contents`) and tagged with it, so authorship structurally
-  // can't drift across HEAD/index/worktree states. Keyed on the side TEXTS
-  // (value-compared), not the `contents` object — a worktree revision bump
-  // that refetches identical text must not re-run git. Skipped while the
-  // in-memory "Format" view is active — that text doesn't exist in git, so
-  // any blame shown for it would be a lie.
+  // One blame per side via `--contents`, so authorship can't drift across
+  // HEAD/index/worktree states. Skipped while the in-memory "Format" view is
+  // active — that text doesn't exist in git, so any blame shown for it would
+  // be a lie.
   const blameRelPath = subPath ? `${subPath}/${file.path}` : file.path;
   const blameable =
     !!contents && !contents.binary && !formatActive && !isImagePath(file.path);
-  const blameSrcOld = blameable ? contents.oldText : "";
-  const blameSrcNew = blameable ? contents.newText : "";
-  const [blameL, setBlameL] = useState<TextBlame | null>(null);
-  const [blameR, setBlameR] = useState<TextBlame | null>(null);
-  useEffect(() => {
-    setBlameL(null);
-    setBlameR(null);
-    let cancelled = false;
-    const fetchSide = (src: string, set: (b: TextBlame | null) => void) => {
-      if (!src) return;
-      window.electronAPI.blameContents(encoded, blameRelPath, src).then((r) => {
-        if (!cancelled) set(tagBlame(r, src));
-      });
-    };
-    fetchSide(blameSrcOld, setBlameL);
-    fetchSide(blameSrcNew, setBlameR);
-    return () => {
-      cancelled = true;
-    };
-  }, [blameSrcOld, blameSrcNew, encoded, blameRelPath]);
-
   const {
+    blame: diffBlame,
     card: blameCard,
     hasCard: hasBlameCard,
-    chipEnter: blameChipEnter,
-    chipLeave: blameChipLeave,
-    open: blameOpen,
-    close: blameClose,
-  } = useBlameCard(encoded, blameRelPath);
-
-  // A side's blame is trusted only while its tag IS that side's rendered text.
-  const matchedBlameL =
-    blameL && blameL.forText === viewOldText ? blameL : null;
-  const matchedBlameR =
-    blameR && blameR.forText === viewNewText ? blameR : null;
-
-  const diffBlame = useMemo<DiffBlame | undefined>(() => {
-    if (!matchedBlameL && !matchedBlameR) return undefined;
-    const infoAt = (side: "left" | "right", num: number) => {
-      const b = side === "left" ? matchedBlameL : matchedBlameR;
-      return b ? blameLineInfo(b, num - 1) : null;
-    };
-    return {
-      labelFor: (side, num) => infoAt(side, num)?.label ?? null,
-      onChipEnter: (side, num, rect) => {
-        const info = infoAt(side, num);
-        if (info) blameChipEnter(rect, info);
-      },
-      onChipLeave: blameChipLeave,
-      onChipClick: (side, num, rect) => {
-        const info = infoAt(side, num);
-        if (info) blameOpen(rect, info);
-      },
-    };
-  }, [matchedBlameL, matchedBlameR, blameChipEnter, blameChipLeave, blameOpen]);
-
-  // The card is fixed-position — drop it when the text under it changes.
-  useEffect(() => {
-    blameClose();
-  }, [viewOldText, viewNewText, blameClose]);
+    closeCard: blameClose,
+  } = useDiffBlame(
+    encoded,
+    blameRelPath,
+    blameable && contents.oldText
+      ? { kind: "contents", text: contents.oldText }
+      : null,
+    blameable && contents.newText
+      ? { kind: "contents", text: contents.newText }
+      : null,
+  );
 
   const addAnnotation = useCallback(
     (

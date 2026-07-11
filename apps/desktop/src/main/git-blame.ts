@@ -1,4 +1,5 @@
-import { basename, dirname } from "path";
+import { stat } from "fs/promises";
+import { basename, dirname, join } from "path";
 import { git } from "./git-exec";
 import { resolveProjectFilePath } from "./project-files";
 import type { BlameCommit, BlameResult, CommitDetails } from "../shared-types";
@@ -13,17 +14,36 @@ async function runGit(
   return r.code === 0 ? r.stdout : null;
 }
 
+async function isDir(p: string): Promise<boolean> {
+  try {
+    return (await stat(p)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve a project-relative file to the directory git should run in. Running
  * in the file's own directory (not the project root) lets git discover the
- * right repo when a project holds several repos in subdirectories.
+ * right repo when a project holds several repos in subdirectories. The
+ * directory may not exist in the current checkout (a rev-blamed path from
+ * another branch, e.g. a PR head that adds a new folder) — climb to the
+ * nearest existing ancestor so `git -C` has a real cwd, keeping the file
+ * path relative to it.
  */
 async function locate(
   encoded: string,
   relPath: string,
 ): Promise<{ cwd: string; file: string } | null> {
   const full = await resolveProjectFilePath(encoded, relPath);
-  return full ? { cwd: dirname(full), file: basename(full) } : null;
+  if (!full) return null;
+  let cwd = dirname(full);
+  let file = basename(full);
+  while (!(await isDir(cwd)) && dirname(cwd) !== cwd) {
+    file = join(basename(cwd), file);
+    cwd = dirname(cwd);
+  }
+  return { cwd, file };
 }
 
 /** Parse `git blame --porcelain` output into per-line hashes + commit info. */
@@ -98,13 +118,37 @@ export async function blameContents(
   relPath: string,
   contents: string,
 ): Promise<BlameResult | null> {
+  return blame(encoded, relPath, ["--contents", "-"], contents);
+}
+
+/**
+ * Per-line authorship for the file AS OF `rev` (`git blame <rev>`) — for
+ * viewers rendering a committed blob, e.g. a PR head that was fetched into
+ * the local object store. Every line resolves to a real commit; the
+ * "uncommitted" zero-hash can't appear.
+ */
+export async function blameRev(
+  encoded: string,
+  relPath: string,
+  rev: string,
+): Promise<BlameResult | null> {
+  if (!/^[0-9a-f]{4,40}$/.test(rev)) return null;
+  return blame(encoded, relPath, [rev]);
+}
+
+async function blame(
+  encoded: string,
+  relPath: string,
+  target: string[],
+  stdin?: string,
+): Promise<BlameResult | null> {
   const loc = await locate(encoded, relPath);
   if (!loc) return null;
   const [out, email] = await Promise.all([
     runGit(
       loc.cwd,
-      ["blame", "--porcelain", "--contents", "-", "--", loc.file],
-      contents,
+      ["blame", "--porcelain", ...target, "--", loc.file],
+      stdin,
     ),
     userEmail(loc.cwd),
   ]);

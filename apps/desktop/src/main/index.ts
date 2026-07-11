@@ -106,7 +106,7 @@ import {
   unstageAll,
   unstageFile,
 } from "./git";
-import { blameContents, getCommitDetails } from "./git-blame";
+import { blameContents, blameRev, getCommitDetails } from "./git-blame";
 import {
   createWorktree,
   removeWorktree,
@@ -488,6 +488,7 @@ const invokeHandlers: {
     applyPatch(encoded, patch, { mode }, subPath),
   "git:blameContents": (_e, encoded, path, contents) =>
     blameContents(encoded, path, contents),
+  "git:blameRev": (_e, encoded, path, rev) => blameRev(encoded, path, rev),
   "git:commitDetails": (_e, encoded, path, hash) =>
     getCommitDetails(encoded, path, hash),
 
