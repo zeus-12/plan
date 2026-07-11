@@ -15,6 +15,7 @@ import {
 } from "@plan/shared/components/ui/sidebar";
 import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import { lastSegment } from "@plan/shared/lib/path";
+import { sameJson } from "@plan/shared/lib/utils";
 import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
 import { ProjectSidebar } from "./components/project-sidebar";
 import { WorkspaceHost, type MountTarget } from "./components/workspace-host";
@@ -163,32 +164,85 @@ function Shell() {
    *   - sidebar grouping (worktrees share a git common dir), and
    *   - the multi-repo file view inside the workspace.
    */
-  const refreshRepos = useCallback(async (list: ProjectEntry[]) => {
-    const entries = await Promise.all(
-      list.map(async (p) => {
-        try {
-          const repos = await window.electronAPI.listRepos(p.encoded);
-          return [p.encoded, repos] as const;
-        } catch {
-          return [p.encoded, [] as DiscoveredRepo[]] as const;
+  const refreshRepos = useCallback(
+    async (targets: ProjectEntry[], allEncodeds?: string[]) => {
+      const entries = await Promise.all(
+        targets.map(async (p) => {
+          try {
+            const repos = await window.electronAPI.listRepos(p.encoded);
+            return [p.encoded, repos] as const;
+          } catch {
+            return [p.encoded, [] as DiscoveredRepo[]] as const;
+          }
+        }),
+      );
+      // Merge + dedupe: unchanged answers keep the previous Map identity so
+      // the memoized workspaces don't re-render on every watcher tick.
+      setReposByProject((prev) => {
+        let changed = false;
+        const next = new Map(prev);
+        if (allEncodeds) {
+          const keep = new Set(allEncodeds);
+          for (const k of next.keys()) {
+            if (!keep.has(k)) {
+              next.delete(k);
+              changed = true;
+            }
+          }
         }
-      }),
-    );
-    setReposByProject(new Map(entries));
-  }, []);
+        for (const [encoded, repos] of entries) {
+          if (!sameJson(next.get(encoded) ?? null, repos)) {
+            next.set(encoded, repos);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    },
+    [],
+  );
 
-  const refreshProjects = useCallback(async () => {
-    const list = await window.electronAPI.listProjects();
-    setProjects(list);
-    setSelectedEncoded((current) => {
-      // Keep the current selection; only fall back when it's gone (or unset).
-      if (current && list.some((p) => p.encoded === current)) return current;
-      const stored = window.localStorage.getItem(SELECTED_PROJECT_KEY);
-      if (stored && list.some((p) => p.encoded === stored)) return stored;
-      return list.find((p) => !p.archived)?.encoded ?? list[0]?.encoded ?? null;
-    });
-    void refreshRepos(list);
-  }, [refreshRepos]);
+  // The project SET last seen — repo discovery re-runs for every project only
+  // when this changes (same idea as iconsKey); per-tick refreshes are scoped to
+  // the projects that actually emitted events.
+  const knownProjectsKeyRef = useRef<string | null>(null);
+
+  const refreshProjects = useCallback(
+    async (changed?: ReadonlySet<string>) => {
+      const list = await window.electronAPI.listProjects();
+      // Watcher ticks usually return identical content — keep the identity so
+      // every `projects`-prop memo downstream keeps working while streaming.
+      setProjects((prev) => (sameJson(prev, list) ? prev : list));
+      setSelectedEncoded((current) => {
+        // Keep the current selection; only fall back when it's gone (or unset).
+        if (current && list.some((p) => p.encoded === current)) return current;
+        const stored = window.localStorage.getItem(SELECTED_PROJECT_KEY);
+        if (stored && list.some((p) => p.encoded === stored)) return stored;
+        return (
+          list.find((p) => !p.archived)?.encoded ?? list[0]?.encoded ?? null
+        );
+      });
+      const key = list
+        .map((p) => p.encoded)
+        .sort()
+        .join("\n");
+      const setChanged = key !== knownProjectsKeyRef.current;
+      knownProjectsKeyRef.current = key;
+      if (setChanged || !changed) {
+        // First load or the project set itself changed: (re)discover them all
+        // and prune removed ones.
+        void refreshRepos(
+          list,
+          list.map((p) => p.encoded),
+        );
+      } else if (changed.size > 0) {
+        // Routine tick: re-inspect only the projects with activity (their
+        // branch may have moved) instead of spawning git for every project.
+        void refreshRepos(list.filter((p) => changed.has(p.encoded)));
+      }
+    },
+    [refreshRepos],
+  );
 
   useEffect(() => {
     refreshProjects();
@@ -203,13 +257,18 @@ function Shell() {
   useEffect(() => {
     // Re-pull the project/repo list on activity (debounced — events stream
     // continuously while a session runs), but never change which project is
-    // focused — switching out from under the user is jarring.
+    // focused — switching out from under the user is jarring. The events seen
+    // during the window scope the repo re-discovery to the projects involved.
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = window.electronAPI.onWatcherEvent(() => {
+    let changed = new Set<string>();
+    const off = window.electronAPI.onWatcherEvent((e) => {
+      changed.add(e.encoded);
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        refreshProjects();
+        const batch = changed;
+        changed = new Set();
+        void refreshProjects(batch);
       }, 500);
     });
     return () => {

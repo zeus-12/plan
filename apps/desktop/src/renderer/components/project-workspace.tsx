@@ -21,7 +21,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
-import { cn } from "@plan/shared/lib/utils";
+import { cn, sameJson } from "@plan/shared/lib/utils";
 import { basename, dirname, lastSegment } from "@plan/shared/lib/path";
 import type {
   ProjectEntry,
@@ -590,7 +590,6 @@ function ProjectWorkspaceImpl({
   chatSessionIdsRef.current = chatSessionIds;
 
   const refreshSessions = useCallback(async () => {
-    setSessionsLoading(true);
     try {
       // List metadata comes straight from main's mtime cache — never fetch
       // full transcripts here (that froze the renderer on every watcher tick).
@@ -618,12 +617,16 @@ function ProjectWorkspaceImpl({
           messageCount: s.messageCount,
           archived: s.archived,
         }));
-      setSessions(enriched);
+      // Watcher ticks mostly return identical content — keep the identity so
+      // the sidebar/session-list memos don't re-render while streaming.
+      setSessions((prev) => (sameJson(prev, enriched) ? prev : enriched));
       // Cache the loaded list so a remount (worktree switch) hydrates instantly.
       setCachedSessions(project.encoded, enriched);
       // No auto-select: the content pane only shows what you've opened as a
       // tab. A fresh worktree opens to an empty pane (click a chat to open it).
     } finally {
+      // Clears the never-loaded placeholder; a same-value set is a React no-op,
+      // so background refreshes don't re-render through this.
       setSessionsLoading(false);
     }
   }, [project.encoded]);
@@ -765,29 +768,37 @@ function ProjectWorkspaceImpl({
   // every single one stalls the renderer.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let wantSelected = false;
+    // What the window's events actually touched — git spawns (diff/status) are
+    // only worth paying when the worktree changed, and the session list only
+    // when a JSONL did. A streaming turn is almost all session events, so this
+    // keeps the 250ms loop off git entirely between file edits.
+    let sawWorktree = false;
+    let sawSession = false;
     const changedSids = new Set<string>();
     const off = window.electronAPI.onWatcherEvent((e) => {
       if (e.encoded !== project.encoded) return;
       // A worktree change (file edit / git op on disk) bumps the content
       // revision so open diff/file/image panes re-fetch — refreshDiff below
       // covers the sidebar status, this covers the mounted content panes.
-      if (e.kind === "worktree-changed") bumpWorktreeRevision(e.encoded);
+      if (e.kind === "worktree-changed") {
+        bumpWorktreeRevision(e.encoded);
+        sawWorktree = true;
+      } else {
+        sawSession = true;
+      }
       // Refresh the transcript of any OPEN chat tab whose JSONL changed.
       if (e.sessionId && chatSessionIdsRef.current.includes(e.sessionId)) {
-        wantSelected = true;
         changedSids.add(e.sessionId);
       }
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        refreshDiff();
-        refreshSessions();
-        if (wantSelected) {
-          wantSelected = false;
-          for (const sid of changedSids) void refreshTranscript(sid);
-          changedSids.clear();
-        }
+        if (sawWorktree) refreshDiff();
+        if (sawSession) refreshSessions();
+        sawWorktree = false;
+        sawSession = false;
+        for (const sid of changedSids) void refreshTranscript(sid);
+        changedSids.clear();
       }, 250);
     });
     return () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { sameJson } from "@plan/shared/lib/utils";
 import type { WorktreeRecord } from "../../shared-types";
 
 export interface AllWorktrees {
@@ -25,7 +26,11 @@ export function useAllWorktrees(): AllWorktrees {
       if (list) list.push(w);
       else map.set(w.projectEncoded, [w]);
     }
-    setByProject(map);
+    // Watcher ticks mostly return identical content — keep the old Map identity
+    // so the sidebar doesn't re-render through every streaming tick.
+    setByProject((prev) =>
+      sameJson([...prev.entries()], [...map.entries()]) ? prev : map,
+    );
   }, []);
 
   useEffect(() => {
