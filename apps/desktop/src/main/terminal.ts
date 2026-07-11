@@ -5,7 +5,9 @@ import { app } from "electron";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { resolveProjectCwd } from "./claude-projects";
+import { classifyInputState, screenIsBusy } from "./tui-screen";
 import type {
+  TerminalActivity,
   TerminalChunk,
   TerminalInfo,
   TerminalInputState,
@@ -22,6 +24,12 @@ interface Session {
    *  whether the renderer's xterm is visible — so we can read the rendered
    *  screen (the input box vs. an approval menu) even from the diffs tab. */
   screen: HeadlessTerminal;
+  /** Trailing debounce for the activity evaluation after output. */
+  evalTimer: ReturnType<typeof setTimeout> | null;
+  /** Supersede marker: only the newest in-flight evaluation may emit. */
+  evalGen: number;
+  /** Last activity pushed to the renderer — emit only on change. */
+  lastActivity: TerminalActivity;
 }
 
 /**
@@ -32,13 +40,17 @@ interface Session {
 const sessions = new Map<string, Session>();
 let onData: ((chunk: TerminalChunk) => void) | null = null;
 let onExit: ((id: string) => void) | null = null;
+let onActivity: ((id: string, activity: TerminalActivity) => void) | null =
+  null;
 
 export function setTerminalCallbacks(cbs: {
   onData: (chunk: TerminalChunk) => void;
   onExit: (id: string) => void;
+  onActivity: (id: string, activity: TerminalActivity) => void;
 }) {
   onData = cbs.onData;
   onExit = cbs.onExit;
+  onActivity = cbs.onActivity;
 }
 
 function defaultShell(): string {
@@ -191,9 +203,14 @@ export async function openTerminal(
       pendingOut: "",
       flushTimer: null,
       screen,
+      evalTimer: null,
+      evalGen: 0,
+      // A fresh shell is idle with no menu; only transitions are pushed.
+      lastActivity: { busy: false, awaitingSelection: false },
     };
     pty.onData((data) => {
       session.screen.write(data);
+      scheduleActivityEval(id, session);
       session.pendingOut += data;
       if (session.flushTimer) return;
       session.flushTimer = setTimeout(() => {
@@ -205,6 +222,7 @@ export async function openTerminal(
     });
     pty.onExit(() => {
       if (session.flushTimer) clearTimeout(session.flushTimer);
+      if (session.evalTimer) clearTimeout(session.evalTimer);
       if (session.pendingOut) onData?.({ id, data: session.pendingOut });
       try {
         session.screen.dispose();
@@ -447,96 +465,72 @@ function readScreen(id: string): string[] {
   return out;
 }
 
-// Claude Code blocks for input in two visually different shapes:
-//
-//  1. Yes/No-style menus (tool approval, plan accept): a NUMBERED option with a
-//     ❯ pointer on the highlighted one, e.g. "❯ 1. Yes". A bare chevron is NOT
-//     enough — the composer's own prompt is also "❯" (or "> ") in current
-//     builds, so only "❯ <number>." means a menu (matching a bare chevron, as
-//     an earlier version did, misread the normal composer as a menu).
-//
-//  2. AskUserQuestion pickers: options are highlighted by COLOR, not a ❯, so
-//     shape (1) misses them entirely. What they reliably carry is a footer hint
-//     line — "Enter to select", "Tab to switch questions", "Esc to cancel".
-//     "Esc to cancel" also rides on the Yes/No prompts, so it doubles as a
-//     general "an interactive prompt is up" signal. It is distinct from the
-//     working spinner's "(esc to interrupt)" — different word, so no clash.
-//
-// All heuristics on rendered glyphs, not a protocol — word any UI as a guess.
-const SELECTION_RE =
-  /❯\s*\d+[.)]|Esc to cancel|Enter to select|Tab to switch questions/;
-const INPUT_BOX_RE = /[│|]\s*[>❯]\s/;
-
 /**
  * EXPERIMENTAL, heuristic. Classify the bottom of terminal `id`'s screen as a
- * free-text input box, a selection menu, or unknown. Returns the matched lines
- * too, so the renderer can surface them for debugging/validation.
+ * free-text input box, a selection menu, or unknown (see tui-screen.ts for the
+ * signatures). Returns the matched lines too, for debugging/validation.
  */
 export function detectInputState(id: string): {
   state: TerminalInputState;
   lines: string[];
 } {
-  const all = readScreen(id);
-  // Only the bottom chunk matters (the box sits at the foot of the frame), and
-  // ignoring the top avoids matching menu-like text in scrollback history.
-  const tail = all.slice(-16);
-  const nonEmpty = tail.filter((l) => l.trim().length > 0);
-  const text = nonEmpty.join("\n");
-  let state: TerminalInputState = "unknown";
-  if (SELECTION_RE.test(text)) state = "selection";
-  else if (INPUT_BOX_RE.test(text)) state = "input";
-  return { state, lines: nonEmpty.slice(-12) };
+  return classifyInputState(readScreen(id));
 }
 
-// While a Claude turn is in flight, its TUI footer renders an "esc to interrupt"
-// hint, and drops it the instant the turn ends (returning to the idle prompt or
-// stopping at an approval menu). That hint is the one true "working" signal:
-//
-//   - Unlike output timing, a scroll repaint can't fake it. Claude runs with
-//     mouse tracking on, so scrolling sends wheel escapes to the pty and Claude
-//     repaints — a real output stream that fooled the old timing-based signal
-//     into "working" for as long as you scrolled. Scrolling never renders this
-//     hint, so reading it instead is immune (verified against real frames).
-//   - Unlike the "✻ Worked for 2s" summaries (which linger in scrollback), it's
-//     only ever present live, so it never produces a stale match.
-//
-// The hint lives in the FOOTER — the live region BELOW the input box. Everything
-// ABOVE the input box is transcript, which can legitimately contain the words
-// "esc to interrupt" (e.g. a chat discussing this very feature — which once
-// pinned a session to "working" forever), so we never scan there. The footer is
-// NOT always the last row or two, though: while Claude runs sub-agents it draws
-// an agent-management panel ("← for agents · ↓ to manage", then a list of
-// agents) BELOW the hint, so a fixed "last N rows" window slid right past it and
-// the status fell back to idle. Anchoring to the input box instead covers the
-// whole footer no matter how tall that panel grows. Reads the real rendered
-// screen (a headless emulator fed the same bytes, kept current for every session
-// incl. backgrounded ones), not an inference off a user action.
-const WORKING_HINT_RE = /esc to interrupt/i;
-// The input-prompt line — the boundary between transcript (above) and the live
-// footer (below). Matches the bordered box ("│ > ", "│ ❯ ") and the borderless
-// prompt ("› ", "❯ ", "> "). We take the LOWEST match: the real input box is
-// always the bottom-most prompt-looking line (a markdown blockquote "> " in the
-// transcript only ever sits above it, and scanning from there down still lands
-// on the same footer).
-const PROMPT_LINE_RE = /^\s*(?:[│|]\s*)?[>❯›](?:\s|$)/;
-// Fallback footer window when no input prompt can be found (unexpected frame).
-const FOOTER_ROWS = 3;
-
-/** Whether terminal `id`'s rendered screen currently shows Claude's working hint. */
+/** Whether terminal `id`'s rendered screen currently shows Claude's working
+ *  hint ("esc to interrupt" in the footer — see tui-screen.ts). Reads the real
+ *  rendered screen (a headless emulator fed the same bytes, kept current for
+ *  every session incl. backgrounded ones), not an inference off a user action. */
 export function isTerminalBusy(id: string): boolean {
+  return screenIsBusy(readScreen(id));
+}
+
+// ── Event-driven activity ──────────────────────────────────────────
+// The renderer used to poll busy/selection state on fixed intervals — a full
+// screen scan of every pty several times a second, even at idle. Instead, a
+// state change can only follow OUTPUT (the working hint appearing/disappearing
+// and a menu being drawn/cleared are repaints), so each output burst schedules
+// one trailing evaluation of THAT session, and only a changed result is pushed
+// (terminal:activity). Idle sessions cost nothing.
+
+// Trailing delay after an output burst. Output flows continuously while Claude
+// works (spinner repaints re-arm the timer every 16ms flush... no — the timer
+// is only set when none is pending, so a steady stream evaluates every 250ms),
+// and the final repaint after the stream stops gets its own evaluation. Also
+// comfortably after the headless emulator has parsed the burst.
+const EVAL_DELAY_MS = 250;
+
+function scheduleActivityEval(id: string, session: Session) {
+  if (session.evalTimer) return;
+  session.evalTimer = setTimeout(() => {
+    session.evalTimer = null;
+    void evaluateActivity(id, session);
+  }, EVAL_DELAY_MS);
+}
+
+async function evaluateActivity(id: string, session: Session) {
+  if (!sessions.has(id)) return; // exited while the timer was pending
+  const gen = ++session.evalGen;
   const rows = readScreen(id);
-  let boundary = -1;
-  for (let i = rows.length - 1; i >= 0; i--) {
-    if (PROMPT_LINE_RE.test(rows[i])) {
-      boundary = i;
-      break;
+  const busy = screenIsBusy(rows);
+  let awaitingSelection = false;
+  if (classifyInputState(rows).state === "selection") {
+    // Gate on a live agent process (TTL-cached ps): a menu detected in a dead
+    // shell's scrollback isn't actionable and must not raise the flag.
+    try {
+      const st = await terminalStatus(id);
+      awaitingSelection = st.running && /claude|node/i.test(st.process ?? "");
+    } catch {
+      awaitingSelection = false;
     }
+    // A newer evaluation started while we awaited ps — let it do the emitting.
+    if (session.evalGen !== gen || !sessions.has(id)) return;
   }
-  const region =
-    boundary >= 0
-      ? rows.slice(boundary + 1)
-      : rows.filter((line) => line.trim().length > 0).slice(-FOOTER_ROWS);
-  return region.some((line) => WORKING_HINT_RE.test(line));
+  const prev = session.lastActivity;
+  if (prev.busy === busy && prev.awaitingSelection === awaitingSelection)
+    return;
+  session.lastActivity = { busy, awaitingSelection };
+  onActivity?.(id, session.lastActivity);
 }
 
 /** Ids of every live pty currently showing the "working" hint. */

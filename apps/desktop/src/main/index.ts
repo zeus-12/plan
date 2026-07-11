@@ -578,6 +578,8 @@ function bridgeTerminal() {
   setTerminalCallbacks({
     onData: (chunk) => sendToRenderer("terminal:data", chunk),
     onExit: (id) => sendToRenderer("terminal:exit", id),
+    onActivity: (id, activity) =>
+      sendToRenderer("terminal:activity", id, activity),
   });
 }
 

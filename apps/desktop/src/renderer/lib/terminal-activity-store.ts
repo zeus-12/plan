@@ -6,8 +6,12 @@ import { useSyncExternalStore } from "react";
  * The truth is Claude's rendered screen, not the output stream. While a turn is
  * in flight Claude's TUI shows an `esc to interrupt` hint and drops it the
  * instant the turn ends; main reads that off a headless emulator it keeps
- * current for every session (see terminal.ts `isTerminalBusy`). We poll that
- * here.
+ * current for every session (see tui-screen.ts).
+ *
+ * Event-fed, not polled: a state change can only follow pty output, so main
+ * evaluates after each output burst and pushes only CHANGES over
+ * `terminal:activity`. One snapshot fetch seeds the set on first subscribe;
+ * idle sessions cost nothing after that.
  *
  * Why not output timing (the previous approach): Claude runs with mouse tracking
  * on, so scrolling the terminal sends wheel escapes to the pty and Claude
@@ -17,58 +21,73 @@ import { useSyncExternalStore } from "react";
  * the viewport but never renders `esc to interrupt`.
  */
 
-// Poll cadence. Main just scans its in-memory emulator rows, so this is a cheap
-// invoke; 400ms keeps the working dot responsive without busy-spinning.
-const POLL_MS = 400;
-
-// Ids currently showing the working hint, as of the last poll.
+// Ids currently showing the working hint.
 let busy = new Set<string>();
 const listeners = new Set<() => void>();
-let timer: ReturnType<typeof setInterval> | null = null;
-let inFlight = false;
+let offs: Array<() => void> | null = null;
+// Ids touched by a live event while the initial snapshot was in flight — the
+// event is fresher than the snapshot, so the snapshot must not override them.
+let touchedDuringSeed: Set<string> | null = null;
 
 function emit() {
   listeners.forEach((l) => l());
 }
 
-function setsEqual(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const x of a) if (!b.has(x)) return false;
-  return true;
+function setBusy(id: string, isBusy: boolean) {
+  if (isBusy === busy.has(id)) return;
+  busy = new Set(busy);
+  if (isBusy) busy.add(id);
+  else busy.delete(id);
+  emit();
 }
 
-async function poll() {
-  // Skip if a poll is still outstanding — never queue invokes up.
-  if (inFlight) return;
-  inFlight = true;
-  try {
-    const next = new Set(await window.electronAPI.terminalBusyIds());
-    if (!setsEqual(next, busy)) {
-      busy = next;
-      emit();
-    }
-  } catch {
-    // Main not ready / no terminals — leave the last known set in place.
-  } finally {
-    inFlight = false;
-  }
-}
-
-function ensureStarted() {
-  if (timer) return;
-  void poll();
-  timer = setInterval(() => void poll(), POLL_MS);
+function start() {
+  if (offs) return;
+  touchedDuringSeed = new Set();
+  offs = [
+    window.electronAPI.onTerminalActivity((id, activity) => {
+      touchedDuringSeed?.add(id);
+      setBusy(id, activity.busy);
+    }),
+    // A killed pty leaves the set. Deferred a tick so every terminal:exit
+    // listener runs first — the done-notifier must prune the id from its
+    // previous-busy set BEFORE it sees this store drop it, or a kill would
+    // read as a finished turn.
+    window.electronAPI.onTerminalExit((id) => {
+      setTimeout(() => setBusy(id, false), 0);
+    }),
+  ];
+  // Seed with the current fleet state; events arriving meanwhile win.
+  void window.electronAPI
+    .terminalBusyIds()
+    .then((ids) => {
+      if (!offs) return; // stopped while the snapshot was in flight
+      const seeded = new Set(busy);
+      for (const id of ids) {
+        if (!touchedDuringSeed?.has(id)) seeded.add(id);
+      }
+      touchedDuringSeed = null;
+      if (seeded.size !== busy.size) {
+        busy = seeded;
+        emit();
+      }
+    })
+    .catch(() => {
+      // Main not ready / no terminals — events will fill the set in.
+      touchedDuringSeed = null;
+    });
 }
 
 function maybeStop() {
   if (listeners.size > 0) return;
-  if (timer) clearInterval(timer);
-  timer = null;
+  offs?.forEach((off) => off());
+  offs = null;
+  touchedDuringSeed = null;
   busy = new Set();
 }
 
 function subscribe(listener: () => void) {
-  ensureStarted();
+  start();
   listeners.add(listener);
   return () => {
     listeners.delete(listener);

@@ -46,6 +46,7 @@ import type {
   SessionEvent,
   SessionListEntry,
   SkillInfo,
+  TerminalActivity,
   TerminalChunk,
   TerminalInfo,
   TerminalInputState,
@@ -328,6 +329,8 @@ export interface IpcEventContract {
   "app:reload-request": [];
   "terminal:data": [chunk: TerminalChunk];
   "terminal:exit": [id: string];
+  /** Pushed when a pty's busy/menu state changes (evaluated on output). */
+  "terminal:activity": [id: string, activity: TerminalActivity];
 }
 
 // ── window.electronAPI surface ───────────────────────────────────────
@@ -420,6 +423,7 @@ export const API_EVENTS = {
   onReloadRequest: "app:reload-request",
   onTerminalData: "terminal:data",
   onTerminalExit: "terminal:exit",
+  onTerminalActivity: "terminal:activity",
 } as const satisfies Record<string, keyof IpcEventContract>;
 
 /** The renderer-facing API, derived method-by-method from the maps above.

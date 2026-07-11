@@ -502,6 +502,17 @@ export interface TerminalChunk {
  */
 export type TerminalInputState = "input" | "selection" | "unknown";
 
+/**
+ * A terminal's live activity, evaluated in main when its pty emits output and
+ * pushed on change (terminal:activity). `busy` = Claude's working hint is on
+ * screen; `awaitingSelection` = a selection/approval menu is rendered AND a
+ * live agent process is behind it.
+ */
+export interface TerminalActivity {
+  busy: boolean;
+  awaitingSelection: boolean;
+}
+
 /** One live pty as reported to the sessions dashboard. */
 export interface TerminalInfo {
   id: string;
