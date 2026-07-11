@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { parseChatTerminalId } from "../../terminal-ids";
 
 /**
  * Live "is this terminal actively working" signal.
@@ -23,6 +24,11 @@ import { useSyncExternalStore } from "react";
 
 // Ids currently showing the working hint.
 let busy = new Set<string>();
+// Busy CHAT ids projected to their `encoded` cwd, so the sidebar can roll up a
+// "Claude is working here" indicator per project/worktree. Chat-only: a busy
+// run/build/scratch pty must never badge a project as working. Rebuilt only when
+// `busy` changes so the hook gets a stable reference between events.
+let busyEncoded = new Set<string>();
 const listeners = new Set<() => void>();
 let offs: Array<() => void> | null = null;
 // Ids touched by a live event while the initial snapshot was in flight — the
@@ -33,11 +39,21 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
+function rebuildEncoded() {
+  const encoded = new Set<string>();
+  for (const id of busy) {
+    const parsed = parseChatTerminalId(id);
+    if (parsed) encoded.add(parsed.encoded);
+  }
+  busyEncoded = encoded;
+}
+
 function setBusy(id: string, isBusy: boolean) {
   if (isBusy === busy.has(id)) return;
   busy = new Set(busy);
   if (isBusy) busy.add(id);
   else busy.delete(id);
+  rebuildEncoded();
   emit();
 }
 
@@ -69,6 +85,7 @@ function start() {
       touchedDuringSeed = null;
       if (seeded.size !== busy.size) {
         busy = seeded;
+        rebuildEncoded();
         emit();
       }
     })
@@ -84,6 +101,7 @@ function maybeStop() {
   offs = null;
   touchedDuringSeed = null;
   busy = new Set();
+  busyEncoded = new Set();
 }
 
 function subscribe(listener: () => void) {
@@ -119,5 +137,18 @@ export function useTerminalWorking(id: string | null): boolean {
     subscribe,
     () => (id ? isWorking(id) : false),
     () => false,
+  );
+}
+
+/**
+ * The set of target `encoded` cwds (projects AND worktrees) with at least one
+ * chat session actively working. The sidebar rolls this up the same way it does
+ * the approval / unread sets.
+ */
+export function useWorkingEncodedSet(): Set<string> {
+  return useSyncExternalStore(
+    subscribe,
+    () => busyEncoded,
+    () => busyEncoded,
   );
 }

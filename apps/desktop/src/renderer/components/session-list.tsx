@@ -4,8 +4,10 @@ import { chatTerminalId } from "../../terminal-ids";
 import { relativeTime } from "../lib/time";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 import { useSessionNeedsApproval } from "../lib/session-approval-store";
+import { useSessionHasUnread } from "../lib/unread-response-store";
 import { WorkingIcon } from "./working-icon";
 import { ApprovalDot } from "./approval-dot";
+import { RepliedDot } from "./replied-dot";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -212,6 +214,9 @@ const SessionRow = memo(function SessionRow({
   // its prompt while it waits, so both read true — but "waiting on you" is the
   // actionable state, so it's the one to show.
   const needsApproval = useSessionNeedsApproval(termId);
+  // Lowest priority of the three: only shown once the turn is genuinely done
+  // (not working) and it isn't parked on a menu (not approval).
+  const hasUnread = useSessionHasUnread(termId);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -237,10 +242,10 @@ const SessionRow = memo(function SessionRow({
             </span>
             {needsApproval ? (
               <ApprovalDot />
+            ) : working ? (
+              <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
             ) : (
-              working && (
-                <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
-              )
+              hasUnread && <RepliedDot />
             )}
           </span>
           <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">

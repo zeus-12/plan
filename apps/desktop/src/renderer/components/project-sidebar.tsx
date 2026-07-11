@@ -51,7 +51,9 @@ import {
   type VisibleItem,
 } from "../lib/project-tree";
 import { useApprovalEncodedSet } from "../lib/session-approval-store";
-import { ApprovalDot } from "./approval-dot";
+import { useUnreadEncodedSet } from "../lib/unread-response-store";
+import { useWorkingEncodedSet } from "../lib/terminal-activity-store";
+import { StatusDots } from "./status-dots";
 import { ChevronLeft } from "./chevron";
 
 interface Props {
@@ -268,6 +270,8 @@ export function ProjectSidebar({
   // up onto rows below so a waiting session in a collapsed project/worktree
   // still surfaces on the sidebar without expanding it.
   const approvalEncoded = useApprovalEncodedSet();
+  const unreadEncoded = useUnreadEncodedSet();
+  const workingEncoded = useWorkingEncodedSet();
   const parentRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
   // When true the sidebar transforms into an archived-only view.
@@ -513,15 +517,19 @@ export function ProjectSidebar({
                 if (row.kind === "group-header") {
                   // Roll up children (and their worktrees) only while collapsed;
                   // expanded, each child row shows its own dot.
-                  const groupNeedsApproval =
+                  // Roll a set over the group's children and their worktrees.
+                  const groupRollup = (set: Set<string>) =>
                     !row.expanded &&
                     row.node.children.some(
                       (c) =>
-                        approvalEncoded.has(c.encoded) ||
+                        set.has(c.encoded) ||
                         (worktreesByProject.get(c.encoded) ?? []).some((w) =>
-                          approvalEncoded.has(w.encoded),
+                          set.has(w.encoded),
                         ),
                     );
+                  const groupNeedsApproval = groupRollup(approvalEncoded);
+                  const groupHasUnread = groupRollup(unreadEncoded);
+                  const groupWorking = groupRollup(workingEncoded);
                   return (
                     <div
                       key={row.node.key}
@@ -546,9 +554,12 @@ export function ProjectSidebar({
                         <span className="min-w-0 flex-1 truncate">
                           {row.node.name}
                         </span>
-                        {groupNeedsApproval && (
-                          <ApprovalDot className="mr-0.5" />
-                        )}
+                        <StatusDots
+                          approval={groupNeedsApproval}
+                          unread={groupHasUnread}
+                          working={groupWorking}
+                          className="mr-0.5"
+                        />
                         <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                           {row.node.children.length}
                         </span>
@@ -563,6 +574,8 @@ export function ProjectSidebar({
                   const isActive =
                     wp.encoded === selected && w.id === activeWorktreeId;
                   const wtNeedsApproval = approvalEncoded.has(w.encoded);
+                  const wtHasUnread = unreadEncoded.has(w.encoded);
+                  const wtWorking = workingEncoded.has(w.encoded);
                   const branch = w.repos[0]?.branch ?? "";
                   const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
                   const canAddRepos = w.repos.length < repoCount;
@@ -626,7 +639,11 @@ export function ProjectSidebar({
                               )}
                             </span>
                           </button>
-                          {wtNeedsApproval && <ApprovalDot />}
+                          <StatusDots
+                            approval={wtNeedsApproval}
+                            unread={wtHasUnread}
+                            working={wtWorking}
+                          />
                         </div>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
@@ -659,10 +676,13 @@ export function ProjectSidebar({
                 // The project's own live-copy session, plus (while collapsed)
                 // any of its worktrees — so a collapsed project surfaces a
                 // waiting worktree without needing to be expanded.
-                const projNeedsApproval =
-                  approvalEncoded.has(p.encoded) ||
+                const projRollup = (set: Set<string>) =>
+                  set.has(p.encoded) ||
                   (!row.expanded &&
-                    row.worktrees.some((w) => approvalEncoded.has(w.encoded)));
+                    row.worktrees.some((w) => set.has(w.encoded)));
+                const projNeedsApproval = projRollup(approvalEncoded);
+                const projHasUnread = projRollup(unreadEncoded);
+                const projWorking = projRollup(workingEncoded);
                 return (
                   <ContextMenu key={p.encoded}>
                     <ContextMenuTrigger asChild>
@@ -733,9 +753,12 @@ export function ProjectSidebar({
                               </span>
                             </span>
                           </button>
-                          {projNeedsApproval && (
-                            <ApprovalDot className="mr-1.5" />
-                          )}
+                          <StatusDots
+                            approval={projNeedsApproval}
+                            unread={projHasUnread}
+                            working={projWorking}
+                            className="mr-1.5"
+                          />
                           {/* Right slot: metadata at rest, actions on hover. The
                             actions overlay the metadata (absolute), so the row
                             never reflows and they never collide with the label. */}

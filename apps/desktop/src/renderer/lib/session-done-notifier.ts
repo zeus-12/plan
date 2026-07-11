@@ -3,6 +3,7 @@ import { isChatTerminalId } from "../../terminal-ids";
 import { getNotificationSettings } from "./notification-settings";
 import { playSound } from "./notification-sounds";
 import { sessionLabel, sessionNavigator } from "./session-notify";
+import { markSessionReplied } from "./unread-response-store";
 import { osNotify, pushToast } from "./toast-store";
 
 /**
@@ -71,6 +72,10 @@ async function onFinished(id: string) {
   } catch {
     // Best effort — if the confirm calls fail, still notify rather than swallow.
   }
+  // Badge the session "replied — needs you" until it's looked at. Independent of
+  // notification settings (those gate the sound/banner, not the persistent
+  // badge); the store itself skips it if you're already looking at the session.
+  markSessionReplied(id);
   fire(id);
 }
 
