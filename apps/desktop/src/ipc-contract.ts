@@ -33,8 +33,10 @@ import type {
   GitDiffResult,
   GitOpResult,
   GitStatusResult,
-  ParsedSession,
-  PrDetailResult,
+  PrConversationResult,
+  PrDiffResult,
+  PrHeadShaResult,
+  PrMetaResult,
   PrListResult,
   PrFileView,
   ProjectDefaults,
@@ -43,6 +45,8 @@ import type {
   ScratchData,
   SearchOptions,
   SearchResult,
+  SessionDelta,
+  SessionDeltaClient,
   SessionEvent,
   SessionListEntry,
   SkillInfo,
@@ -81,9 +85,11 @@ export interface IpcInvokeContract {
     args: [sessionId: string, name: string];
     result: { ok: true };
   };
+  /** Incremental transcript read: pass the previous response's `gen` +
+   *  held-message count to receive only the messages appended since. */
   "session:read": {
-    args: [encoded: string, sessionId: string];
-    result: ParsedSession | null;
+    args: [encoded: string, sessionId: string, client?: SessionDeltaClient];
+    result: SessionDelta | null;
   };
   /** Kills the source chat's pty, then moves the transcript across projects. */
   "session:move": {
@@ -129,9 +135,21 @@ export interface IpcInvokeContract {
     args: [encoded: string, subPath?: string];
     result: PrListResult;
   };
-  "github:prDetail": {
+  "github:prMeta": {
     args: [encoded: string, subPath: string, number: number];
-    result: PrDetailResult;
+    result: PrMetaResult;
+  };
+  "github:prConversation": {
+    args: [encoded: string, subPath: string, number: number];
+    result: PrConversationResult;
+  };
+  "github:prDiff": {
+    args: [encoded: string, subPath: string, number: number];
+    result: PrDiffResult;
+  };
+  "github:prHeadSha": {
+    args: [encoded: string, subPath: string, number: number];
+    result: PrHeadShaResult;
   };
   "github:prFileView": {
     args: [
@@ -363,7 +381,10 @@ export const API_INVOKE = {
   getFileImageDiff: "project:fileImageDiff",
 
   listPrs: "github:listPrs",
-  getPrDetail: "github:prDetail",
+  getPrMeta: "github:prMeta",
+  getPrConversation: "github:prConversation",
+  getPrDiff: "github:prDiff",
+  getPrHeadSha: "github:prHeadSha",
   getPrFileView: "github:prFileView",
 
   listProjectFiles: "files:list",

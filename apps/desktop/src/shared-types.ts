@@ -47,6 +47,27 @@ export interface ParsedSession {
   messages: ConversationMessage[];
 }
 
+/** Client cursor for incremental `session:read`: the `gen` and message count
+ *  from the previous response. */
+export interface SessionDeltaClient {
+  gen: number;
+  /** Messages the client already holds from this gen. */
+  have: number;
+}
+
+/** Incremental `session:read` response. `gen` identifies main's fold instance —
+ *  a cursor is only valid against the same gen. */
+export interface SessionDelta {
+  gen: number;
+  /** "append": `messages` are the ones past the client's cursor — concatenate.
+   *  "full": `messages` restate the whole transcript (no/stale client cursor). */
+  mode: "full" | "append";
+  /** Total messages in the fold — lets the client verify prev + append add up. */
+  total: number;
+  meta: SessionMeta;
+  messages: ConversationMessage[];
+}
+
 export interface GitDiffResult {
   available: boolean;
   diff: string;
@@ -408,7 +429,15 @@ export interface PrCommit {
   committedDate: string;
 }
 
-export interface PrDetail {
+/**
+ * The PR "shell": everything a single `gh pr view` returns — header fields, the
+ * description body, and the commit list. Fast to fetch (no pagination, no diff,
+ * no network ref-fetch), so it paints the header, description, and Commits tab
+ * first while the heavier sections (conversation, diff, head ref) stream in
+ * independently. See getPrMeta / getPrConversation / getPrDiff / getPrHeadSha —
+ * the PR view fetches all four in parallel and renders each as it lands.
+ */
+export interface PrMeta {
   number: number;
   title: string;
   body: string;
@@ -423,20 +452,40 @@ export interface PrDetail {
   headRefName: string;
   additions: number;
   deletions: number;
-  /** Raw unified diff (`gh pr diff`); parse with parseUnifiedDiff in the UI. */
-  diff: string;
-  /** Conversation comments + reviews + inline review comments, chronological. */
-  timeline: PrComment[];
   commits: PrCommit[];
-  /** PR head commit SHA — the "new" side of every file diff. The "old" side is
-   * reconstructed from `diff` (reverse-applied to the head blob), so no base SHA
-   * is needed. null when the head ref couldn't be fetched (offline / no access). */
-  headSha: string | null;
 }
 
-export interface PrDetailResult {
+export interface PrMetaResult {
   ok: boolean;
-  detail?: PrDetail;
+  meta?: PrMeta;
+  error?: string;
+}
+
+/** The PR conversation timeline (issue comments + reviews + inline review
+ * comments, merged chronological). Its own call because the paginated REST
+ * endpoints are the slowest part and shouldn't block the header. */
+export interface PrConversationResult {
+  ok: boolean;
+  timeline?: PrComment[];
+  error?: string;
+}
+
+/** The raw unified diff (`gh pr diff`); parse with parseUnifiedDiff in the UI.
+ * Its own call because a large diff shouldn't block the conversation. */
+export interface PrDiffResult {
+  ok: boolean;
+  diff?: string;
+  error?: string;
+}
+
+/** The PR head commit SHA — the "new" side of every file diff. The "old" side is
+ * reconstructed from the diff (reverse-applied to the head blob), so no base SHA
+ * is needed. Its own call because it does a network `git fetch pull/N/head`,
+ * which only the Files tab needs. `headSha` is null when the head ref couldn't
+ * be fetched (offline / no access). */
+export interface PrHeadShaResult {
+  ok: boolean;
+  headSha?: string | null;
   error?: string;
 }
 

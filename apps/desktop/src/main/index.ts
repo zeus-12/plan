@@ -61,7 +61,7 @@ import {
   stopWorktreeWatch,
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
-import { readSessionFile } from "./jsonl-parser";
+import { readSessionDelta } from "./jsonl-parser";
 import { markSessionMovedAway } from "./session-reaper";
 import { getFileContents, getFileView } from "./file-contents";
 import {
@@ -412,9 +412,9 @@ const invokeHandlers: {
     if (fromEncoded !== toEncoded) markSessionMovedAway(fromEncoded, sessionId);
   },
 
-  "session:read": async (_e, encoded, sessionId) => {
+  "session:read": async (_e, encoded, sessionId, client) => {
     try {
-      return await readSessionFile(sessionFilePath(encoded, sessionId));
+      return await readSessionDelta(sessionFilePath(encoded, sessionId), client);
     } catch {
       return null;
     }

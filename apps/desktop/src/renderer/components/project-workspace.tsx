@@ -45,7 +45,8 @@ import {
   type ProjectAnnotations,
   type ProjectFileAnnotationInput,
 } from "../lib/annotation-store";
-import { chatTerminalPrefix } from "../../terminal-ids";
+import { chatTerminalId, chatTerminalPrefix } from "../../terminal-ids";
+import { setViewedSession } from "../lib/unread-response-store";
 import { useTerminalHeight } from "../lib/terminal-store";
 import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
@@ -75,6 +76,7 @@ import { ThemeMenu } from "./theme-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
 import { mergeSession } from "../lib/merge-session";
+import { fetchTranscript, dropTranscript } from "../lib/transcript-sync";
 import { bumpWorktreeRevision } from "../lib/worktree-revision";
 import {
   getCachedSessions,
@@ -441,6 +443,22 @@ function ProjectWorkspaceImpl({
   } = useWorkspaceTabs(project.encoded, sessions);
   // Header branch pill. A single-repo project always shows its branch. A
   // multi-repo project shows a branch only when the active tab pins a file to
+  // Tell the unread store which session you're actually looking at, so its
+  // green "replied" badge clears when — and only when — this workspace is the
+  // active one AND a chat is the on-screen pane. Gated on `active` because the
+  // keep-alive pool mounts several workspaces at once; only the visible one is
+  // "viewed". Cleanup (and the inactive branch) reports null so a background
+  // workspace never claims to be on screen.
+  useEffect(() => {
+    if (!active) return;
+    setViewedSession(
+      openKind === "chat" && selectedSessionId
+        ? chatTerminalId(project.encoded, selectedSessionId)
+        : null,
+    );
+    return () => setViewedSession(null);
+  }, [active, openKind, selectedSessionId, project.encoded]);
+
   // one specific repo — never an arbitrary repo's branch.
   const headerRepo = useMemo(() => {
     if (repos.length === 1) return repos[0];
@@ -688,7 +706,10 @@ function ProjectWorkspaceImpl({
 
   const refreshTranscript = useCallback(
     async (sid: string) => {
-      const parsed = await window.electronAPI.readSession(project.encoded, sid);
+      // Incremental: main folds the JSONL behind a byte cursor and returns only
+      // appended messages; transcript-sync assembles the full ParsedSession
+      // (prefix objects keep their identity by construction).
+      const parsed = await fetchTranscript(project.encoded, sid);
       // Identity-preserving merge: unchanged messages keep their old objects so
       // memoized rows skip re-rendering (otherwise every watcher tick re-renders
       // the whole transcript's markdown).
@@ -721,12 +742,13 @@ function ProjectWorkspaceImpl({
       for (const sid of prev.keys()) {
         if (!chatSessionIds.includes(sid)) {
           next.delete(sid);
+          dropTranscript(project.encoded, sid);
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [chatSessionIds, refreshTranscript]);
+  }, [chatSessionIds, refreshTranscript, project.encoded]);
 
   // Watch this project's real worktree on disk while its workspace is mounted.
   // Scoped to the active project (real repos are heavier to watch than the

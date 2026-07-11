@@ -4,6 +4,8 @@ import type {
   MessagePart,
   ConversationMessage,
   ParsedSession,
+  SessionDelta,
+  SessionDeltaClient,
 } from "../shared-types";
 
 export type { MessagePart, ConversationMessage, ParsedSession };
@@ -91,78 +93,111 @@ function parseUserParts(content: unknown): MessagePart[] {
   return parts;
 }
 
+/** Session-level fields folded line by line. First sessionId/cwd/startedAt win;
+ *  gitBranch/title/updatedAt track the latest line that carries them. */
+interface MetaFields {
+  sessionId: string;
+  cwd: string | null;
+  gitBranch: string | null;
+  title: string | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+}
+
+function freshMetaFields(): MetaFields {
+  return {
+    sessionId: "",
+    cwd: null,
+    gitBranch: null,
+    title: null,
+    startedAt: null,
+    updatedAt: null,
+  };
+}
+
+function applyMetaFields(fields: MetaFields, obj: RawLine): void {
+  if (typeof obj.sessionId === "string" && !fields.sessionId)
+    fields.sessionId = obj.sessionId;
+  if (typeof obj.cwd === "string" && !fields.cwd) fields.cwd = obj.cwd;
+  if (typeof obj.gitBranch === "string") fields.gitBranch = obj.gitBranch;
+  if (obj.type === "ai-title" && typeof obj.aiTitle === "string")
+    fields.title = obj.aiTitle;
+  if (typeof obj.timestamp === "string") {
+    if (!fields.startedAt) fields.startedAt = obj.timestamp;
+    fields.updatedAt = obj.timestamp;
+  }
+}
+
+/** Parse one message line's renderable parts, or null for non-message /
+ *  no-renderable-parts lines (which don't count toward the transcript). */
+function parseMessageLine(obj: RawLine): ConversationMessage | null {
+  if (obj.type !== "user" && obj.type !== "assistant") return null;
+  const message = (obj as { message?: { content?: unknown } }).message;
+  const content = message?.content;
+  const parts =
+    obj.type === "assistant"
+      ? parseAssistantParts(content)
+      : parseUserParts(content);
+  if (parts.length === 0) return null;
+
+  const promptSource =
+    obj.promptSource === "system" || obj.promptSource === "typed"
+      ? obj.promptSource
+      : undefined;
+  return {
+    uuid: typeof obj.uuid === "string" ? obj.uuid : "",
+    parentUuid: typeof obj.parentUuid === "string" ? obj.parentUuid : null,
+    role: obj.type,
+    timestamp: typeof obj.timestamp === "string" ? obj.timestamp : "",
+    parts,
+    ...(obj.isMeta === true ? { isMeta: true } : {}),
+    ...(promptSource ? { promptSource } : {}),
+  };
+}
+
+/** Full transcript fold: meta fields plus every parsed message, in file order.
+ *  Feeding it lines one at a time yields exactly what parsing the whole file at
+ *  once yields — the property the incremental transcript reader relies on. */
+interface SessionFold {
+  fields: MetaFields;
+  messages: ConversationMessage[];
+}
+
+function freshSessionFold(): SessionFold {
+  return { fields: freshMetaFields(), messages: [] };
+}
+
+function applySessionLine(fold: SessionFold, line: string): void {
+  if (!line.trim()) return;
+  let obj: RawLine;
+  try {
+    obj = JSON.parse(line) as RawLine;
+  } catch {
+    return;
+  }
+  applyMetaFields(fold.fields, obj);
+  const message = parseMessageLine(obj);
+  if (message) fold.messages.push(message);
+}
+
+function packageSession(fold: SessionFold, filePath: string): ParsedSession {
+  return {
+    meta: {
+      ...fold.fields,
+      filePath,
+      messageCount: fold.messages.length,
+    },
+    messages: fold.messages,
+  };
+}
+
 export function parseSessionJsonl(
   raw: string,
   filePath: string,
 ): ParsedSession {
-  const lines = raw.split("\n");
-  const messages: ConversationMessage[] = [];
-  let sessionId = "";
-  let cwd: string | null = null;
-  let gitBranch: string | null = null;
-  let title: string | null = null;
-  let startedAt: string | null = null;
-  let updatedAt: string | null = null;
-
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    let obj: RawLine;
-    try {
-      obj = JSON.parse(line) as RawLine;
-    } catch {
-      continue;
-    }
-
-    if (typeof obj.sessionId === "string" && !sessionId)
-      sessionId = obj.sessionId;
-    if (typeof obj.cwd === "string" && !cwd) cwd = obj.cwd;
-    if (typeof obj.gitBranch === "string") gitBranch = obj.gitBranch;
-    if (obj.type === "ai-title" && typeof obj.aiTitle === "string") {
-      title = obj.aiTitle;
-    }
-    if (typeof obj.timestamp === "string") {
-      if (!startedAt) startedAt = obj.timestamp;
-      updatedAt = obj.timestamp;
-    }
-
-    if (obj.type === "user" || obj.type === "assistant") {
-      const message = (obj as { message?: { content?: unknown } }).message;
-      const content = message?.content;
-      const parts =
-        obj.type === "assistant"
-          ? parseAssistantParts(content)
-          : parseUserParts(content);
-      if (parts.length === 0) continue;
-
-      const promptSource =
-        obj.promptSource === "system" || obj.promptSource === "typed"
-          ? obj.promptSource
-          : undefined;
-      messages.push({
-        uuid: typeof obj.uuid === "string" ? obj.uuid : "",
-        parentUuid: typeof obj.parentUuid === "string" ? obj.parentUuid : null,
-        role: obj.type,
-        timestamp: typeof obj.timestamp === "string" ? obj.timestamp : "",
-        parts,
-        ...(obj.isMeta === true ? { isMeta: true } : {}),
-        ...(promptSource ? { promptSource } : {}),
-      });
-    }
-  }
-
-  return {
-    meta: {
-      sessionId,
-      filePath,
-      cwd,
-      gitBranch,
-      title,
-      startedAt,
-      updatedAt,
-      messageCount: messages.length,
-    },
-    messages,
-  };
+  const fold = freshSessionFold();
+  for (const line of raw.split("\n")) applySessionLine(fold, line);
+  return packageSession(fold, filePath);
 }
 
 export async function readSessionFile(
@@ -172,48 +207,133 @@ export async function readSessionFile(
   return parseSessionJsonl(raw, filePath);
 }
 
-// ── Incremental session metadata (append-only fast path) ───────────────────
-// The session list only needs title / messageCount / updatedAt, but the file
-// of the actively-streaming session changes mtime on every write, so a naive
-// "re-parse on mtime change" re-reads and fully re-parses the whole growing
-// transcript several times a second. JSONL is append-only, so instead we keep
-// per-file running state and parse only the bytes appended since last time.
+// ── Incremental follow (append-only fast path) ──────────────────────────────
+// The file of an actively-streaming session changes mtime on every write, so a
+// naive "re-parse on mtime change" re-reads and fully re-parses the whole
+// growing transcript several times a second (this froze the renderer once via
+// the session list, and again via open chat tabs). JSONL is append-only in
+// steady state, so instead we keep a per-file byte cursor and parse only what
+// was appended since last time.
+//
+// "Steady state" carries two documented exceptions, both of which REWRITE
+// bytes we already consumed: a streaming tool_use line is truncated and
+// rewritten once its full input is assembled (see mergeSession's sameInput
+// note), and a resumed session can rewrite the whole file. A shrink check
+// alone misses the rewrite that ends up LARGER, so the follower re-reads the
+// last consumed bytes each time and compares: any mismatch restarts the follow
+// from byte 0. Correctness never depends on append-only holding — a rewrite
+// just costs one full re-parse.
 
-export interface SessionMetaLite {
-  sessionId: string;
-  cwd: string | null;
-  gitBranch: string | null;
-  title: string | null;
-  startedAt: string | null;
-  updatedAt: string | null;
-  messageCount: number;
-}
+/** How many trailing consumed bytes are kept and re-verified per read. Tail
+ *  rewrites replace the last line, so the window only needs to cover it. */
+const TAIL_BYTES = 4096;
 
-interface MetaState extends SessionMetaLite {
+interface JsonlFollow {
   /** Bytes consumed so far — where the next incremental read starts. */
   bytesSeen: number;
   /** Decoder carries any incomplete trailing UTF-8 bytes across reads. */
   decoder: StringDecoder;
   /** The trailing partial line (no newline yet) carried to the next read. */
   leftover: string;
+  /** The last ≤TAIL_BYTES raw bytes ending at `bytesSeen`, compared against
+   *  the file on the next read to detect rewrites of consumed bytes. */
+  tail: Buffer;
 }
 
-const metaStates = new Map<string, MetaState>();
-
-function freshState(): MetaState {
+function freshFollow(): JsonlFollow {
   return {
-    sessionId: "",
-    cwd: null,
-    gitBranch: null,
-    title: null,
-    startedAt: null,
-    updatedAt: null,
-    messageCount: 0,
     bytesSeen: 0,
     decoder: new StringDecoder("utf8"),
     leftover: "",
+    tail: Buffer.alloc(0),
   };
 }
+
+/** `fh.read` may return short for a regular file in theory; loop to be exact.
+ *  Returns false if the file ended before `len` bytes (treated as a rewrite). */
+async function readExact(
+  fh: Awaited<ReturnType<typeof open>>,
+  buf: Buffer,
+  len: number,
+  position: number,
+): Promise<boolean> {
+  let done = 0;
+  while (done < len) {
+    const { bytesRead } = await fh.read(buf, done, len - done, position + done);
+    if (bytesRead <= 0) return false;
+    done += bytesRead;
+  }
+  return true;
+}
+
+/**
+ * The complete lines appended to `filePath` since the last call with this
+ * state. `reset: true` means previously-consumed bytes changed (the file was
+ * rewritten or truncated): the follow restarted from byte 0 and `lines` covers
+ * the whole file, so the caller must rebuild its fold state before applying.
+ */
+async function followJsonl(
+  filePath: string,
+  follow: JsonlFollow,
+): Promise<{ lines: string[]; reset: boolean }> {
+  const { size } = await stat(filePath);
+  const fh = await open(filePath, "r");
+  try {
+    let reset = false;
+    if (size < follow.bytesSeen) {
+      reset = true;
+    } else if (follow.tail.length > 0) {
+      const win = Buffer.allocUnsafe(follow.tail.length);
+      const ok = await readExact(
+        fh,
+        win,
+        win.length,
+        follow.bytesSeen - follow.tail.length,
+      );
+      if (!ok || !win.equals(follow.tail)) reset = true;
+    }
+    if (reset) Object.assign(follow, freshFollow());
+    if (size === follow.bytesSeen) return { lines: [], reset };
+
+    const len = size - follow.bytesSeen;
+    const buf = Buffer.allocUnsafe(len);
+    if (!(await readExact(fh, buf, len, follow.bytesSeen))) {
+      // File shrank under us mid-read. Restart cleanly next call — and throw
+      // rather than surface a partial fold (callers treat errors as "keep
+      // whatever you showed before", which is truthful; an empty fold isn't).
+      Object.assign(follow, freshFollow());
+      throw new Error(`file changed mid-read: ${filePath}`);
+    }
+    // Copy (not subarray) so the tail doesn't pin a multi-MB read buffer.
+    const joined = follow.tail.length ? Buffer.concat([follow.tail, buf]) : buf;
+    follow.tail = Buffer.from(
+      joined.subarray(Math.max(0, joined.length - TAIL_BYTES)),
+    );
+    follow.bytesSeen = size;
+    const chunk = follow.leftover + follow.decoder.write(buf);
+    const lines = chunk.split("\n");
+    // The last element is either "" (file ended on a newline) or a partial
+    // line still being written — carry it forward, unparsed, until complete.
+    follow.leftover = lines.pop() ?? "";
+    return { lines, reset };
+  } finally {
+    await fh.close();
+  }
+}
+
+// ── Incremental session metadata ────────────────────────────────────────────
+
+export interface SessionMetaLite extends MetaFields {
+  messageCount: number;
+}
+
+interface MetaState {
+  follow: JsonlFollow;
+  fields: MetaFields;
+  messageCount: number;
+}
+
+const metaStates = new Map<string, MetaState>();
 
 function applyMetaLine(state: MetaState, line: string): void {
   if (!line.trim()) return;
@@ -223,26 +343,11 @@ function applyMetaLine(state: MetaState, line: string): void {
   } catch {
     return;
   }
-  if (typeof obj.sessionId === "string" && !state.sessionId)
-    state.sessionId = obj.sessionId;
-  if (typeof obj.cwd === "string" && !state.cwd) state.cwd = obj.cwd;
-  if (typeof obj.gitBranch === "string") state.gitBranch = obj.gitBranch;
-  if (obj.type === "ai-title" && typeof obj.aiTitle === "string")
-    state.title = obj.aiTitle;
-  if (typeof obj.timestamp === "string") {
-    if (!state.startedAt) state.startedAt = obj.timestamp;
-    state.updatedAt = obj.timestamp;
-  }
-  if (obj.type === "user" || obj.type === "assistant") {
-    const content = (obj as { message?: { content?: unknown } }).message
-      ?.content;
-    const parts =
-      obj.type === "assistant"
-        ? parseAssistantParts(content)
-        : parseUserParts(content);
-    // Mirror parseSessionJsonl: a message with no renderable parts doesn't count.
-    if (parts.length > 0) state.messageCount += 1;
-  }
+  applyMetaFields(state.fields, obj);
+  // Mirror parseSessionJsonl: a message with no renderable parts doesn't count.
+  // Parsed and dropped (rather than kept like the transcript fold) so the meta
+  // path never retains message bodies for every session in every project.
+  if (parseMessageLine(obj)) state.messageCount += 1;
 }
 
 // Dedup concurrent reads of the same file so overlapping listSessions calls
@@ -251,8 +356,8 @@ const metaInflight = new Map<string, Promise<SessionMetaLite>>();
 
 /**
  * Title / messageCount / updatedAt for a session file, parsing only the bytes
- * appended since the last call. Falls back to a full re-read if the file shrank
- * (rewritten / truncated). Cheap enough to call on every watcher tick.
+ * appended since the last call (full re-fold when the follower detects a
+ * rewrite). Cheap enough to call on every watcher tick.
  */
 export function readSessionMeta(filePath: string): Promise<SessionMetaLite> {
   const existing = metaInflight.get(filePath);
@@ -267,38 +372,105 @@ export function readSessionMeta(filePath: string): Promise<SessionMetaLite> {
 async function readSessionMetaInner(
   filePath: string,
 ): Promise<SessionMetaLite> {
-  const { size } = await stat(filePath);
   let state = metaStates.get(filePath);
-  // File shrank → it was rewritten, not appended; our running state is stale.
-  if (state && size < state.bytesSeen) state = undefined;
   if (!state) {
-    state = freshState();
+    state = {
+      follow: freshFollow(),
+      fields: freshMetaFields(),
+      messageCount: 0,
+    };
     metaStates.set(filePath, state);
   }
-  if (size > state.bytesSeen) {
-    const fh = await open(filePath, "r");
-    try {
-      const len = size - state.bytesSeen;
-      const buf = Buffer.allocUnsafe(len);
-      await fh.read(buf, 0, len, state.bytesSeen);
-      state.bytesSeen = size;
-      const chunk = state.leftover + state.decoder.write(buf);
-      const lines = chunk.split("\n");
-      // The last element is either "" (file ended on a newline) or a partial
-      // line still being written — carry it forward, uncounted, until complete.
-      state.leftover = lines.pop() ?? "";
-      for (const line of lines) applyMetaLine(state, line);
-    } finally {
-      await fh.close();
-    }
+  const { lines, reset } = await followJsonl(filePath, state.follow);
+  if (reset) {
+    state.fields = freshMetaFields();
+    state.messageCount = 0;
   }
+  for (const line of lines) applyMetaLine(state, line);
+  return { ...state.fields, messageCount: state.messageCount };
+}
+
+// ── Incremental transcript (open chat tabs) ─────────────────────────────────
+// Same follower, but the fold keeps the parsed messages so the renderer can be
+// answered with just the messages past its cursor instead of a full re-read +
+// full re-parse + multi-MB IPC payload on every watcher tick of a streaming
+// session.
+
+interface TranscriptState {
+  follow: JsonlFollow;
+  fold: SessionFold;
+  /** Identity of this fold instance. Bumped whenever the fold restarts (first
+   *  read, rewrite reset), invalidating every client cursor issued against the
+   *  previous fold. */
+  gen: number;
+}
+
+let nextGen = 1;
+
+/** LRU by re-insertion. A fold retains the whole parsed transcript, so the
+ *  count is bounded; eviction only costs the next reader a full re-parse. */
+const MAX_FOLLOWED_TRANSCRIPTS = 8;
+const transcriptStates = new Map<string, TranscriptState>();
+
+const transcriptInflight = new Map<string, Promise<TranscriptState>>();
+
+function advanceTranscript(filePath: string): Promise<TranscriptState> {
+  const existing = transcriptInflight.get(filePath);
+  if (existing) return existing;
+  const p = advanceTranscriptInner(filePath).finally(() =>
+    transcriptInflight.delete(filePath),
+  );
+  transcriptInflight.set(filePath, p);
+  return p;
+}
+
+async function advanceTranscriptInner(
+  filePath: string,
+): Promise<TranscriptState> {
+  let state = transcriptStates.get(filePath);
+  if (!state) {
+    state = { follow: freshFollow(), fold: freshSessionFold(), gen: nextGen++ };
+  }
+  const { lines, reset } = await followJsonl(filePath, state.follow);
+  if (reset) {
+    state.fold = freshSessionFold();
+    state.gen = nextGen++;
+  }
+  for (const line of lines) applySessionLine(state.fold, line);
+  transcriptStates.delete(filePath);
+  transcriptStates.set(filePath, state);
+  for (const key of transcriptStates.keys()) {
+    if (transcriptStates.size <= MAX_FOLLOWED_TRANSCRIPTS) break;
+    transcriptStates.delete(key);
+  }
+  return state;
+}
+
+/**
+ * Read a session transcript incrementally. Callers pass the `gen` and message
+ * count from their previous read; when they match the live fold, the response
+ * carries only the new messages. Any mismatch (first read, fold evicted, file
+ * rewritten) falls back to a full restatement — the cursor can never produce a
+ * transcript that differs from a from-scratch parse.
+ */
+export async function readSessionDelta(
+  filePath: string,
+  client?: SessionDeltaClient,
+): Promise<SessionDelta> {
+  const state = await advanceTranscript(filePath);
+  const { messages } = state.fold;
+  const meta = packageSession(state.fold, filePath).meta;
+  const append =
+    client !== undefined &&
+    client.gen === state.gen &&
+    client.have <= messages.length;
   return {
-    sessionId: state.sessionId,
-    cwd: state.cwd,
-    gitBranch: state.gitBranch,
-    title: state.title,
-    startedAt: state.startedAt,
-    updatedAt: state.updatedAt,
-    messageCount: state.messageCount,
+    gen: state.gen,
+    mode: append ? "append" : "full",
+    total: messages.length,
+    meta,
+    // Sliced copy either way: the fold array keeps growing after this handler
+    // resolves, and the IPC layer serializes asynchronously.
+    messages: append ? messages.slice(client.have) : messages.slice(),
   };
 }

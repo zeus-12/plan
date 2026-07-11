@@ -39,6 +39,8 @@ export function mergeSession(
 }
 
 function sameMessage(a: ConversationMessage, b: ConversationMessage): boolean {
+  // Incremental reads (transcript-sync) reuse prefix objects as-is.
+  if (a === b) return true;
   if (
     a.uuid !== b.uuid ||
     a.role !== b.role ||
