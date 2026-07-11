@@ -1,6 +1,5 @@
-import { readdir, stat, readFile, mkdir, rename, access } from "fs/promises";
+import { readdir, readFile, open, mkdir, rename, access } from "fs/promises";
 import { join } from "path";
-import type { ProjectEntry } from "../shared-types";
 import {
   CLAUDE_PROJECTS_DIR,
   newestSessionFile,
@@ -37,11 +36,6 @@ export async function moveSessionTranscript(
   await rename(src, sessionFilePath(toEncoded, sessionId));
 }
 
-// The renderer-facing ProjectEntry (shared-types) adds `archived`, which only
-// main/index.ts can layer on. listProjects() returns the raw fs-only shape —
-// derived structurally so the two can never drift apart.
-export type RawProjectEntry = Omit<ProjectEntry, "archived">;
-
 const cwdCache = new Map<string, string>();
 
 /** First `"cwd":"..."` occurrence in a JSONL body. */
@@ -52,6 +46,29 @@ function extractCwd(jsonl: string): string | null {
     return JSON.parse(`"${m[1]}"`);
   } catch {
     return m[1];
+  }
+}
+
+// The cwd field lives on the first line of a normal transcript (a few lines in
+// on compacted ones, after the summary entries), so a bounded head read finds
+// it without pulling a multi-MB file into memory. A value split by the chunk
+// boundary can't half-match (the regex needs the closing quote), so a miss on
+// an incomplete head falls back to the full read — exact, never guessed.
+const CWD_HEAD_BYTES = 64 * 1024;
+
+async function readHead(
+  filePath: string,
+  bytes: number,
+): Promise<{ text: string; complete: boolean }> {
+  const fh = await open(filePath, "r");
+  try {
+    const { size } = await fh.stat();
+    const len = Math.min(size, bytes);
+    const buf = Buffer.allocUnsafe(len);
+    await fh.read(buf, 0, len, 0);
+    return { text: buf.toString("utf-8"), complete: len >= size };
+  } finally {
+    await fh.close();
   }
 }
 
@@ -77,8 +94,11 @@ export async function resolveProjectCwd(encoded: string): Promise<string> {
     // The most recently modified session file has the freshest cwd.
     const newest = await newestSessionFile(encoded);
     if (newest) {
-      const body = await readFile(newest.filePath, "utf-8");
-      const cwd = extractCwd(body);
+      const head = await readHead(newest.filePath, CWD_HEAD_BYTES);
+      let cwd = extractCwd(head.text);
+      if (!cwd && !head.complete) {
+        cwd = extractCwd(await readFile(newest.filePath, "utf-8"));
+      }
       if (cwd) {
         cwdCache.set(encoded, cwd);
         return cwd;
@@ -93,26 +113,15 @@ export async function resolveProjectCwd(encoded: string): Promise<string> {
   return fallback;
 }
 
-export async function listProjects(): Promise<RawProjectEntry[]> {
+/**
+ * Just the encoded dir names under `~/.claude/projects` — what watcher setup
+ * needs at boot. Deliberately no cwd resolution: the old full listing read
+ * every project's newest transcript at launch only to throw the cwds away.
+ */
+export async function listProjectEncodeds(): Promise<string[]> {
   try {
     const entries = await readdir(CLAUDE_PROJECTS_DIR, { withFileTypes: true });
-    const out: RawProjectEntry[] = [];
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      try {
-        const s = await stat(join(CLAUDE_PROJECTS_DIR, e.name));
-        out.push({
-          encoded: e.name,
-          // Real cwd resolved from the JSONL (cached); decode is the fallback.
-          cwd: await resolveProjectCwd(e.name),
-          mtimeMs: s.mtimeMs,
-        });
-      } catch {
-        // skip
-      }
-    }
-    out.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return out;
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
   } catch {
     return [];
   }

@@ -50,16 +50,17 @@ export async function scanSessionFiles(
   encoded: string,
 ): Promise<SessionFileStat[]> {
   const files = await listSessionFiles(encoded);
-  const out: SessionFileStat[] = [];
-  for (const f of files) {
-    try {
-      const s = await stat(f.filePath);
-      out.push({ ...f, mtimeMs: s.mtimeMs });
-    } catch {
-      // skip
-    }
-  }
-  return out;
+  const stats = await Promise.all(
+    files.map(async (f) => {
+      try {
+        const s = await stat(f.filePath);
+        return { ...f, mtimeMs: s.mtimeMs };
+      } catch {
+        return null; // vanished mid-scan
+      }
+    }),
+  );
+  return stats.filter((f): f is SessionFileStat => f !== null);
 }
 
 /** Most recent session-file mtime for a project (for activity sorting). */
@@ -122,7 +123,7 @@ async function sessionMeta(filePath: string, mtimeMs: number) {
 
 // The renderer-facing SessionListEntry adds `archived` and the user-assigned
 // `title`, which only main/index.ts can layer on (they live in the
-// manual-projects store) — same split as RawProjectEntry/ProjectEntry.
+// manual-projects store) — derived structurally so the two can't drift.
 export type RawSessionListEntry = Omit<SessionListEntry, "archived" | "title">;
 
 /** All sessions with display metadata, most recently active first. */

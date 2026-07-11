@@ -12,7 +12,7 @@ import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { writeFile } from "fs/promises";
 import {
-  listProjects,
+  listProjectEncodeds,
   resolveProjectCwd,
   primeProjectCwd,
   moveSessionTranscript,
@@ -308,7 +308,7 @@ function focusMainWindow() {
 /**
  * claude-sessions gives the fs-only entries; the archived flag and the
  * user-assigned name live in the manual-projects store, layered on here —
- * same split as RawProjectEntry/ProjectEntry.
+ * same split as RawSessionListEntry/SessionListEntry.
  */
 async function listSessionsForProject(
   encoded: string,
@@ -627,10 +627,11 @@ app.whenReady().then(async () => {
   // root from session history.
   await listAllProjects().catch(() => {});
 
-  // Auto-watch every existing project, plus the root for new ones.
-  const projects = await listProjects();
-  for (const p of projects) {
-    void startWatching(p.encoded);
+  // Auto-watch every existing project, plus the root for new ones. Watcher
+  // setup needs only the dir names — never the cwd resolution that used to
+  // read every project's newest transcript here at boot.
+  for (const encoded of await listProjectEncodeds()) {
+    void startWatching(encoded);
   }
   void startRootWatch();
 
