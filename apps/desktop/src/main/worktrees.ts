@@ -5,7 +5,7 @@ import { gitOrThrow as git, gitSafe, gh } from "./git-exec";
 import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
 import { encodeCwd, safeSegment } from "./claude-encoding";
 import { PLAN_DIR } from "./plan-config";
-import { discoverRepos } from "./git";
+import { discoverRepos, invalidateRepoLayout } from "./git";
 import type { DiscoveredRepo } from "../shared-types";
 
 /**
@@ -226,6 +226,8 @@ export async function createWorktree(
 
   const wtEncoded = encodeCwd(rootPath);
   primeProjectCwd(wtEncoded, rootPath);
+  // The checkouts just landed — drop any layout discovered before they existed.
+  invalidateRepoLayout(wtEncoded);
   return addWorktreeRecord({
     projectEncoded: encoded,
     name,
@@ -272,6 +274,8 @@ export async function addReposToWorktree(
     toAdd.map((repo) => ({ repo, base: input.bases[repo.subPath].trim() })),
   );
   const created = await addCheckouts(starts, rec.rootPath, branch);
+  // The worktree spans more repos now — its cached layout is stale.
+  invalidateRepoLayout(rec.encoded);
 
   const updated: WorktreeRecord = { ...rec, repos: [...rec.repos, ...created] };
   await updateWorktreeRecord(updated);
@@ -292,6 +296,7 @@ export async function removeWorktree(id: string): Promise<void> {
     }
   }
   await rm(rec.rootPath, { recursive: true, force: true }).catch(() => {});
+  invalidateRepoLayout(rec.encoded);
   await deleteWorktreeRecord(id);
 }
 

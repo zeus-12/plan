@@ -1,30 +1,35 @@
-import { discoverRepos } from "./git";
+import { repoPathFor } from "./git";
 import { gh, gitSafe, gitShow } from "./git-exec";
 import { looksBinary } from "./fs-util";
 import type {
   PrChecks,
   PrComment,
   PrCommit,
-  PrDetail,
-  PrDetailResult,
+  PrConversationResult,
+  PrDiffResult,
+  PrHeadShaResult,
+  PrMeta,
+  PrMetaResult,
   PrListResult,
   PrState,
   PrSummary,
   PrFileView,
 } from "../shared-types";
 
-/** Absolute cwd for the repo at `subPath` within a project, or null if none. */
-async function repoCwd(
-  encoded: string,
-  subPath: string,
-): Promise<string | null> {
-  const repos = await discoverRepos(encoded);
-  const repo = repos.find((r) => r.subPath === subPath) ?? repos[0];
-  return repo?.path ?? null;
-}
+/** Absolute cwd for the repo at `subPath` within a project, or null if none.
+ *  Backed by git.ts's layout cache — no spawns in steady state, so every PR
+ *  endpoint (and every per-file view) can afford to call it. */
+const repoCwd = repoPathFor;
+
+// Positive-only cache: a repo's GitHub slug only changes if its remote is
+// repointed, which the app has no way to observe — and a stale slug merely
+// 404s the conversation fetch until relaunch. Saves a gh spawn per timeline.
+const slugCache = new Map<string, string>();
 
 /** owner/name for the repo's GitHub remote, or null if it isn't on GitHub. */
 async function repoSlug(cwd: string): Promise<string | null> {
+  const cached = slugCache.get(cwd);
+  if (cached) return cached;
   const r = await gh(cwd, [
     "repo",
     "view",
@@ -34,7 +39,9 @@ async function repoSlug(cwd: string): Promise<string | null> {
     ".nameWithOwner",
   ]);
   const slug = r.stdout.trim();
-  return r.ok && slug ? slug : null;
+  if (!r.ok || !slug) return null;
+  slugCache.set(cwd, slug);
+  return slug;
 }
 
 function parseJson<T>(s: string, fallback: T): T {
@@ -200,43 +207,84 @@ function authorIsBot(u?: GhUser): boolean {
 }
 
 /**
- * Fetch everything the PR view needs in one shot: the description + metadata,
- * the full conversation (issue comments + reviews + inline review comments,
- * merged into one chronological timeline), the commit list, the raw diff, and
- * the two commit SHAs the Files tab diffs between.
- *
- * The timeline pulls from the REST API rather than `gh pr view --json comments`
- * because only REST exposes `user.type` (reliable bot detection) and the inline
- * anchoring fields (path/line/diff_hunk) — no guessing from logins.
+ * The PR "shell" — header fields, description body, and commit list — from a
+ * single `gh pr view`. This is the fast section: no pagination, no diff, no
+ * network ref-fetch, so the PR view can paint its header and description the
+ * moment this returns, without waiting on the conversation or diff.
  */
-export async function getPrDetail(
+export async function getPrMeta(
   encoded: string,
   subPath: string,
   number: number,
-): Promise<PrDetailResult> {
+): Promise<PrMetaResult> {
+  const cwd = await repoCwd(encoded, subPath);
+  if (!cwd) return { ok: false, error: "Repo not found." };
+
+  const r = await gh(cwd, [
+    "pr",
+    "view",
+    String(number),
+    "--json",
+    "number,title,body,state,url,isDraft,author,createdAt,mergedAt,baseRefName,headRefName,additions,deletions,commits",
+  ]);
+  if (!r.ok) return { ok: false, error: r.stderr };
+  const view = parseJson<GhPrView | null>(r.stdout, null);
+  if (!view) return { ok: false, error: "Couldn't parse PR data." };
+
+  const commits: PrCommit[] = (view.commits ?? []).map((c) => ({
+    oid: c.oid,
+    messageHeadline: c.messageHeadline,
+    author: authorLogin(c.authors?.[0]),
+    committedDate: c.committedDate,
+  }));
+
+  const meta: PrMeta = {
+    number: view.number,
+    title: view.title,
+    body: view.body ?? "",
+    state: normState(view.state),
+    isDraft: view.isDraft,
+    url: view.url,
+    author: authorLogin(view.author),
+    authorIsBot: authorIsBot(view.author),
+    createdAt: view.createdAt,
+    mergedAt: view.mergedAt,
+    baseRefName: view.baseRefName,
+    headRefName: view.headRefName,
+    additions: view.additions,
+    deletions: view.deletions,
+    commits,
+  };
+  return { ok: true, meta };
+}
+
+/**
+ * The PR conversation timeline: issue comments + reviews + inline review
+ * comments, merged into one chronological stream. This is the slowest section —
+ * three paginated REST endpoints — so it's its own call and never blocks the
+ * header.
+ *
+ * The timeline pulls from the REST API rather than `gh pr view --json comments`
+ * because only REST exposes `user.type` (reliable bot detection) and the inline
+ * anchoring fields (path/line/diff_hunk) — no guessing from logins. Individual
+ * endpoint failures degrade to an empty section (parseJson fallback) rather than
+ * failing the whole timeline.
+ */
+export async function getPrConversation(
+  encoded: string,
+  subPath: string,
+  number: number,
+): Promise<PrConversationResult> {
   const cwd = await repoCwd(encoded, subPath);
   if (!cwd) return { ok: false, error: "Repo not found." };
   const slug = await repoSlug(cwd);
   if (!slug) return { ok: false, error: "This repo has no GitHub remote." };
 
-  const [viewR, commentsR, reviewsR, reviewCommentsR, diffR] =
-    await Promise.all([
-      gh(cwd, [
-        "pr",
-        "view",
-        String(number),
-        "--json",
-        "number,title,body,state,url,isDraft,author,createdAt,mergedAt,baseRefName,headRefName,additions,deletions,commits",
-      ]),
-      gh(cwd, ["api", `repos/${slug}/issues/${number}/comments`, "--paginate"]),
-      gh(cwd, ["api", `repos/${slug}/pulls/${number}/reviews`, "--paginate"]),
-      gh(cwd, ["api", `repos/${slug}/pulls/${number}/comments`, "--paginate"]),
-      gh(cwd, ["pr", "diff", String(number)]),
-    ]);
-
-  if (!viewR.ok) return { ok: false, error: viewR.stderr };
-  const view = parseJson<GhPrView | null>(viewR.stdout, null);
-  if (!view) return { ok: false, error: "Couldn't parse PR data." };
+  const [commentsR, reviewsR, reviewCommentsR] = await Promise.all([
+    gh(cwd, ["api", `repos/${slug}/issues/${number}/comments`, "--paginate"]),
+    gh(cwd, ["api", `repos/${slug}/pulls/${number}/reviews`, "--paginate"]),
+    gh(cwd, ["api", `repos/${slug}/pulls/${number}/comments`, "--paginate"]),
+  ]);
 
   const timeline: PrComment[] = [];
 
@@ -286,37 +334,34 @@ export async function getPrDetail(
   }
 
   timeline.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return { ok: true, timeline };
+}
 
-  const commits: PrCommit[] = (view.commits ?? []).map((c) => ({
-    oid: c.oid,
-    messageHeadline: c.messageHeadline,
-    author: authorLogin(c.authors?.[0]),
-    committedDate: c.committedDate,
-  }));
+/** The raw unified diff (`gh pr diff`). Its own call so a large diff doesn't
+ * block the header or the conversation. */
+export async function getPrDiff(
+  encoded: string,
+  subPath: string,
+  number: number,
+): Promise<PrDiffResult> {
+  const cwd = await repoCwd(encoded, subPath);
+  if (!cwd) return { ok: false, error: "Repo not found." };
+  const r = await gh(cwd, ["pr", "diff", String(number)]);
+  if (!r.ok) return { ok: false, error: r.stderr };
+  return { ok: true, diff: r.stdout };
+}
 
-  const headSha = await resolveHeadSha(cwd, number);
-
-  const detail: PrDetail = {
-    number: view.number,
-    title: view.title,
-    body: view.body ?? "",
-    state: normState(view.state),
-    isDraft: view.isDraft,
-    url: view.url,
-    author: authorLogin(view.author),
-    authorIsBot: authorIsBot(view.author),
-    createdAt: view.createdAt,
-    mergedAt: view.mergedAt,
-    baseRefName: view.baseRefName,
-    headRefName: view.headRefName,
-    additions: view.additions,
-    deletions: view.deletions,
-    diff: diffR.ok ? diffR.stdout : "",
-    timeline,
-    commits,
-    headSha,
-  };
-  return { ok: true, detail };
+/** Resolve the PR head SHA (network `git fetch pull/N/head`). Its own call
+ * because only the Files tab needs it — the default Conversation tab shouldn't
+ * wait on a network round-trip. `headSha` is null offline / without access. */
+export async function getPrHeadSha(
+  encoded: string,
+  subPath: string,
+  number: number,
+): Promise<PrHeadShaResult> {
+  const cwd = await repoCwd(encoded, subPath);
+  if (!cwd) return { ok: false, error: "Repo not found." };
+  return { ok: true, headSha: await resolveHeadSha(cwd, number) };
 }
 
 /**

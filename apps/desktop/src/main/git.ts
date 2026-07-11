@@ -38,20 +38,18 @@ async function branchAt(cwd: string): Promise<string | null> {
   return !name || name === "HEAD" ? null : name;
 }
 
+/** Where a repo lives — a DiscoveredRepo minus the volatile `branch`. */
+export type RepoLocation = Omit<DiscoveredRepo, "branch">;
+
 async function inspectRepo(
   path: string,
   subPath: string,
-): Promise<DiscoveredRepo | null> {
+): Promise<RepoLocation | null> {
   if (!(await hasGitMarker(path))) return null;
   if (!(await isGitRepo(path))) return null;
   const commonDir = await getGitCommonDir(path);
   if (!commonDir) return null;
-  return {
-    path,
-    subPath,
-    commonDir,
-    branch: await branchAt(path),
-  };
+  return { path, subPath, commonDir };
 }
 
 /**
@@ -62,11 +60,9 @@ async function inspectRepo(
  *   - Otherwise, list immediate children up to GIT_SCAN_DEPTH and return any
  *     directory that is itself a git repo. Hidden dirs are skipped.
  */
-export async function discoverRepos(
-  encoded: string,
-): Promise<DiscoveredRepo[]> {
+async function discoverLayout(encoded: string): Promise<RepoLocation[]> {
   const root = await resolveProjectCwd(encoded);
-  const out: DiscoveredRepo[] = [];
+  const out: RepoLocation[] = [];
 
   const rootRepo = await inspectRepo(root, "");
   if (rootRepo) {
@@ -94,9 +90,66 @@ export async function discoverRepos(
   return out;
 }
 
+// Where a project's repos live is stable for a session except when the tree
+// itself changes — and every observable change (file edits around a `git
+// init`, worktree create/add/remove) either flows through the worktree watcher
+// (which calls invalidateRepoLayout on every worktree-changed, at most once
+// per debounce window) or through worktrees.ts's explicit invalidation. The
+// PR view alone was re-running the 3-spawn discovery ~4× per opened file
+// without this. Promise-cached so concurrent callers share one discovery.
+const layoutCache = new Map<string, Promise<RepoLocation[]>>();
+
+export function invalidateRepoLayout(encoded: string): void {
+  layoutCache.delete(encoded);
+}
+
+export function repoLayout(encoded: string): Promise<RepoLocation[]> {
+  let p = layoutCache.get(encoded);
+  if (!p) {
+    p = discoverLayout(encoded);
+    layoutCache.set(encoded, p);
+    // A rejected discovery must not stick as this project's answer.
+    p.catch(() => {
+      if (layoutCache.get(encoded) === p) layoutCache.delete(encoded);
+    });
+  }
+  return p;
+}
+
+/** Layout plus each repo's current branch (branch is re-read every call —
+ *  checkouts must show up — but the discovery spawns are cached). */
+export async function discoverRepos(
+  encoded: string,
+): Promise<DiscoveredRepo[]> {
+  const layout = await repoLayout(encoded);
+  return Promise.all(
+    layout.map(async (r) => ({ ...r, branch: await branchAt(r.path) })),
+  );
+}
+
+/** Absolute cwd for the repo at `subPath` within a project (first repo when
+ *  `subPath` doesn't match), or null with no repos. Cached — zero spawns in
+ *  steady state, unlike discoverRepos which re-reads branches. */
+export async function repoPathFor(
+  encoded: string,
+  subPath: string,
+): Promise<string | null> {
+  const layout = await repoLayout(encoded);
+  const repo = layout.find((r) => r.subPath === subPath) ?? layout[0];
+  return repo?.path ?? null;
+}
+
+// Positive-only cache: a path that is a work tree stays one for the app's
+// lifetime (negatives are NOT cached, so a later `git init` is still noticed).
+// Saves one spawn from every status/branch/diff call.
+const knownWorkTrees = new Set<string>();
+
 async function isGitRepo(cwd: string): Promise<boolean> {
+  if (knownWorkTrees.has(cwd)) return true;
   const r = await run(cwd, ["rev-parse", "--is-inside-work-tree"]);
-  return r.code === 0 && r.stdout.trim() === "true";
+  const yes = r.code === 0 && r.stdout.trim() === "true";
+  if (yes) knownWorkTrees.add(cwd);
+  return yes;
 }
 
 /** Current branch name, or null when detached/no repo. */

@@ -107,6 +107,7 @@ import {
   getBranch,
   getStatus,
   getWorkingTreeDiff,
+  invalidateRepoLayout,
   push as gitPush,
   stageAll,
   stageFile,
@@ -414,7 +415,10 @@ const invokeHandlers: {
 
   "session:read": async (_e, encoded, sessionId, client) => {
     try {
-      return await readSessionDelta(sessionFilePath(encoded, sessionId), client);
+      return await readSessionDelta(
+        sessionFilePath(encoded, sessionId),
+        client,
+      );
     } catch {
       return null;
     }
@@ -588,7 +592,15 @@ function registerIpc() {
 function bridgeWatcher() {
   const send = (e: SessionEvent) => sendToRenderer("watcher:event", e);
   setCallbacks({ onEvent: send });
-  setWorktreeCallbacks({ onEvent: send });
+  setWorktreeCallbacks({
+    onEvent: (e) => {
+      // The tree changed on disk, so the cached repo layout may be stale
+      // (git init, checkout dirs appearing). At most one re-discovery per
+      // debounced watcher window keeps the cache honest without heuristics.
+      invalidateRepoLayout(e.encoded);
+      send(e);
+    },
+  });
 }
 
 function bridgeTerminal() {

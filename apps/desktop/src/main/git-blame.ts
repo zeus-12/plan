@@ -145,17 +145,19 @@ async function blame(
   const loc = await locate(encoded, relPath);
   if (!loc) return null;
   const [out, email] = await Promise.all([
-    runGit(
-      loc.cwd,
-      ["blame", "--porcelain", ...target, "--", loc.file],
-      stdin,
-    ),
+    runGit(loc.cwd, ["blame", "--porcelain", ...target, "--", loc.file], stdin),
     userEmail(loc.cwd),
   ]);
   if (out == null) return null;
   const parsed = parseBlame(out);
   return parsed ? { ...parsed, userEmail: email } : null;
 }
+
+// Commit objects are immutable, so a resolved message never goes stale —
+// re-hovering the same blame chip shouldn't re-spawn `git show`. Bounded by a
+// full clear (messages are small; simpler than LRU bookkeeping).
+const commitDetailsCache = new Map<string, CommitDetails>();
+const COMMIT_DETAILS_CACHE_MAX = 500;
 
 /** Full commit message for the blame hover card (the blame pass only carries the subject). */
 export async function getCommitDetails(
@@ -166,6 +168,15 @@ export async function getCommitDetails(
   if (!/^[0-9a-f]{4,40}$/.test(hash)) return null;
   const loc = await locate(encoded, relPath);
   if (!loc) return null;
+  const key = `${loc.cwd}\n${hash}`;
+  const cached = commitDetailsCache.get(key);
+  if (cached) return cached;
   const out = await runGit(loc.cwd, ["show", "-s", "--format=%B", hash, "--"]);
-  return out == null ? null : { message: out.trim() };
+  if (out == null) return null;
+  const details = { message: out.trim() };
+  if (commitDetailsCache.size >= COMMIT_DETAILS_CACHE_MAX) {
+    commitDetailsCache.clear();
+  }
+  commitDetailsCache.set(key, details);
+  return details;
 }
