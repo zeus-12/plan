@@ -8,6 +8,7 @@ import {
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
 import { usePersistentString } from "../lib/use-persistent-string";
+import { buildFileTree, flattenFileTree } from "../lib/file-tree";
 import { FileIcon, FolderIcon } from "./file-icon";
 import { Chevron } from "./chevron";
 
@@ -90,13 +91,6 @@ type Row =
     }
   | { kind: "file"; key: string; file: FileEntry; depth: number };
 
-interface DirNode {
-  name: string;
-  path: string;
-  dirs: Map<string, DirNode>;
-  files: FileEntry[];
-}
-
 /**
  * Turn a section's flat file list into VSCode-style tree rows: folders (with
  * single-child chains compacted into one row, like `explorer.compactFolders`)
@@ -109,63 +103,28 @@ function treeRows(
   repoKey: string,
   collapsedFolders: Set<string>,
 ): Row[] {
-  const root: DirNode = { name: "", path: "", dirs: new Map(), files: [] };
-  for (const f of files) {
-    const parts = f.path.split("/");
-    parts.pop(); // drop the filename — only the directory chain builds nodes
-    let node = root;
-    let acc = "";
-    for (const part of parts) {
-      acc = acc ? `${acc}/${part}` : part;
-      let child = node.dirs.get(part);
-      if (!child) {
-        child = { name: part, path: acc, dirs: new Map(), files: [] };
-        node.dirs.set(part, child);
-      }
-      node = child;
-    }
-    node.files.push(f);
-  }
-
-  const out: Row[] = [];
-  const emit = (node: DirNode, depth: number) => {
-    const dirNames = [...node.dirs.keys()].sort((a, b) => a.localeCompare(b));
-    for (const dn of dirNames) {
-      let child = node.dirs.get(dn)!;
-      let name = child.name;
-      // Compact a chain of single-child folders: a → b → c shows as "a/b/c".
-      while (child.dirs.size === 1 && child.files.length === 0) {
-        const only = [...child.dirs.values()][0];
-        name = `${name}/${only.name}`;
-        child = only;
-      }
-      const collapseKey = `${repoKey}::${section}::dir::${child.path}`;
-      out.push({
-        kind: "folder",
-        key: `fold:${collapseKey}`,
-        group,
-        section,
-        dirPath: child.path,
-        name,
-        depth,
-        collapseKey,
-      });
-      if (!collapsedFolders.has(collapseKey)) emit(child, depth + 1);
-    }
-    const sorted = [...node.files].sort((a, b) =>
-      basename(a.path).localeCompare(basename(b.path)),
-    );
-    for (const f of sorted) {
-      out.push({
-        kind: "file",
-        key: `file:${repoKey}:${section}:${f.path}`,
-        file: f,
-        depth,
-      });
-    }
-  };
-  emit(root, 0);
-  return out;
+  const keyFor = (dirPath: string) => `${repoKey}::${section}::dir::${dirPath}`;
+  const tree = buildFileTree(files, (f) => f.path, { compact: true });
+  return flattenFileTree(tree, (p) => !collapsedFolders.has(keyFor(p))).map(
+    (row): Row =>
+      row.kind === "dir"
+        ? {
+            kind: "folder",
+            key: `fold:${keyFor(row.dir.path)}`,
+            group,
+            section,
+            dirPath: row.dir.path,
+            name: row.dir.name,
+            depth: row.depth,
+            collapseKey: keyFor(row.dir.path),
+          }
+        : {
+            kind: "file",
+            key: `file:${repoKey}:${section}:${row.file.path}`,
+            file: row.file,
+            depth: row.depth,
+          },
+  );
 }
 
 function statusColor(letter: FileEntry["letter"]) {

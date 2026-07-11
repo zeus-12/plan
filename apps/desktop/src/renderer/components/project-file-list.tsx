@@ -3,6 +3,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename, dirname } from "@plan/shared/lib/path";
 import { FileIcon, FolderIcon } from "./file-icon";
+import {
+  ancestorDirs,
+  buildFileTree,
+  flattenFileTree,
+  type FileTreeRow,
+} from "../lib/file-tree";
 import { Chevron } from "./chevron";
 
 interface Props {
@@ -17,73 +23,7 @@ interface Props {
 
 const ROW_HEIGHT = 24;
 
-// ── Tree model ──────────────────────────────────────────────────────
-interface DirNode {
-  type: "dir";
-  name: string;
-  path: string;
-  children: TreeNode[];
-}
-interface FileNode {
-  type: "file";
-  name: string;
-  path: string;
-}
-type TreeNode = DirNode | FileNode;
-
-function buildTree(files: string[]): TreeNode[] {
-  const root: DirNode = { type: "dir", name: "", path: "", children: [] };
-  const dirs = new Map<string, DirNode>([["", root]]);
-  for (const f of files) {
-    const parts = f.split("/");
-    let parent = root;
-    let cur = "";
-    for (let i = 0; i < parts.length - 1; i++) {
-      cur = cur ? `${cur}/${parts[i]}` : parts[i];
-      let dir = dirs.get(cur);
-      if (!dir) {
-        dir = { type: "dir", name: parts[i], path: cur, children: [] };
-        dirs.set(cur, dir);
-        parent.children.push(dir);
-      }
-      parent = dir;
-    }
-    parent.children.push({
-      type: "file",
-      name: parts[parts.length - 1],
-      path: f,
-    });
-  }
-  sortNodes(root);
-  return root.children;
-}
-
-function sortNodes(dir: DirNode): void {
-  dir.children.sort((a, b) => {
-    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-  for (const c of dir.children) if (c.type === "dir") sortNodes(c);
-}
-
-interface Row {
-  node: TreeNode;
-  depth: number;
-}
-function flatten(
-  nodes: TreeNode[],
-  expanded: Set<string>,
-  depth = 0,
-  out: Row[] = [],
-): Row[] {
-  for (const n of nodes) {
-    out.push({ node: n, depth });
-    if (n.type === "dir" && expanded.has(n.path)) {
-      flatten(n.children, expanded, depth + 1, out);
-    }
-  }
-  return out;
-}
+type Row = FileTreeRow<string>;
 
 /**
  * VSCode-style collapsible file tree. While a filter query is typed it flattens
@@ -101,7 +41,7 @@ export function ProjectFileList({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const parentRef = useRef<HTMLDivElement>(null);
 
-  const tree = useMemo(() => buildTree(files), [files]);
+  const tree = useMemo(() => buildFileTree(files, (f) => f), [files]);
 
   // Reveal the selected (or cross-tab active) file by expanding its ancestors.
   const reveal = selected ?? activeFilePath ?? null;
@@ -109,12 +49,7 @@ export function ProjectFileList({
     if (!reveal) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      const parts = reveal.split("/");
-      let cur = "";
-      for (let i = 0; i < parts.length - 1; i++) {
-        cur = cur ? `${cur}/${parts[i]}` : parts[i];
-        next.add(cur);
-      }
+      for (const dir of ancestorDirs(reveal)) next.add(dir);
       return next;
     });
   }, [reveal]);
@@ -128,11 +63,12 @@ export function ProjectFileList({
   const rows: Row[] = useMemo(() => {
     if (filtered) {
       return filtered.map((f) => ({
-        node: { type: "file", name: f, path: f },
+        kind: "file" as const,
+        file: f,
         depth: 0,
       }));
     }
-    return flatten(tree, expanded);
+    return flattenFileTree(tree, (p) => expanded.has(p));
   }, [filtered, tree, expanded]);
 
   const virtualizer = useVirtualizer({
@@ -165,23 +101,21 @@ export function ProjectFileList({
             style={{ height: virtualizer.getTotalSize(), position: "relative" }}
           >
             {virtualizer.getVirtualItems().map((vi) => {
-              const { node, depth } = rows[vi.index];
-              const isDir = node.type === "dir";
-              const isOpen = isDir && expanded.has(node.path);
-              const isSelected = node.type === "file" && node.path === selected;
+              const row = rows[vi.index];
+              const { depth } = row;
+              const isDir = row.kind === "dir";
+              const path = isDir ? row.dir.path : row.file;
+              const name = isDir ? row.dir.name : basename(row.file);
+              const isOpen = isDir && expanded.has(path);
+              const isSelected = !isDir && path === selected;
               // Cross-tab indicator: the active file (e.g. an open diff) that
               // isn't the explicit selection here.
-              const isActive =
-                node.type === "file" &&
-                !isSelected &&
-                node.path === activeFilePath;
+              const isActive = !isDir && !isSelected && path === activeFilePath;
               return (
                 <button
                   key={vi.key}
-                  onClick={() =>
-                    isDir ? toggle(node.path) : onSelect(node.path)
-                  }
-                  title={node.path}
+                  onClick={() => (isDir ? toggle(path) : onSelect(path))}
+                  title={path}
                   className={cn(
                     "absolute left-0 top-0 flex w-full items-center gap-1 border-l-2 pr-2 text-left font-[family-name:var(--font-mono)] text-[12px] transition-colors",
                     isSelected
@@ -204,20 +138,20 @@ export function ProjectFileList({
                   {isDir ? (
                     <FolderIcon open={!!isOpen} />
                   ) : (
-                    <FileIcon name={node.name} />
+                    <FileIcon name={name} />
                   )}
                   <span className="truncate">
-                    {filtered && node.type === "file" ? (
+                    {filtered && !isDir ? (
                       <>
-                        <span>{basename(node.path)}</span>
-                        {dirname(node.path) && (
+                        <span>{name}</span>
+                        {dirname(path) && (
                           <span className="ml-2 text-[10px] text-[var(--text-tertiary)]">
-                            {dirname(node.path)}
+                            {dirname(path)}
                           </span>
                         )}
                       </>
                     ) : (
-                      node.name
+                      name
                     )}
                   </span>
                 </button>
