@@ -62,8 +62,16 @@ import {
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
 import { readSessionFile } from "./jsonl-parser";
+import { markSessionMovedAway } from "./session-reaper";
 import { getFileContents, getFileView } from "./file-contents";
-import { listPrs, getPrDetail, getPrFileView } from "./github";
+import {
+  listPrs,
+  getPrMeta,
+  getPrConversation,
+  getPrDiff,
+  getPrHeadSha,
+  getPrFileView,
+} from "./github";
 import { getFileImageDiff } from "./file-media";
 import {
   listProjectFiles,
@@ -392,12 +400,16 @@ const invokeHandlers: {
   },
 
   "session:move": async (_e, sessionId, fromEncoded, toEncoded) => {
-    // Kill the source chat's `claude` and WAIT for it to exit before moving
-    // the transcript. A live `claude` writes to a path derived from its cwd,
-    // so if it outlives the rename it re-creates a metadata stub at the old
-    // path — the session then lingers (message-less) in the source worktree.
+    // Kill the source chat's `claude` and WAIT for it to exit before moving the
+    // transcript — a live `claude` writes to a path derived from its cwd, so
+    // the sooner it's gone the smaller the ghost window. But the kill can't be
+    // a guarantee: claude runs under the pty's shell (SIGHUP doesn't reliably
+    // reap it) and may flush one last state snapshot after the rename, leaving
+    // a message-less stub at the old path. markSessionMovedAway arms the
+    // deterministic reaper that neutralizes that ghost (see session-reaper).
     await killTerminalAndWait(chatTerminalId(fromEncoded, sessionId));
     await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
+    if (fromEncoded !== toEncoded) markSessionMovedAway(fromEncoded, sessionId);
   },
 
   "session:read": async (_e, encoded, sessionId) => {
@@ -418,8 +430,14 @@ const invokeHandlers: {
     getFileImageDiff(encoded, path, mode, subPath),
 
   "github:listPrs": (_e, encoded, subPath = "") => listPrs(encoded, subPath),
-  "github:prDetail": (_e, encoded, subPath, number) =>
-    getPrDetail(encoded, subPath, number),
+  "github:prMeta": (_e, encoded, subPath, number) =>
+    getPrMeta(encoded, subPath, number),
+  "github:prConversation": (_e, encoded, subPath, number) =>
+    getPrConversation(encoded, subPath, number),
+  "github:prDiff": (_e, encoded, subPath, number) =>
+    getPrDiff(encoded, subPath, number),
+  "github:prHeadSha": (_e, encoded, subPath, number) =>
+    getPrHeadSha(encoded, subPath, number),
   "github:prFileView": (_e, encoded, subPath, headSha, newPath) =>
     getPrFileView(encoded, subPath, headSha, newPath),
 

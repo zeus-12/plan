@@ -1,6 +1,7 @@
 import { watch, stat } from "fs/promises";
 import { join } from "path";
 import { CLAUDE_PROJECTS_DIR, listSessionFiles } from "./claude-sessions";
+import { clearRelocationGuards, reapRelocatedStub } from "./session-reaper";
 import type { SessionEvent } from "../shared-types";
 
 const DEBOUNCE_MS = 300;
@@ -53,6 +54,7 @@ export function stopAll(): void {
   for (const enc of [...projectWatchers.keys()]) stopWatching(enc);
   rootWatch?.abort.abort();
   rootWatch = null;
+  clearRelocationGuards();
 }
 
 async function runProjectWatch(
@@ -84,6 +86,15 @@ async function runProjectWatch(
           }
 
           const sessionId = event.filename!.replace(/\.jsonl$/, "");
+
+          // A session moved out of this project can leave a message-less ghost
+          // here if the source `claude` flushes state after the transcript was
+          // renamed away. Reap it instead of surfacing it (see session-reaper).
+          if (await reapRelocatedStub(encoded, sessionId, filePath)) {
+            knownFiles.delete(filePath);
+            return;
+          }
+
           const wasKnown = knownFiles.has(filePath);
           knownFiles.add(filePath);
 
