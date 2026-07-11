@@ -113,10 +113,61 @@ let highlighter: Highlighter | null = null;
 let highlighterPromise: Promise<Highlighter | null> | null = null;
 const subscribers = new Set<() => void>();
 
+/** Bumped whenever tokenization can produce something new — highlighter
+ *  created, a grammar landed, the active theme changed. 0 = nothing loadable
+ *  yet. `useShikiReady` exposes it so token memos re-run on each bump. */
+let shikiEpoch = 0;
+
+function notifySubscribers(): void {
+  shikiEpoch++;
+  for (const cb of subscribers) cb();
+}
+
 function resolveLang(id: string): string | null {
   if (!id || id === "auto" || id === "plaintext") return null;
   const target = LANG_ALIAS[id] ?? id;
   return SUPPORTED_LANGS.includes(target) ? target : null;
+}
+
+// ── On-demand grammars and themes ────────────────────────────────────────────
+// The highlighter is created with only the active theme and NO grammars.
+// Creating it with all 27 grammars + every registered theme was a significant
+// main-thread TextMate-compile burst right after first paint — competing with
+// the first workspace's mount for exactly the frames the user is watching.
+// Each grammar/theme now compiles on the first render that needs it: that
+// render paints plain (the same not-ready path callers already handle) and the
+// subscriber ping re-colors it the moment the grammar lands.
+
+const loadedLangs = new Set<string>();
+const loadingLangs = new Set<string>();
+const loadedThemes = new Set<string>();
+const loadingThemes = new Set<string>();
+/** Theme waiting on its first compile; applied when it lands (last wins). */
+let pendingTheme: string | null = null;
+
+/** A theme's `loadTheme` input: the custom object, or the bundled name. */
+function themeInput(name: string): object | string {
+  return customThemes.get(name) ?? name;
+}
+
+/** True when `lang`'s grammar is loaded; kicks off its load when it isn't. */
+function langReady(h: Highlighter, lang: string): boolean {
+  if (loadedLangs.has(lang)) return true;
+  if (!loadingLangs.has(lang)) {
+    loadingLangs.add(lang);
+    void h
+      .loadLanguage(lang as unknown as never)
+      .then(() => {
+        loadedLangs.add(lang);
+        notifySubscribers();
+      })
+      .catch(() => {
+        // Load failed (shouldn't happen for bundled grammars) — the language
+        // just stays uncolored; don't retry-loop.
+      })
+      .finally(() => loadingLangs.delete(lang));
+  }
+  return false;
 }
 
 /**
@@ -130,15 +181,24 @@ export async function ensureHighlighter(): Promise<Highlighter | null> {
   highlighterPromise = (async () => {
     try {
       const { createHighlighter } = await import("shiki");
+      const initialTheme = activeShikiTheme;
       const h = await createHighlighter({
-        themes: [...bundledNames, ...customThemes.values()] as never,
+        themes: [themeInput(initialTheme)] as never,
         // Cast through unknown — shiki expects a BundledLanguage[] union
         // which is a 200-element string union that blows up TS memory.
-        langs: SUPPORTED_LANGS as unknown as never,
+        langs: [] as unknown as never,
       });
+      loadedThemes.add(initialTheme);
       highlighter = h;
+      // The active theme may have changed while the wasm loaded; reroute
+      // through the normal switch (which compiles it) now that we can.
+      if (activeShikiTheme !== initialTheme) {
+        const want = activeShikiTheme;
+        activeShikiTheme = initialTheme;
+        setActiveShikiTheme(want);
+      }
       // Wake up everyone who was waiting for tokens.
-      for (const cb of subscribers) cb();
+      notifySubscribers();
       return h;
     } catch {
       return null;
@@ -153,12 +213,39 @@ export async function ensureHighlighter(): Promise<Highlighter | null> {
  * when the UI theme changes. Notifies subscribers so mounted code blocks
  * re-tokenize with the new theme's colors. Unknown names fall back to the
  * default so a misconfigured mapping never leaves code uncolored.
+ *
+ * A theme not yet compiled into the highlighter loads first and applies when
+ * ready — mounted blocks keep the previous theme's colors in the interim
+ * (never a flash of plain text). Rapid switches resolve to the last one.
  */
 export function setActiveShikiTheme(name: string): void {
   const next = knownThemeName(name) ? name : DEFAULT_THEME;
   if (next === activeShikiTheme) return;
-  activeShikiTheme = next;
-  for (const cb of subscribers) cb();
+  // No highlighter yet (creation bakes the active theme in) or already
+  // compiled: flip immediately.
+  if (!highlighter || loadedThemes.has(next)) {
+    pendingTheme = null;
+    activeShikiTheme = next;
+    notifySubscribers();
+    return;
+  }
+  pendingTheme = next;
+  if (loadingThemes.has(next)) return;
+  loadingThemes.add(next);
+  void highlighter
+    .loadTheme(themeInput(next) as never)
+    .then(() => {
+      loadedThemes.add(next);
+      if (pendingTheme === next) {
+        pendingTheme = null;
+        activeShikiTheme = next;
+        notifySubscribers();
+      }
+    })
+    .catch(() => {
+      // Failed theme compile — keep the current theme rather than go colorless.
+    })
+    .finally(() => loadingThemes.delete(next));
 }
 
 /**
@@ -180,26 +267,26 @@ export function useActiveShikiTheme(): string {
 }
 
 /**
- * Subscribe to shiki readiness so a component re-renders the moment the
- * highlighter finishes loading. Cheap — no React state ping if the
- * highlighter was already loaded by the time the component mounted.
+ * Shiki readiness "epoch": 0 while nothing can tokenize; bumps when the
+ * highlighter finishes loading and again whenever an on-demand grammar or
+ * theme lands. Truthy once tokenization is possible, so `!ready` branches
+ * work — and using it as a memo dependency means a block that first rendered
+ * plain (its grammar still compiling) re-tokenizes the moment it can.
  */
-export function useShikiReady(): boolean {
-  const [ready, setReady] = useState<boolean>(!!highlighter);
+export function useShikiReady(): number {
+  const [epoch, setEpoch] = useState<number>(shikiEpoch);
   useEffect(() => {
-    if (highlighter) {
-      if (!ready) setReady(true);
-      return;
-    }
-    const cb = () => setReady(true);
+    const cb = () => setEpoch(shikiEpoch);
     subscribers.add(cb);
+    // Sync in case an epoch bump landed between render and this effect.
+    cb();
     void ensureHighlighter();
     return () => {
       subscribers.delete(cb);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return ready;
+  return epoch;
 }
 
 export interface SyntaxToken {
@@ -257,6 +344,9 @@ export function highlightTokens(
   if (!highlighter) return [];
   const lang = resolveLang(languageId);
   if (!lang) return [];
+  // Grammar still compiling (first use of this language): plain for now; the
+  // load's subscriber ping re-runs callers' memos once tokens are possible.
+  if (!langReady(highlighter, lang)) return [];
 
   // Keyed on the RESOLVED grammar name (aliases collapse to one entry) and the
   // active theme (colors differ per theme, so each theme caches separately).
@@ -342,6 +432,7 @@ export function stripComments(code: string, languageId: string): string | null {
   if (!highlighter) return null;
   const lang = resolveLang(languageId);
   if (!lang) return null;
+  if (!langReady(highlighter, lang)) return null;
 
   let lines;
   try {
@@ -412,6 +503,7 @@ export function codeBracketPositions(
   if (!highlighter) return [];
   const lang = resolveLang(languageId);
   if (!lang) return [];
+  if (!langReady(highlighter, lang)) return [];
 
   let lines;
   try {
