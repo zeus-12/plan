@@ -2,7 +2,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { git, gitShow } from "./git-exec";
 import { looksBinary } from "./fs-util";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveWorkspaceCwd } from "./workspace";
 import type { FileContents, FileView } from "../shared-types";
 
 /** Unified diff for one file in one stage; "" when git fails (e.g. no repo). */
@@ -32,8 +32,7 @@ export async function getFileContents(
   newPath: string | null,
   subPath: string = "",
 ): Promise<FileContents> {
-  const base = await resolveProjectCwd(encoded);
-  const cwd = subPath ? join(base, subPath) : base;
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const [oldText, newText] = await Promise.all([
     oldPath ? gitShow(cwd, "HEAD", oldPath) : Promise.resolve(""),
     newPath ? readWorking(cwd, newPath) : Promise.resolve(""),
@@ -54,8 +53,7 @@ export async function getFileView(
   mode: "staged" | "unstaged",
   subPath: string = "",
 ): Promise<FileView> {
-  const base = await resolveProjectCwd(encoded);
-  const cwd = subPath ? join(base, subPath) : base;
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
 
   let oldText: string;
   let newText: string;

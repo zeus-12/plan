@@ -3,6 +3,7 @@ import { join, resolve } from "path";
 import { git as run } from "./git-exec";
 import { pathExists } from "./fs-util";
 import { resolveProjectCwd } from "./claude-projects";
+import { resolveWorkspaceCwd } from "./workspace";
 import { GIT_SCAN_DEPTH } from "./config";
 import type {
   DiscoveredRepo,
@@ -10,14 +11,6 @@ import type {
   GitFileStatus,
   GitStatusResult,
 } from "../shared-types";
-
-async function cwdFromEncoded(
-  encoded: string,
-  subPath: string = "",
-): Promise<string> {
-  const base = await resolveProjectCwd(encoded);
-  return subPath ? join(base, subPath) : base;
-}
 
 /** Cheap pre-check: is there a `.git` file or directory at this path? */
 async function hasGitMarker(cwd: string): Promise<boolean> {
@@ -111,7 +104,7 @@ export async function getBranch(
   encoded: string,
   subPath: string = "",
 ): Promise<string | null> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   if (!(await isGitRepo(cwd))) return null;
   return branchAt(cwd);
 }
@@ -120,7 +113,7 @@ export async function getStatus(
   encoded: string,
   subPath: string = "",
 ): Promise<GitStatusResult> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   if (!(await isGitRepo(cwd))) {
     return {
       available: false,
@@ -171,7 +164,7 @@ export async function push(
   encoded: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
 
   // Mirror VS Code's "sync": pull before pushing so remote commits are merged
   // in and the push isn't rejected as non-fast-forward. Skip when the branch
@@ -212,7 +205,7 @@ export async function stageFile(
   path: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const r = await run(await cwdFromEncoded(encoded, subPath), [
+  const r = await run(await resolveWorkspaceCwd(encoded, subPath), [
     "add",
     "--",
     path,
@@ -226,7 +219,7 @@ export async function unstageFile(
   path: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const r = await run(cwd, ["restore", "--staged", "--", path]);
   if (r.code !== 0) {
     const r2 = await run(cwd, ["reset", "HEAD", "--", path]);
@@ -240,7 +233,7 @@ export async function discardFile(
   path: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const r = await run(cwd, ["restore", "--worktree", "--", path]);
   if (r.code !== 0) {
     const c = await run(cwd, ["clean", "-f", "--", path]);
@@ -255,7 +248,10 @@ export async function stageAll(
   encoded: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const r = await run(await cwdFromEncoded(encoded, subPath), ["add", "-A"]);
+  const r = await run(await resolveWorkspaceCwd(encoded, subPath), [
+    "add",
+    "-A",
+  ]);
   if (r.code !== 0)
     return { ok: false, error: r.stderr || "git add -A failed" };
   return { ok: true };
@@ -265,7 +261,7 @@ export async function unstageAll(
   encoded: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const r = await run(cwd, ["restore", "--staged", "."]);
   if (r.code !== 0) {
     const r2 = await run(cwd, ["reset", "HEAD"]);
@@ -283,7 +279,7 @@ export async function discardAll(
   encoded: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const restore = await run(cwd, ["restore", "--worktree", "."]);
   const clean = await run(cwd, ["clean", "-fd"]);
   if (restore.code !== 0 && clean.code !== 0) {
@@ -303,7 +299,7 @@ export async function stashAll(
   encoded: string,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const r = await run(cwd, ["stash", "push", "--include-untracked"]);
   if (r.code !== 0) return { ok: false, error: r.stderr || "git stash failed" };
   if (/No local changes to save/i.test(r.stdout)) {
@@ -319,7 +315,7 @@ export async function commit(
 ): Promise<{ ok: boolean; error?: string }> {
   if (!message.trim())
     return { ok: false, error: "Commit message is required" };
-  const r = await run(await cwdFromEncoded(encoded, subPath), [
+  const r = await run(await resolveWorkspaceCwd(encoded, subPath), [
     "commit",
     "-m",
     message,
@@ -345,7 +341,7 @@ export async function applyPatch(
   opts: ApplyHunkOptions,
   subPath: string = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const cwd = await cwdFromEncoded(encoded, subPath);
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const args: string[] = ["apply", "--whitespace=nowarn", "--unidiff-zero"];
   if (opts.mode === "stage") args.push("--cached");
   else if (opts.mode === "unstage") {

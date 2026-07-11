@@ -1,5 +1,6 @@
 import { createJsonStore } from "./json-store";
 import { primeProjectCwd } from "./claude-projects";
+import { encodeCwd } from "./claude-encoding";
 
 interface Stored {
   manualCwds: string[];
@@ -116,15 +117,4 @@ export async function setSessionName(sessionId: string, name: string) {
     delete data.sessionNames[sessionId];
   }
   scheduleWrite();
-}
-
-/**
- * Claude's encoding: replace every non-alphanumeric character with a hyphen.
- * This covers path separators as well as spaces, dots, parens, etc. — e.g.
- * "/Users/x/hacker rank ats" → "-Users-x-hacker-rank-ats" and
- * "/Users/x/copilot (ic)" → "-Users-x-copilot--ic-". Must match the directory
- * names Claude creates under ~/.claude/projects, or session lookups miss.
- */
-export function encodeCwd(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
 }

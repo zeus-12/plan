@@ -1,10 +1,8 @@
 import type { IPty } from "node-pty";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
-import { execFile } from "child_process";
-import { app } from "electron";
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
-import { resolveProjectCwd } from "./claude-projects";
+import { agentProcessFor } from "./agent-probe";
+import { defaultShell, shellEnv } from "./shell-env";
+import { resolveWorkspaceCwd } from "./workspace";
 import { classifyInputState, screenIsBusy } from "./tui-screen";
 import type {
   TerminalActivity,
@@ -51,56 +49,6 @@ export function setTerminalCallbacks(cbs: {
   onData = cbs.onData;
   onExit = cbs.onExit;
   onActivity = cbs.onActivity;
-}
-
-function defaultShell(): string {
-  if (process.platform === "win32") return "powershell.exe";
-  return process.env.SHELL || "/bin/zsh";
-}
-
-/**
- * App-scoped zsh styling WITHOUT touching the user's dotfiles. We point zsh at
- * our own `ZDOTDIR`; each file there sources the user's real equivalent first
- * (so their PATH/aliases/plugins load unchanged), then our `.zshrc` layers the
- * terminal's prompt + colours on top. Only ptys spawned by this app get it;
- * every other terminal on the machine is unaffected. This is the same mechanism
- * VS Code uses for its shell integration.
- *
- * Returns the dir to use as `ZDOTDIR`, or null for non-zsh shells (where we
- * leave the environment completely alone).
- */
-let cachedZdotdir: string | null | undefined;
-function shellZdotdir(): string | null {
-  if (cachedZdotdir !== undefined) return cachedZdotdir;
-  cachedZdotdir = null;
-  if (!/(^|\/)zsh$/.test(defaultShell())) return null;
-  try {
-    const dir = join(app.getPath("userData"), "shell", "zdotdir");
-    mkdirSync(dir, { recursive: true });
-    // Chain to the user's real startup files (ZDOTDIR stays ours, so zsh keeps
-    // reading our files; each one pulls in the user's before we add anything).
-    const chain = (name: string) =>
-      `[[ -f "\${USER_ZDOTDIR:-$HOME}/${name}" ]] && source "\${USER_ZDOTDIR:-$HOME}/${name}"\n`;
-    writeFileSync(join(dir, ".zshenv"), chain(".zshenv"));
-    writeFileSync(join(dir, ".zprofile"), chain(".zprofile"));
-    writeFileSync(join(dir, ".zlogin"), chain(".zlogin"));
-    writeFileSync(
-      join(dir, ".zshrc"),
-      chain(".zshrc") +
-        [
-          "# Plan terminal styling — scoped to this app; your ~/.zshrc is untouched.",
-          "export CLICOLOR=1",
-          "export LSCOLORS=cxfxcxdxbxegedabagacad",
-          // Full cwd (home shown as ~) in one soft tint, dim prompt symbol.
-          "PROMPT='%F{108}%~%f %F{244}%#%f '",
-          "",
-        ].join("\n"),
-    );
-    cachedZdotdir = dir;
-  } catch {
-    cachedZdotdir = null;
-  }
-  return cachedZdotdir;
 }
 
 // Lazy-loaded so a native-module load failure is caught and reported to the
@@ -151,8 +99,7 @@ export async function openTerminal(
     return { cwd: existing.cwd };
   }
 
-  const base = await resolveProjectCwd(encoded);
-  const cwd = subPath ? join(base, subPath) : base;
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const mod = loadPty();
   if (!mod) {
     const msg = `\r\n\x1b[31mTerminal unavailable: failed to load node-pty.\x1b[0m\r\n${ptyLoadError ?? ""}\r\nTry: pnpm --filter @plan/desktop rebuild\r\n`;
@@ -162,32 +109,12 @@ export async function openTerminal(
   }
 
   try {
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      TERM: "xterm-256color",
-    };
-    // Point zsh at our app-owned ZDOTDIR (which chains to the user's real
-    // config) so the prompt/colours live in the app, not the user's dotfiles.
-    const zdotdir = shellZdotdir();
-    if (zdotdir) {
-      // Point at the user's REAL config dir. If we were launched from inside one
-      // of our own terminals, the inherited ZDOTDIR is already ours — using it
-      // would make our .zshrc source itself forever, so fall back to the real
-      // dir the parent stashed in USER_ZDOTDIR (then $HOME).
-      const inherited = process.env.ZDOTDIR;
-      const realUserDir =
-        inherited && inherited !== zdotdir
-          ? inherited
-          : process.env.USER_ZDOTDIR;
-      env.USER_ZDOTDIR = realUserDir || process.env.HOME || "";
-      env.ZDOTDIR = zdotdir;
-    }
     const pty = mod.spawn(defaultShell(), [], {
       name: "xterm-color",
       cols: Math.max(cols, 1),
       rows: Math.max(rows, 1),
       cwd,
-      env,
+      env: shellEnv(),
     });
     const screen = new HeadlessTerminal({
       cols: Math.max(cols, 1),
@@ -259,61 +186,17 @@ export function writeTerminal(id: string, data: string) {
 
 /**
  * Live status of a terminal. `process` is the name of an agent process
- * (claude / node) found among the shell's descendants — determined by walking
- * the real process tree (`ps`), since node-pty's foreground-process name is
- * unreliable on macOS. Falls back to node-pty's report if `ps` fails.
+ * (claude / node) found among the shell's descendants — see agent-probe.ts.
+ * Falls back to node-pty's (less reliable) report if `ps` fails.
  */
-// `ps -ax` lists EVERY process on the system and is the expensive part of a
-// status check (100–500ms on a busy Mac). The output is identical for every
-// terminal at a given moment, yet each open session polls status independently
-// (1–5s each). So we snapshot the whole process tree once and share it for a
-// short window: concurrent and back-to-back polls collapse onto one `ps` run
-// instead of spawning one each. The per-terminal BFS below is then in-memory.
-type ProcTree = Map<number, { pid: number; comm: string }[]>;
-const PS_TTL_MS = 2_000;
-let procTreeCache: { at: number; tree: ProcTree } | null = null;
-let procTreeInflight: Promise<ProcTree> | null = null;
-
-function getProcessTree(): Promise<ProcTree> {
-  const now = Date.now();
-  if (procTreeCache && now - procTreeCache.at < PS_TTL_MS) {
-    return Promise.resolve(procTreeCache.tree);
-  }
-  if (procTreeInflight) return procTreeInflight;
-  procTreeInflight = new Promise<ProcTree>((resolve, reject) => {
-    execFile("ps", ["-ax", "-o", "pid=,ppid=,comm="], (err, stdout) => {
-      procTreeInflight = null;
-      if (err) {
-        reject(err);
-        return;
-      }
-      const childrenOf: ProcTree = new Map();
-      for (const line of stdout.split("\n")) {
-        const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
-        if (!m) continue;
-        const entry = { pid: Number(m[1]), comm: m[3] };
-        const ppid = Number(m[2]);
-        const arr = childrenOf.get(ppid);
-        if (arr) arr.push(entry);
-        else childrenOf.set(ppid, [entry]);
-      }
-      procTreeCache = { at: Date.now(), tree: childrenOf };
-      resolve(childrenOf);
-    });
-  });
-  return procTreeInflight;
-}
-
 export async function terminalStatus(
   id: string,
 ): Promise<{ running: boolean; process: string | null }> {
   const s = sessions.get(id);
   if (!s) return { running: false, process: null };
-  let childrenOf: ProcTree;
   try {
-    childrenOf = await getProcessTree();
+    return { running: true, process: await agentProcessFor(s.pty.pid) };
   } catch {
-    // `ps` failed — fall back to node-pty's (less reliable) report.
     let fallback: string | null = null;
     try {
       fallback = s.pty.process;
@@ -322,21 +205,6 @@ export async function terminalStatus(
     }
     return { running: true, process: fallback };
   }
-  // BFS from the pty's shell pid for an agent process among its descendants.
-  let found: string | null = null;
-  const queue = [s.pty.pid];
-  while (queue.length > 0 && !found) {
-    const pid = queue.shift()!;
-    for (const c of childrenOf.get(pid) ?? []) {
-      const base = (c.comm.split("/").pop() ?? c.comm).toLowerCase();
-      if (base.includes("claude") || base === "node") {
-        found = base;
-        break;
-      }
-      queue.push(c.pid);
-    }
-  }
-  return { running: true, process: found };
 }
 
 /**

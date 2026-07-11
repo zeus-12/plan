@@ -3,7 +3,7 @@ import { join, basename } from "path";
 import { createHash } from "crypto";
 import { gitOrThrow as git, gitSafe, gh } from "./git-exec";
 import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
-import { encodeCwd } from "./manual-projects";
+import { encodeCwd, safeSegment } from "./claude-encoding";
 import { PLAN_DIR } from "./plan-config";
 import { discoverRepos } from "./git";
 import type { DiscoveredRepo } from "../shared-types";
@@ -17,10 +17,6 @@ import type { DiscoveredRepo } from "../shared-types";
  */
 const WORKTREES_ROOT = join(PLAN_DIR, "worktrees");
 
-/** Reduce a path segment to chars where our encoding == Claude's (no "." etc). */
-function safeSegment(s: string): string {
-  return s.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
-}
 import {
   addWorktreeRecord,
   deleteWorktreeRecord,

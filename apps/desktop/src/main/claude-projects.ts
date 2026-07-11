@@ -6,6 +6,7 @@ import {
   newestSessionFile,
   sessionFilePath,
 } from "./claude-sessions";
+import { decodeProjectDir } from "./claude-encoding";
 
 /**
  * Physically relocate a session's transcript from one project dir to another —
@@ -40,19 +41,6 @@ export async function moveSessionTranscript(
 // main/index.ts can layer on. listProjects() returns the raw fs-only shape —
 // derived structurally so the two can never drift apart.
 export type RawProjectEntry = Omit<ProjectEntry, "archived">;
-
-/**
- * Claude encodes a project cwd into a directory name by replacing path
- * separators with hyphens. The reverse is LOSSY — a real "-", space, or
- * other special char in a directory name is indistinguishable from a
- * separator (e.g. "copilot (ic)" → "copilot--ic-"). Use this only as a
- * last-resort fallback; prefer resolveProjectCwd() which reads the real cwd
- * from the session JSONL.
- */
-export function decodeProjectDir(encoded: string): string {
-  if (!encoded.startsWith("-")) return encoded;
-  return "/" + encoded.slice(1).replace(/-/g, "/");
-}
 
 const cwdCache = new Map<string, string>();
 

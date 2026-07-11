@@ -23,10 +23,11 @@ import {
   sessionFilePath,
 } from "./claude-sessions";
 import { pathExists } from "./fs-util";
+import { resolveWorkspaceCwd } from "./workspace";
+import { encodeCwd } from "./claude-encoding";
 import {
   getManualCwds,
   addManualCwd,
-  encodeCwd,
   getArchivedEncoded,
   setArchived,
   getArchivedSessions,
@@ -407,11 +408,8 @@ const invokeHandlers: {
     }
   },
 
-  "project:diff": async (_e, encoded, subPath = "") => {
-    const base = await resolveProjectCwd(encoded);
-    const cwd = subPath ? join(base, subPath) : base;
-    return getWorkingTreeDiff(cwd);
-  },
+  "project:diff": async (_e, encoded, subPath = "") =>
+    getWorkingTreeDiff(await resolveWorkspaceCwd(encoded, subPath)),
   "project:fileContents": (_e, encoded, oldPath, newPath, subPath = "") =>
     getFileContents(encoded, oldPath, newPath, subPath),
   "project:fileView": (_e, encoded, path, mode, subPath = "") =>

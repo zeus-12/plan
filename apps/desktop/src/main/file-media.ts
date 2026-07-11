@@ -4,7 +4,7 @@ import { join } from "path";
 import { app } from "electron";
 import { gitShowBuffer } from "./git-exec";
 import { extOf, pathExists } from "./fs-util";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveWorkspaceCwd } from "./workspace";
 import type { FileImageDiff } from "../shared-types";
 
 /**
@@ -52,8 +52,7 @@ export async function getFileImageDiff(
   mode: "staged" | "unstaged",
   subPath: string = "",
 ): Promise<FileImageDiff> {
-  const base = await resolveProjectCwd(encoded);
-  const cwd = subPath ? join(base, subPath) : base;
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
 
   if (mode === "staged") {
     const [oldPath, newPath] = await Promise.all([
