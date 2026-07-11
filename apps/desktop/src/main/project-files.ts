@@ -20,6 +20,30 @@ const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB
 // {@link ./ignored-dirs.ts}; shared with the worktree watcher.
 const IGNORE_DIRS = IGNORED_DIRS;
 
+// The walk result is stable between disk changes, but search re-ran it for
+// every query (and the Files tab for every mount). Cached per encoded; the
+// worktree watcher invalidates on every worktree-changed, so at most one walk
+// happens per debounce window and search/Files share it. Promise-cached so
+// concurrent callers share one walk.
+const fileListCache = new Map<string, Promise<string[]>>();
+
+export function invalidateFileList(encoded: string): void {
+  fileListCache.delete(encoded);
+}
+
+function cachedFileList(encoded: string): Promise<string[]> {
+  let p = fileListCache.get(encoded);
+  if (!p) {
+    p = resolveProjectCwd(encoded).then(fileList);
+    fileListCache.set(encoded, p);
+    // A rejected walk must not stick as this project's answer.
+    p.catch(() => {
+      if (fileListCache.get(encoded) === p) fileListCache.delete(encoded);
+    });
+  }
+  return p;
+}
+
 /**
  * Flat list of project files (POSIX-relative paths), for the Files tab and the
  * ⌘P finder. A single recursive filesystem walk that prunes the directories in
@@ -27,9 +51,8 @@ const IGNORE_DIRS = IGNORED_DIRS;
  * subprocess, no `.gitignore` parsing — so it always matches what's on disk and
  * behaves identically whether or not the project is a git repo.
  */
-export async function listProjectFiles(encoded: string): Promise<string[]> {
-  const cwd = await resolveProjectCwd(encoded);
-  return fileList(cwd);
+export function listProjectFiles(encoded: string): Promise<string[]> {
+  return cachedFileList(encoded);
 }
 
 /**
@@ -267,7 +290,9 @@ export async function searchProjectFiles(
 
   try {
     const cwd = await resolveProjectCwd(encoded);
-    const paths = await fileList(cwd);
+    // Shared with the Files tab and invalidated by the worktree watcher — a
+    // query burst re-walks nothing.
+    const paths = await cachedFileList(encoded);
 
     const results: SearchFileResult[] = [];
     let totalMatches = 0;

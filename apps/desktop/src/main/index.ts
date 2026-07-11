@@ -74,6 +74,7 @@ import {
 } from "./github";
 import { getFileImageDiff } from "./file-media";
 import {
+  invalidateFileList,
   listProjectFiles,
   readProjectFile,
   resolveProjectFilePath,
@@ -594,10 +595,12 @@ function bridgeWatcher() {
   setCallbacks({ onEvent: send });
   setWorktreeCallbacks({
     onEvent: (e) => {
-      // The tree changed on disk, so the cached repo layout may be stale
-      // (git init, checkout dirs appearing). At most one re-discovery per
-      // debounced watcher window keeps the cache honest without heuristics.
+      // The tree changed on disk, so per-project derived caches may be stale
+      // (repo layout: git init / checkout dirs; file list: files added or
+      // removed). At most one re-derivation per debounced watcher window
+      // keeps them honest without heuristics.
       invalidateRepoLayout(e.encoded);
+      invalidateFileList(e.encoded);
       send(e);
     },
   });
