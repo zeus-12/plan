@@ -1,5 +1,10 @@
 import { useEffect, useSyncExternalStore } from "react";
-import type { PrDetail, PrListResult } from "../../shared-types";
+import type {
+  PrComment,
+  PrMeta,
+  PrListResult,
+  PrSummary,
+} from "../../shared-types";
 
 /**
  * Cache for the PR viewer, keyed by project `encoded`. Two layers:
@@ -7,10 +12,12 @@ import type { PrDetail, PrListResult } from "../../shared-types";
  *  - PR *lists* (one per repo subPath) are small, so they persist to
  *    localStorage — the sidebar repaints its last-known PRs instantly on
  *    relaunch, then revalidates.
- *  - PR *details* (description + full timeline + raw diff) can be large, so they
- *    live in memory only. Re-opening a PR within a session is instant; a cold
- *    start refetches. This keeps us clear of the localStorage quota rather than
- *    risking a silent write failure that would corrupt the whole cache blob.
+ *  - PR *details* live in memory only (they can be large — quota-safe) and are
+ *    split into four independently-fetched sections: `meta` (header + commits),
+ *    `conversation` (timeline), `diff` (raw patch), and `headSha` (the network
+ *    ref-fetch the Files tab needs). The PR view kicks off all four in parallel
+ *    and paints each the instant it lands, so the header no longer waits on the
+ *    slow paginated conversation or the large diff.
  *
  * Both layers are stale-while-revalidate: a cached value paints immediately and
  * a background refetch swaps in fresh data when it lands (`revalidating` drives
@@ -20,10 +27,6 @@ import type { PrDetail, PrListResult } from "../../shared-types";
 
 interface ListEntry {
   result: PrListResult;
-  fetchedAt: number;
-}
-interface DetailEntry {
-  detail: PrDetail;
   fetchedAt: number;
 }
 
@@ -38,9 +41,28 @@ interface DetailEntry {
 const STALE_MS = 60_000;
 
 const lists = new Map<string, Record<string, ListEntry>>(); // encoded → subPath → entry
-const details = new Map<string, DetailEntry>(); // `${encoded}::${subPath}#${n}` → entry
 const inFlight = new Set<string>();
 const listeners = new Set<() => void>();
+
+// One in-memory SWR store per detail section. Keyed by `meta::${encoded}::${subPath}#${n}`
+// (namespaced so a section's key doubles as its inFlight key). `errors` holds
+// the last failure only while `data` has no cached value to fall back on — a
+// stale-but-real value always beats an error banner.
+interface CacheEntry<T> {
+  value: T;
+  fetchedAt: number;
+}
+interface Section<T> {
+  data: Map<string, CacheEntry<T>>;
+  errors: Map<string, string>;
+}
+function makeSection<T>(): Section<T> {
+  return { data: new Map(), errors: new Map() };
+}
+const metaSec = makeSection<PrMeta>();
+const conversationSec = makeSection<PrComment[]>();
+const diffSec = makeSection<string>();
+const headShaSec = makeSection<string | null>();
 
 // The hooks derive their state from several mutable maps per render, so the
 // subscription snapshot is a plain version counter: any cache change bumps it,
@@ -132,32 +154,34 @@ async function fetchList(encoded: string, subPath: string, force: boolean) {
   }
 }
 
-/** Fetch one PR's detail. Deduped; `force` bypasses the dedup window. */
-async function fetchDetail(
-  encoded: string,
-  subPath: string,
-  n: number,
+/**
+ * Fetch one detail section into its store, stale-while-revalidate + deduped.
+ * `run` maps the IPC result to either a value to cache or an error to surface.
+ * `force` bypasses the dedup window (⌘R). The section key doubles as the
+ * inFlight key, so the four sections of one PR fetch concurrently.
+ */
+async function fetchSection<T>(
+  sec: Section<T>,
+  key: string,
   force: boolean,
+  run: () => Promise<{ ok: true; value: T } | { ok: false; error: string }>,
 ) {
-  const key = detailKey(encoded, subPath, n);
   if (inFlight.has(key)) return;
   if (!force) {
-    const existing = details.get(key);
+    const existing = sec.data.get(key);
     if (existing && Date.now() - existing.fetchedAt < STALE_MS) return;
   }
   inFlight.add(key);
   emit();
   try {
-    const res = await window.electronAPI.getPrDetail(encoded, subPath, n);
-    if (res.ok && res.detail) {
-      details.set(key, { detail: res.detail, fetchedAt: Date.now() });
-    } else if (!details.has(key)) {
-      // Surface the error only when there's no cached detail to fall back on;
-      // a stale-but-real detail beats replacing it with an error banner.
-      details.set(key, {
-        detail: errorDetail(n, res.error ?? "Couldn't load this PR."),
-        fetchedAt: Date.now(),
-      });
+    const res = await run();
+    if (res.ok) {
+      sec.data.set(key, { value: res.value, fetchedAt: Date.now() });
+      sec.errors.delete(key);
+    } else if (!sec.data.has(key)) {
+      // Surface the error only when there's no cached value to fall back on;
+      // a stale-but-real value beats replacing it with an error banner.
+      sec.errors.set(key, res.error);
     }
   } finally {
     inFlight.delete(key);
@@ -165,50 +189,94 @@ async function fetchDetail(
   }
 }
 
-/** A placeholder detail carrying an error message in its title, when a PR has
- * never loaded successfully. `headSha` null so Files shows nothing. */
-function errorDetail(n: number, message: string): PrDetail {
-  return {
-    number: n,
-    title: message,
-    body: "",
-    state: "OPEN",
-    isDraft: false,
-    url: "",
-    author: "",
-    authorIsBot: false,
-    createdAt: "",
-    mergedAt: null,
-    baseRefName: "",
-    headRefName: "",
-    additions: 0,
-    deletions: 0,
-    diff: "",
-    timeline: [],
-    commits: [],
-    headSha: null,
-    __error: message,
-  } as PrDetail & { __error: string };
+function sectionKey(prefix: string, encoded: string, subPath: string, n: number) {
+  return `${prefix}::${detailKey(encoded, subPath, n)}`;
+}
+
+function fetchMeta(encoded: string, subPath: string, n: number, force: boolean) {
+  return fetchSection(metaSec, sectionKey("meta", encoded, subPath, n), force, async () => {
+    const res = await window.electronAPI.getPrMeta(encoded, subPath, n);
+    return res.ok && res.meta
+      ? { ok: true, value: res.meta }
+      : { ok: false, error: res.error ?? "Couldn't load this PR." };
+  });
+}
+
+function fetchConversation(encoded: string, subPath: string, n: number, force: boolean) {
+  return fetchSection(
+    conversationSec,
+    sectionKey("conv", encoded, subPath, n),
+    force,
+    async () => {
+      const res = await window.electronAPI.getPrConversation(encoded, subPath, n);
+      return res.ok && res.timeline
+        ? { ok: true, value: res.timeline }
+        : { ok: false, error: res.error ?? "Couldn't load the conversation." };
+    },
+  );
+}
+
+function fetchDiff(encoded: string, subPath: string, n: number, force: boolean) {
+  return fetchSection(diffSec, sectionKey("diff", encoded, subPath, n), force, async () => {
+    const res = await window.electronAPI.getPrDiff(encoded, subPath, n);
+    return res.ok && res.diff != null
+      ? { ok: true, value: res.diff }
+      : { ok: false, error: res.error ?? "Couldn't load the changes." };
+  });
+}
+
+function fetchHeadSha(encoded: string, subPath: string, n: number, force: boolean) {
+  return fetchSection(
+    headShaSec,
+    sectionKey("head", encoded, subPath, n),
+    force,
+    async () => {
+      const res = await window.electronAPI.getPrHeadSha(encoded, subPath, n);
+      // headSha === null is a real value (offline / no access), not an error.
+      return res.ok
+        ? { ok: true, value: res.headSha ?? null }
+        : { ok: false, error: res.error ?? "" };
+    },
+  );
+}
+
+/** Force-refetch every section of a PR (⌘R / the refresh button). */
+export function refetchPr(encoded: string, subPath: string, n: number) {
+  void fetchMeta(encoded, subPath, n, true);
+  void fetchConversation(encoded, subPath, n, true);
+  void fetchDiff(encoded, subPath, n, true);
+  void fetchHeadSha(encoded, subPath, n, true);
 }
 
 /**
- * Best-known title for a PR from whatever's already cached (detail first, then
- * the repo's list), for the content-pane tab label. Never triggers a fetch —
- * returns null when nothing's cached yet, so the caller falls back to `#N`.
+ * Best-known title for a PR from whatever's already cached (loaded meta first,
+ * then the repo's list), for the content-pane tab label. Never triggers a
+ * fetch — returns null when nothing's cached, so the caller falls back to `#N`.
  */
 export function cachedPrTitle(
   encoded: string,
   subPath: string,
   n: number,
 ): string | null {
-  const detail = details.get(detailKey(encoded, subPath, n));
-  if (detail && !(detail.detail as PrDetail & { __error?: string }).__error) {
-    return detail.detail.title;
-  }
-  const summary = loadLists(encoded)[subPath]?.result.prs.find(
-    (p) => p.number === n,
+  const meta = metaSec.data.get(sectionKey("meta", encoded, subPath, n));
+  if (meta) return meta.value.title;
+  return cachedPrSummary(encoded, subPath, n)?.title ?? null;
+}
+
+/**
+ * The PR's list summary if the repo's list is already cached — lets the PR view
+ * paint its header (title, state, branches) the instant the tab opens, before
+ * `gh pr view` returns. Never triggers a fetch. Real data `gh pr list` returned,
+ * not a guess.
+ */
+export function cachedPrSummary(
+  encoded: string,
+  subPath: string,
+  n: number,
+): PrSummary | null {
+  return (
+    loadLists(encoded)[subPath]?.result.prs.find((p) => p.number === n) ?? null
   );
-  return summary?.title ?? null;
 }
 
 export interface PrListState {
@@ -243,30 +311,77 @@ export function usePrList(
   };
 }
 
-export interface PrDetailState {
-  detail: PrDetail | null;
+/** One detail section's view state. `value` is the cached data (stale-while-
+ * revalidate); `error` is set only when there's no value to show. */
+export interface SectionState<T> {
+  value: T | null;
+  error: string | null;
+  /** No cached value yet and a fetch is running (show a skeleton). */
   loading: boolean;
+  /** A cached value is showing while a fresh fetch runs (show a shimmer). */
   revalidating: boolean;
-  refetch: () => void;
 }
 
-/** Read + lazily fetch one PR's detail (called when a PR tab is open). */
-export function usePrDetail(
+function readSection<T>(sec: Section<T>, key: string): SectionState<T> {
+  const entry = sec.data.get(key) ?? null;
+  const fetching = inFlight.has(key);
+  return {
+    value: entry?.value ?? null,
+    error: entry ? null : (sec.errors.get(key) ?? null),
+    loading: !entry && fetching,
+    revalidating: !!entry && fetching,
+  };
+}
+
+/** Read + lazily fetch the PR shell (header + description + commits). */
+export function usePrMeta(
   encoded: string,
   subPath: string,
   n: number,
-): PrDetailState {
+): SectionState<PrMeta> {
   useCacheVersion();
   useEffect(() => {
-    void fetchDetail(encoded, subPath, n, false);
+    void fetchMeta(encoded, subPath, n, false);
   }, [encoded, subPath, n]);
+  return readSection(metaSec, sectionKey("meta", encoded, subPath, n));
+}
 
-  const entry = details.get(detailKey(encoded, subPath, n)) ?? null;
-  const fetching = inFlight.has(detailKey(encoded, subPath, n));
-  return {
-    detail: entry?.detail ?? null,
-    loading: !entry && fetching,
-    revalidating: !!entry && fetching,
-    refetch: () => void fetchDetail(encoded, subPath, n, true),
-  };
+/** Read + lazily fetch the PR conversation timeline. */
+export function usePrConversation(
+  encoded: string,
+  subPath: string,
+  n: number,
+): SectionState<PrComment[]> {
+  useCacheVersion();
+  useEffect(() => {
+    void fetchConversation(encoded, subPath, n, false);
+  }, [encoded, subPath, n]);
+  return readSection(conversationSec, sectionKey("conv", encoded, subPath, n));
+}
+
+/** Read + lazily fetch the PR's raw unified diff. */
+export function usePrDiff(
+  encoded: string,
+  subPath: string,
+  n: number,
+): SectionState<string> {
+  useCacheVersion();
+  useEffect(() => {
+    void fetchDiff(encoded, subPath, n, false);
+  }, [encoded, subPath, n]);
+  return readSection(diffSec, sectionKey("diff", encoded, subPath, n));
+}
+
+/** Read + lazily fetch the PR head SHA (the network ref-fetch the Files tab
+ * needs). `value` null with no error = fetched but unavailable (offline). */
+export function usePrHeadSha(
+  encoded: string,
+  subPath: string,
+  n: number,
+): SectionState<string | null> {
+  useCacheVersion();
+  useEffect(() => {
+    void fetchHeadSha(encoded, subPath, n, false);
+  }, [encoded, subPath, n]);
+  return readSection(headShaSec, sectionKey("head", encoded, subPath, n));
 }

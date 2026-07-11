@@ -13,6 +13,9 @@ interface Props {
   file: FileDiff;
   /** PR head commit SHA (from the PR detail) — the "new" side of the diff. */
   headSha: string | null;
+  /** True while the head SHA is still being resolved — distinguishes "loading"
+   * from a null headSha that failed to resolve ("unavailable"). */
+  headShaPending: boolean;
   annotations: Annotation[];
   onAdd: (
     selectedText: string,
@@ -46,6 +49,7 @@ export const PrFileDiff = memo(function PrFileDiff({
   subPath,
   file,
   headSha,
+  headShaPending,
   annotations,
   onAdd,
   onUpdate,
@@ -173,9 +177,13 @@ export const PrFileDiff = memo(function PrFileDiff({
         {file.binary ? (
           <Placeholder>Binary file</Placeholder>
         ) : !headSha ? (
-          <Placeholder>
-            Diff unavailable — couldn&apos;t fetch this PR&apos;s head commit.
-          </Placeholder>
+          headShaPending ? (
+            <Placeholder>Loading…</Placeholder>
+          ) : (
+            <Placeholder>
+              Diff unavailable — couldn&apos;t fetch this PR&apos;s head commit.
+            </Placeholder>
+          )
         ) : !contents ? (
           <Placeholder>Loading…</Placeholder>
         ) : contents.binary ? (

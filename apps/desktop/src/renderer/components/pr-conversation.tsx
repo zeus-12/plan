@@ -1,12 +1,27 @@
 import { memo, useCallback, useRef } from "react";
-import type { PrComment, PrDetail } from "../../shared-types";
+import type { PrComment } from "../../shared-types";
 import { Markdown } from "@plan/shared/components/markdown";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { cn } from "@plan/shared/lib/utils";
 
+/** The PR description, from the (fast) meta section. */
+export interface PrDescription {
+  author: string;
+  authorIsBot: boolean;
+  createdAt: string;
+  body: string;
+}
+
 interface Props {
-  detail: PrDetail;
+  /** The PR description; null until the meta section lands. */
+  description: PrDescription | null;
+  descriptionLoading: boolean;
+  descriptionError: string | null;
+  /** The conversation timeline; null until the conversation section lands. */
+  timeline: PrComment[] | null;
+  timelineLoading: boolean;
+  timelineError: string | null;
   /** False while the Conversation sub-tab is hidden — gates text selection. */
   active: boolean;
   /** Persist a note taken by selecting text somewhere in the conversation.
@@ -26,7 +41,12 @@ interface Props {
  * note lands in the shared send-to-chat batch.
  */
 export const PrConversation = memo(function PrConversation({
-  detail,
+  description,
+  descriptionLoading,
+  descriptionError,
+  timeline,
+  timelineLoading,
+  timelineError,
   active,
   onAdd,
 }: Props) {
@@ -66,50 +86,54 @@ export const PrConversation = memo(function PrConversation({
   });
   const pending = selection.pending;
 
-  const error = (detail as PrDetail & { __error?: string }).__error;
-
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <div
         ref={containerRef}
         className="mx-auto flex w-full max-w-[820px] flex-col gap-3 px-4 py-4"
       >
-        {error ? (
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-            {error}
-          </div>
-        ) : (
+        {/* Description — from the fast meta section, so it lands first. */}
+        {description ? (
+          <Card label="the PR description">
+            <CardHeader
+              author={description.author}
+              isBot={description.authorIsBot}
+              when={description.createdAt}
+              trailing="opened this pull request"
+            />
+            <div className="px-4 pb-4 pt-1">
+              {description.body.trim() ? (
+                <Markdown content={description.body} />
+              ) : (
+                <span className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                  No description provided.
+                </span>
+              )}
+            </div>
+          </Card>
+        ) : descriptionError ? (
+          <ErrorCard>{descriptionError}</ErrorCard>
+        ) : descriptionLoading ? (
+          <SkeletonCard lines={2} />
+        ) : null}
+
+        {/* Timeline — from the slower paginated conversation section. */}
+        {timeline ? (
+          timeline.length === 0 ? (
+            <div className="py-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+              No comments yet.
+            </div>
+          ) : (
+            timeline.map((c) => <TimelineCard key={c.id} comment={c} />)
+          )
+        ) : timelineError ? (
+          <ErrorCard>{timelineError}</ErrorCard>
+        ) : timelineLoading ? (
           <>
-            {/* Description */}
-            <Card label="the PR description">
-              <CardHeader
-                author={detail.author}
-                isBot={detail.authorIsBot}
-                when={detail.createdAt}
-                trailing="opened this pull request"
-              />
-              <div className="px-4 pb-4 pt-1">
-                {detail.body.trim() ? (
-                  <Markdown content={detail.body} />
-                ) : (
-                  <span className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                    No description provided.
-                  </span>
-                )}
-              </div>
-            </Card>
-
-            {detail.timeline.map((c) => (
-              <TimelineCard key={c.id} comment={c} />
-            ))}
-
-            {detail.timeline.length === 0 && (
-              <div className="py-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                No comments yet.
-              </div>
-            )}
+            <SkeletonCard lines={2} />
+            <SkeletonCard lines={3} />
           </>
-        )}
+        ) : null}
       </div>
 
       {pending && (
@@ -172,6 +196,36 @@ const TimelineCard = memo(function TimelineCard({
     </Card>
   );
 });
+
+/** A card-shaped placeholder while a section loads — same border/surface as a
+ * real card, with pulsing bars standing in for the header and body. */
+function SkeletonCard({ lines }: { lines: number }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2">
+        <div className="h-3 w-24 animate-pulse rounded bg-[var(--bg-surface-hover)]" />
+        <div className="ml-auto h-2 w-16 animate-pulse rounded bg-[var(--bg-surface-hover)]" />
+      </div>
+      <div className="flex flex-col gap-2 px-4 py-3">
+        {Array.from({ length: lines }).map((_, i) => (
+          <div
+            key={i}
+            className="h-2.5 animate-pulse rounded bg-[var(--bg-surface-hover)]"
+            style={{ width: `${90 - i * 15}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ErrorCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+      {children}
+    </div>
+  );
+}
 
 function Card({
   label,

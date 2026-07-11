@@ -2,12 +2,19 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { cn } from "@plan/shared/lib/utils";
-import { usePrDetail } from "../lib/pr-store";
+import {
+  usePrMeta,
+  usePrConversation,
+  usePrDiff,
+  usePrHeadSha,
+  cachedPrSummary,
+  refetchPr,
+} from "../lib/pr-store";
 import { useProjectAnnotations } from "../lib/annotation-store";
 import { setReloadOverride } from "../lib/reload-override";
 import { PrConversation } from "./pr-conversation";
 import { PrFileDiff } from "./pr-file-diff";
-import type { PrDetail, PrState } from "../../shared-types";
+import type { PrCommit, PrState } from "../../shared-types";
 
 interface Props {
   encoded: string;
@@ -44,11 +51,16 @@ export const PrView = memo(function PrView({
   number,
   active,
 }: Props) {
-  const { detail, loading, revalidating, refetch } = usePrDetail(
-    encoded,
-    subPath,
-    number,
-  );
+  // Four independently-loading sections. The header paints from the cached list
+  // summary immediately; meta / conversation / diff / headSha each stream in and
+  // render (or show a skeleton) on their own, so the slow paginated conversation
+  // and the large diff never block the header.
+  const summary = cachedPrSummary(encoded, subPath, number);
+  const meta = usePrMeta(encoded, subPath, number);
+  const conversation = usePrConversation(encoded, subPath, number);
+  const diff = usePrDiff(encoded, subPath, number);
+  const headSha = usePrHeadSha(encoded, subPath, number);
+
   const {
     annotationsByPr,
     addPrAnnotation,
@@ -57,6 +69,16 @@ export const PrView = memo(function PrView({
   } = useProjectAnnotations(encoded);
   const [sub, setSub] = useState<SubTab>("conversation");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  const refetch = useCallback(
+    () => refetchPr(encoded, subPath, number),
+    [encoded, subPath, number],
+  );
+  const revalidating =
+    meta.revalidating ||
+    conversation.revalidating ||
+    diff.revalidating ||
+    headSha.revalidating;
 
   // ⌘R → force refresh THIS PR (not the whole app), only while visible. Main
   // forwards ⌘R to the renderer (before-input-event) and we claim it here; the
@@ -67,8 +89,8 @@ export const PrView = memo(function PrView({
   }, [active, refetch]);
 
   const files = useMemo(
-    () => (detail ? parseUnifiedDiff(detail.diff) : []),
-    [detail],
+    () => (diff.value ? parseUnifiedDiff(diff.value) : []),
+    [diff.value],
   );
 
   // Default the Files sub-tab to the first file once the diff lands.
@@ -137,27 +159,38 @@ export const PrView = memo(function PrView({
     [subPath, number, removePrAnnotation],
   );
 
-  if (!detail) {
-    return (
-      <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-        {loading ? "Loading PR…" : "No PR data."}
-      </div>
-    );
-  }
-
-  const error = (detail as PrDetail & { __error?: string }).__error;
+  // Header fields prefer loaded meta, falling back to the cached list summary so
+  // the header is real (never guessed) from the first paint. `haveHeader` is
+  // false only on a truly cold open (no list cached) — then we skeleton it.
+  const m = meta.value;
+  const headerTitle = m?.title ?? summary?.title ?? null;
+  const headerState: PrState = m?.state ?? summary?.state ?? "OPEN";
+  const headerDraft = m?.isDraft ?? summary?.isDraft ?? false;
+  const baseRef = m?.baseRefName ?? summary?.baseRefName ?? "";
+  const headRef = m?.headRefName ?? summary?.headRefName ?? "";
+  const haveHeader = !!(m || summary);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="shrink-0 border-b border-[var(--border)] px-4 py-3">
         <div className="flex items-start gap-2">
-          <StatePill state={detail.state} isDraft={detail.isDraft} />
+          {haveHeader ? (
+            <StatePill state={headerState} isDraft={headerDraft} />
+          ) : (
+            <span className="mt-0.5 h-[18px] w-14 shrink-0 animate-pulse rounded bg-[var(--bg-surface-hover)]" />
+          )}
           <h2 className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-[var(--text)]">
-            {detail.title}{" "}
-            <span className="font-[family-name:var(--font-mono)] text-[var(--text-tertiary)]">
-              #{detail.number}
-            </span>
+            {headerTitle ? (
+              <>
+                {headerTitle}{" "}
+                <span className="font-[family-name:var(--font-mono)] text-[var(--text-tertiary)]">
+                  #{number}
+                </span>
+              </>
+            ) : (
+              <span className="inline-block h-[14px] w-1/2 animate-pulse rounded bg-[var(--bg-surface-hover)] align-middle" />
+            )}
           </h2>
           <button
             onClick={refetch}
@@ -183,127 +216,146 @@ export const PrView = memo(function PrView({
             </svg>
           </button>
         </div>
-        {!error && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+          {(baseRef || headRef) && (
             <span className="truncate">
-              {detail.baseRefName} <span className="opacity-60">←</span>{" "}
-              {detail.headRefName}
+              {baseRef} <span className="opacity-60">←</span> {headRef}
             </span>
-            <span className="text-[var(--diff-add-bar)]">
-              +{detail.additions}
-            </span>
-            <span className="text-[var(--diff-remove-bar)]">
-              −{detail.deletions}
-            </span>
-          </div>
-        )}
+          )}
+          {/* +/- come only from meta; skeleton them until it lands. */}
+          {m ? (
+            <>
+              <span className="text-[var(--diff-add-bar)]">+{m.additions}</span>
+              <span className="text-[var(--diff-remove-bar)]">
+                −{m.deletions}
+              </span>
+            </>
+          ) : meta.loading ? (
+            <span className="h-2 w-16 animate-pulse rounded bg-[var(--bg-surface-hover)]" />
+          ) : null}
+        </div>
       </div>
 
-      {error ? (
-        <div className="flex flex-1 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-          {error}
+      {/* Sub-tabs — counts appear once their section lands. */}
+      <div className="flex shrink-0 items-center gap-4 border-b border-[var(--border)] px-4">
+        <SubTabButton
+          label="Conversation"
+          active={sub === "conversation"}
+          onClick={() => setSub("conversation")}
+        />
+        <SubTabButton
+          label={`Files${diff.value != null ? ` ${files.length}` : ""}`}
+          active={sub === "files"}
+          onClick={() => setSub("files")}
+        />
+        <SubTabButton
+          label={`Commits${m ? ` ${m.commits.length}` : ""}`}
+          active={sub === "commits"}
+          onClick={() => setSub("commits")}
+        />
+      </div>
+
+      {/* Panes — all mounted, hidden via CSS, so scroll survives switches. */}
+      <div className="relative min-h-0 flex-1">
+        <div
+          className={cn(
+            "absolute inset-0 flex min-h-0 flex-col",
+            sub !== "conversation" && "hidden",
+          )}
+        >
+          <PrConversation
+            description={
+              m
+                ? {
+                    author: m.author,
+                    authorIsBot: m.authorIsBot,
+                    createdAt: m.createdAt,
+                    body: m.body,
+                  }
+                : null
+            }
+            descriptionLoading={meta.loading}
+            descriptionError={meta.error}
+            timeline={conversation.value}
+            timelineLoading={conversation.loading}
+            timelineError={conversation.error}
+            active={active && sub === "conversation"}
+            onAdd={addConversationNote}
+          />
         </div>
-      ) : (
-        <>
-          {/* Sub-tabs */}
-          <div className="flex shrink-0 items-center gap-4 border-b border-[var(--border)] px-4">
-            <SubTabButton
-              label="Conversation"
-              active={sub === "conversation"}
-              onClick={() => setSub("conversation")}
-            />
-            <SubTabButton
-              label={`Files ${files.length}`}
-              active={sub === "files"}
-              onClick={() => setSub("files")}
-            />
-            <SubTabButton
-              label={`Commits ${detail.commits.length}`}
-              active={sub === "commits"}
-              onClick={() => setSub("commits")}
-            />
-          </div>
 
-          {/* Panes — all mounted, hidden via CSS, so scroll survives switches. */}
-          <div className="relative min-h-0 flex-1">
-            <div
-              className={cn(
-                "absolute inset-0 flex min-h-0 flex-col",
-                sub !== "conversation" && "hidden",
-              )}
-            >
-              <PrConversation
-                detail={detail}
-                active={active && sub === "conversation"}
-                onAdd={addConversationNote}
+        <div
+          className={cn(
+            "absolute inset-0 flex min-h-0",
+            sub !== "files" && "hidden",
+          )}
+        >
+          {diff.loading ? (
+            <FilesSkeleton />
+          ) : diff.error ? (
+            <PaneMessage>{diff.error}</PaneMessage>
+          ) : files.length === 0 ? (
+            <PaneMessage>No file changes.</PaneMessage>
+          ) : (
+            <>
+              <FileRail
+                files={files}
+                selected={selectedPath}
+                onSelect={setSelectedPath}
               />
-            </div>
-
-            <div
-              className={cn(
-                "absolute inset-0 flex min-h-0",
-                sub !== "files" && "hidden",
-              )}
-            >
-              {files.length === 0 ? (
-                <div className="flex flex-1 items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                  No file changes.
-                </div>
-              ) : (
-                <>
-                  <FileRail
-                    files={files}
-                    selected={selectedPath}
-                    onSelect={setSelectedPath}
+              <div className="min-h-0 min-w-0 flex-1">
+                {selectedFile && (
+                  <PrFileDiff
+                    key={selectedFile.path}
+                    encoded={encoded}
+                    subPath={subPath}
+                    file={selectedFile}
+                    headSha={headSha.value}
+                    headShaPending={headSha.loading}
+                    annotations={
+                      annotationsByPr[
+                        fileKey(subPath, number, selectedFile.path)
+                      ] ?? EMPTY
+                    }
+                    onAdd={(text, start, end, comment, side, sl, el) =>
+                      addFileNote(
+                        selectedFile.path,
+                        text,
+                        start,
+                        end,
+                        comment,
+                        side,
+                        sl,
+                        el,
+                      )
+                    }
+                    onUpdate={(id, comment) =>
+                      updateFileNote(selectedFile.path, id, comment)
+                    }
+                    onRemove={(id) => removeFileNote(selectedFile.path, id)}
+                    active={active && sub === "files"}
                   />
-                  <div className="min-h-0 min-w-0 flex-1">
-                    {selectedFile && (
-                      <PrFileDiff
-                        key={selectedFile.path}
-                        encoded={encoded}
-                        subPath={subPath}
-                        file={selectedFile}
-                        headSha={detail.headSha}
-                        annotations={
-                          annotationsByPr[
-                            fileKey(subPath, number, selectedFile.path)
-                          ] ?? EMPTY
-                        }
-                        onAdd={(text, start, end, comment, side, sl, el) =>
-                          addFileNote(
-                            selectedFile.path,
-                            text,
-                            start,
-                            end,
-                            comment,
-                            side,
-                            sl,
-                            el,
-                          )
-                        }
-                        onUpdate={(id, comment) =>
-                          updateFileNote(selectedFile.path, id, comment)
-                        }
-                        onRemove={(id) => removeFileNote(selectedFile.path, id)}
-                        active={active && sub === "files"}
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
 
-            <div
-              className={cn(
-                "absolute inset-0 overflow-auto",
-                sub !== "commits" && "hidden",
-              )}
-            >
-              <CommitList detail={detail} />
-            </div>
-          </div>
-        </>
-      )}
+        <div
+          className={cn(
+            "absolute inset-0 overflow-auto",
+            sub !== "commits" && "hidden",
+          )}
+        >
+          {m ? (
+            <CommitList commits={m.commits} />
+          ) : meta.loading ? (
+            <CommitsSkeleton />
+          ) : meta.error ? (
+            <PaneMessage>{meta.error}</PaneMessage>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 });
@@ -393,15 +445,71 @@ function FileRail({
   );
 }
 
-function CommitList({ detail }: { detail: PrDetail }) {
+/** A full-pane centered message (empty state or section error). */
+function PaneMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-1 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+      {children}
+    </div>
+  );
+}
+
+/** Files-tab placeholder: a stand-in rail + a few pulsing diff rows. */
+function FilesSkeleton() {
+  return (
+    <>
+      <div className="w-[240px] shrink-0 border-r border-[var(--border)] py-1">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="px-3 py-1.5">
+            <div
+              className="h-3 animate-pulse rounded bg-[var(--bg-surface-hover)]"
+              style={{ width: `${80 - i * 8}%` }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-3 animate-pulse rounded bg-[var(--bg-surface-hover)]"
+            style={{ width: `${40 + ((i * 37) % 55)}%` }}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** Commits-tab placeholder: a few pulsing commit rows. */
+function CommitsSkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-[820px] flex-col gap-1 px-4 py-4">
-      {detail.commits.length === 0 ? (
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2"
+        >
+          <div className="h-2.5 w-12 shrink-0 animate-pulse rounded bg-[var(--bg-surface-hover)]" />
+          <div
+            className="h-2.5 animate-pulse rounded bg-[var(--bg-surface-hover)]"
+            style={{ width: `${50 - i * 6}%` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CommitList({ commits }: { commits: PrCommit[] }) {
+  return (
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-1 px-4 py-4">
+      {commits.length === 0 ? (
         <div className="py-6 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
           No commits.
         </div>
       ) : (
-        detail.commits.map((c) => (
+        commits.map((c) => (
           <div
             key={c.oid}
             className="flex items-center gap-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2"
