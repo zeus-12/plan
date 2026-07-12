@@ -515,33 +515,39 @@ function FileDiffViewerImpl({
             Binary file
           </div>
         ) : (
-          <InteractiveDiff
-            oldText={viewOldText}
-            newText={viewNewText}
-            settings={settings}
-            onSettingsChange={updateSettings}
-            settingsVariant="popover"
-            settingsPortalTarget={settingsSlot}
-            findEnabled={active}
-            isFirstVersion={!contents.oldText}
-            language={effectiveLanguage}
-            annotations={annotations}
-            onAddAnnotation={addAnnotation}
-            onUpdateAnnotation={updateAnnotation}
-            onRemoveAnnotation={removeAnnotation}
-            hunkActions={
-              parsedHunks.hunks.length > 0
-                ? {
-                    isStaged,
-                    hunks: parsedHunks.hunks,
-                    onStage: (r) => applyHunk(r, "stage"),
-                    onUnstage: (r) => applyHunk(r, "unstage"),
-                    onRevert: (r) => applyHunk(r, "discard"),
-                  }
-                : undefined
-            }
-            blame={diffBlame}
-          />
+          <>
+            <InteractiveDiff
+              oldText={viewOldText}
+              newText={viewNewText}
+              settings={settings}
+              onSettingsChange={updateSettings}
+              settingsVariant="popover"
+              settingsPortalTarget={settingsSlot}
+              findEnabled={active}
+              isFirstVersion={!contents.oldText}
+              language={effectiveLanguage}
+              annotations={annotations}
+              onAddAnnotation={addAnnotation}
+              onUpdateAnnotation={updateAnnotation}
+              onRemoveAnnotation={removeAnnotation}
+              hunkActions={
+                parsedHunks.hunks.length > 0
+                  ? {
+                      isStaged,
+                      hunks: parsedHunks.hunks,
+                      onStage: (r) => applyHunk(r, "stage"),
+                      onUnstage: (r) => applyHunk(r, "unstage"),
+                      onRevert: (r) => applyHunk(r, "discard"),
+                    }
+                  : undefined
+              }
+              blame={diffBlame}
+            />
+            {/* Empty tail so the last rows (and any inline comment box on them)
+                can scroll up clear of the viewport's bottom edge, instead of
+                being pinned there where a tall comment hides the final lines. */}
+            <div aria-hidden className="h-[20vh] shrink-0" />
+          </>
         )}
       </div>
       {blameCard}
