@@ -1,8 +1,8 @@
 import {
   lazy,
-  startTransition,
   Suspense,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -343,20 +343,23 @@ function Shell() {
     return m;
   }, [allWorktrees.byProject]);
 
-  // Switching worktrees remounts the workspace (keyed by encoded), so mark it a
-  // transition: React renders the new worktree concurrently while the current
-  // one stays interactive, instead of the window freezing mid-switch.
+  // Selection updates are URGENT — the click must visibly land (sidebar
+  // highlight, header) on the very next frame. The expensive part of a switch
+  // (mounting the target workspace) is deferred separately via
+  // `useDeferredValue(activeTarget)` below, so it trails the click without
+  // ever swallowing it. (These used to wrap the whole switch in
+  // startTransition, which let streaming-tick state updates interrupt and
+  // restart the multi-second cold-mount render — clicks appeared to simply
+  // not register until the transition finally got through.)
   // Local = within the selected project (live-copy toggle, ⌘1 switcher).
   const selectWorktreeLocal = useCallback((id: string | null) => {
-    startTransition(() => setActiveWorktreeId(id));
+    setActiveWorktreeId(id);
   }, []);
   // Cross-project = clicking a worktree under any project in the sidebar. Sets
   // both project + worktree atomically so neither clobbers the other.
   const selectWorktree = useCallback((projectEncoded: string, id: string) => {
-    startTransition(() => {
-      setSelectedEncoded(projectEncoded);
-      setActiveWorktreeId(id);
-    });
+    setSelectedEncoded(projectEncoded);
+    setActiveWorktreeId(id);
   }, []);
 
   const handleNewWorktree = useCallback((projectEncoded: string) => {
@@ -424,32 +427,41 @@ function Shell() {
     };
   }, [selectedEncoded, activeWorktree]);
 
+  // The pool renders against a DEFERRED copy of the target: the click's urgent
+  // render (sidebar highlight, header) commits on the next frame with the OLD
+  // workspace still on screen and interactive, and React mounts the new one in
+  // a low-priority render that follows. Deferring here — rather than wrapping
+  // the selection setters in startTransition — is what keeps the click itself
+  // instant no matter how heavy the target workspace is.
+  const deferredTarget = useDeferredValue(activeTarget);
+
   const [mountTargets, setMountTargets] = useState<MountTarget[]>([]);
   useEffect(() => {
-    if (!activeTarget) return;
+    if (!deferredTarget) return;
     setMountTargets((prev) => {
       // Already focused → nothing to reorder. Returning `prev` (not a fresh
       // array) is what stops this effect from re-rendering every tick.
-      if (prev[0]?.encoded === activeTarget.encoded) return prev;
+      if (prev[0]?.encoded === deferredTarget.encoded) return prev;
       // Reuse the existing object for this encoded so its identity stays stable
       // across switches — that's what lets the memoized background hosts skip
       // re-rendering when you switch away from and back to them.
-      const existing = prev.find((t) => t.encoded === activeTarget.encoded);
-      const head = existing ?? activeTarget;
-      const rest = prev.filter((t) => t.encoded !== activeTarget.encoded);
+      const existing = prev.find((t) => t.encoded === deferredTarget.encoded);
+      const head = existing ?? deferredTarget;
+      const rest = prev.filter((t) => t.encoded !== deferredTarget.encoded);
       return [head, ...rest].slice(0, MAX_MOUNTED_WORKSPACES);
     });
-  }, [activeTarget]);
+  }, [deferredTarget]);
 
-  // What to actually render: the LRU set, plus the active target if the effect
-  // hasn't folded it in yet (first visit) — so switching to a brand-new target
-  // paints it immediately instead of a blank frame while all hosts are hidden.
+  // What to actually render: the LRU set, plus the deferred target if the
+  // effect hasn't folded it in yet (first visit) — so switching to a brand-new
+  // target paints it in the deferred pass instead of a blank frame while all
+  // hosts are hidden.
   const renderTargets = useMemo<MountTarget[]>(() => {
-    if (!activeTarget) return mountTargets;
-    if (mountTargets.some((t) => t.encoded === activeTarget.encoded))
+    if (!deferredTarget) return mountTargets;
+    if (mountTargets.some((t) => t.encoded === deferredTarget.encoded))
       return mountTargets;
-    return [activeTarget, ...mountTargets].slice(0, MAX_MOUNTED_WORKSPACES);
-  }, [mountTargets, activeTarget]);
+    return [deferredTarget, ...mountTargets].slice(0, MAX_MOUNTED_WORKSPACES);
+  }, [mountTargets, deferredTarget]);
 
   const handleRemoveWorktree = useCallback(
     async (id: string) => {
@@ -562,17 +574,12 @@ function Shell() {
       );
   }, [selectedEncoded, activeWorktreeId]);
 
-  // Switching projects remounts the whole workspace (keyed by encoded) and
-  // mounts the target's tabs — a big file's viewer, terminals, etc. Mark it a
-  // transition so React renders the new workspace concurrently: the current
-  // project stays interactive instead of the window freezing until the new one
-  // is ready (the "Cmd+` hangs / had to alt-tab" symptom).
+  // Urgent for the same reason as selectWorktree above; the heavy remount
+  // trails via the deferred mount target.
   const selectProject = useCallback((encoded: string | null) => {
-    startTransition(() => {
-      setSelectedEncoded(encoded);
-      // Selecting a project lands on its live working copy.
-      setActiveWorktreeId(null);
-    });
+    setSelectedEncoded(encoded);
+    // Selecting a project lands on its live working copy.
+    setActiveWorktreeId(null);
   }, []);
 
   // Kept identity-stable (reads the focused project via a ref) so it isn't a
@@ -750,7 +757,10 @@ function Shell() {
             <WorkspaceHost
               key={t.encoded}
               target={t}
-              active={t.encoded === activeTarget?.encoded}
+              // Visibility follows the DEFERRED target: the old workspace
+              // stays on screen (and interactive) until the new one has
+              // actually rendered — never a blank flash mid-switch.
+              active={t.encoded === deferredTarget?.encoded}
               projects={projects}
               reposByProject={reposByProject}
               worktreeRecord={

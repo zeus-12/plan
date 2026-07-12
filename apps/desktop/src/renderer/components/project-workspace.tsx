@@ -441,6 +441,16 @@ function ProjectWorkspaceImpl({
     firstSessionSwitcherId,
     hasOpenTabs,
   } = useWorkspaceTabs(project.encoded, sessions);
+
+  // Panes stay mounted once created (scroll position, expanded diffs, undo
+  // history survive tab switches) — but they are created LAZILY: a tab's pane
+  // mounts the first time that tab is active during this workspace mount.
+  // Mounting every open tab's transcript/diff/PR view in one commit made a
+  // cold project/worktree switch a multi-second render; a never-yet-activated
+  // tab has no view state to preserve, so deferring costs nothing.
+  const everActiveTabIds = useRef(new Set<string>());
+  if (activeId) everActiveTabIds.current.add(activeId);
+  const paneMounted = (id: string) => everActiveTabIds.current.has(id);
   // Header branch pill. A single-repo project always shows its branch. A
   // multi-repo project shows a branch only when the active tab pins a file to
   // Tell the unread store which session you're actually looking at, so its
@@ -1703,7 +1713,7 @@ function ProjectWorkspaceImpl({
                 {/* Diff tabs — each pane is memoized (see DiffTabPane) so an
                     unrelated re-render doesn't touch every mounted diff. */}
                 {tabs.map((t) =>
-                  t.kind === "diff" ? (
+                  t.kind === "diff" && paneMounted(t.id) ? (
                     <DiffTabPane
                       key={t.id}
                       tab={t}
@@ -1721,7 +1731,7 @@ function ProjectWorkspaceImpl({
 
                 {/* File tabs */}
                 {tabs.map((t) =>
-                  t.kind === "file" ? (
+                  t.kind === "file" && paneMounted(t.id) ? (
                     <FileTabPane
                       key={t.id}
                       tab={t}
@@ -1746,7 +1756,7 @@ function ProjectWorkspaceImpl({
                     the others) so its undo history and cursor survive switching
                     away and back. */}
                 {tabs.map((t) =>
-                  t.kind === "scratch" ? (
+                  t.kind === "scratch" && paneMounted(t.id) ? (
                     <div
                       key={t.id}
                       className={cn(
@@ -1765,7 +1775,7 @@ function ProjectWorkspaceImpl({
                 {/* PR tabs — each mounted, hidden when inactive so sub-tab and
                     scroll state survive switching. */}
                 {tabs.map((t) =>
-                  t.kind === "pr" ? (
+                  t.kind === "pr" && paneMounted(t.id) ? (
                     <div
                       key={t.id}
                       className={cn(
@@ -1863,7 +1873,7 @@ function ProjectWorkspaceImpl({
                   </div>
                   <div className="relative min-h-0 flex-1">
                     {tabs.map((t) => {
-                      if (t.kind !== "chat") return null;
+                      if (t.kind !== "chat" || !paneMounted(t.id)) return null;
                       // Active only when this workspace is the visible one AND
                       // this is its active tab — so a hidden (keep-alive) chat
                       // stops driving its terminal/working signals.
