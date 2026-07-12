@@ -548,6 +548,7 @@ function CodeBody({ text, className }: { text: string; className?: string }) {
 
 let annHighlight: Highlight | null = null;
 let pendingHighlight: Highlight | null = null;
+let liveSelHighlight: Highlight | null = null;
 
 // The `::highlight()` rules live here, injected once at runtime, rather than in
 // the shared globals.css: Turbopack's CSS parser (used by the web build that
@@ -588,6 +589,19 @@ function getHighlights(): { ann: Highlight; pending: Highlight } | null {
     CSS.highlights.set("chat-annotation-pending", pendingHighlight);
   }
   return { ann: annHighlight, pending: pendingHighlight! };
+}
+
+/** The registry entry that mirrors the live drag selection (see the
+ *  `chat-selection-live` style note). Lazily created; shares the API's global
+ *  registry with the annotation highlights. */
+function getLiveSelHighlight(): Highlight | null {
+  if (typeof Highlight === "undefined" || !("highlights" in CSS)) return null;
+  ensureHighlightStyles();
+  if (!liveSelHighlight) {
+    liveSelHighlight = new Highlight();
+    CSS.highlights.set("chat-selection-live", liveSelHighlight);
+  }
+  return liveSelHighlight;
 }
 
 // In-view find (⌘F) highlights — a separate registry from annotations.
@@ -1769,6 +1783,37 @@ export const MessageList = memo(function MessageList({
     return () => window.removeEventListener("keydown", handler);
   }, [visible, find]);
 
+  // Paint the in-progress drag selection ourselves so it reads tight (text
+  // boxes only) the entire time — see the `chat-selection-live` style note.
+  // Native selection is hidden inside `.chat-transcript`; here we mirror
+  // window.getSelection() into that custom highlight on every change while this
+  // pane is visible, so there's no fat→thin snap when the popover's own (also
+  // tight) pending highlight takes over on release.
+  useEffect(() => {
+    const hl = getLiveSelHighlight();
+    if (!hl) return;
+    const sync = () => {
+      hl.clear();
+      const root = parentRef.current;
+      const sel = window.getSelection();
+      if (!visible || !root || !sel || sel.isCollapsed || sel.rangeCount === 0)
+        return;
+      // Only mirror selections wholly inside this transcript — the diffs/plans
+      // panes stay mounted-but-hidden and share the document, and a selection
+      // escaping into the margin would otherwise double-paint (native shows
+      // outside `.chat-transcript`).
+      if (!root.contains(sel.anchorNode) || !root.contains(sel.focusNode))
+        return;
+      hl.add(sel.getRangeAt(0).cloneRange());
+    };
+    sync();
+    document.addEventListener("selectionchange", sync);
+    return () => {
+      document.removeEventListener("selectionchange", sync);
+      hl.clear();
+    };
+  }, [visible]);
+
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
@@ -1784,7 +1829,10 @@ export const MessageList = memo(function MessageList({
         {!find.open && (
           <UserMessageOverview messages={items} scrollRef={parentRef} />
         )}
-        <div ref={parentRef} className="h-full overflow-auto pt-3 pb-6">
+        <div
+          ref={parentRef}
+          className="chat-transcript h-full overflow-auto pt-3 pb-6"
+        >
           {/* Reading column (ChatGPT-style): each row centers itself and caps
             its width for readability while the scrollbar stays at the pane edge.
             The cap is per-row (not on this wrapper) so a plan card showing a diff

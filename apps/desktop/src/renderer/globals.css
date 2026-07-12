@@ -34,6 +34,33 @@ textarea {
 }
 
 /*
+ * The chat transcript paints its own selection via the CSS Custom Highlight API
+ * (see `chat-selection-live` in message-list.tsx) so the drag selection reads
+ * tight — text boxes only, no line-height leading — and stays visually identical
+ * to the comment popover's pending highlight. Native ::selection would fill the
+ * whole line box and cause a fat→thin snap on release, so we hide its paint here.
+ * The selection itself still lives (copy, Cmd+A, comment anchoring all work); only
+ * the browser's default highlight fill is suppressed.
+ */
+.chat-transcript ::selection {
+  background: transparent;
+}
+.chat-transcript ::-moz-selection {
+  background: transparent;
+}
+/*
+ * The live drag-selection paint, mirrored onto this custom highlight from
+ * window.getSelection() in message-list.tsx (the range is registered in JS; only
+ * the paint lives here). Kept in static CSS rather than the runtime-injected
+ * ::highlight() block so it can't go stale under Fast Refresh, where the one-shot
+ * style injection may not re-run. Matches the pending highlight's fill exactly, so
+ * the selection looks the same mid-drag as it does once the popover takes over.
+ */
+::highlight(chat-selection-live) {
+  background-color: var(--selection-bg);
+}
+
+/*
  * The file viewer's editor surface is a transparent textarea laid over the
  * syntax-highlighted layer (caret + keyboard nav come from the textarea). Its
  * native selection is what the user sees while dragging — live and GPU-fast —
