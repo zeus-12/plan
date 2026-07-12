@@ -207,9 +207,17 @@ export const Markdown = memo(function Markdown({
   return (
     <div
       className={cn(
-        "text-[14px] leading-[1.7] text-[var(--text)] antialiased [word-break:break-word]",
+        "leading-[1.7] antialiased [word-break:break-word]",
         className,
       )}
+      // Reading font / size / brightness are user prefs (desktop Settings),
+      // delivered as `--prose-*` vars on <html>. Fallbacks keep the standalone
+      // (web / unset) rendering identical to before.
+      style={{
+        fontFamily: "var(--prose-font, var(--font-sans))",
+        fontSize: "var(--prose-size, 14px)",
+        color: "var(--prose-fg, var(--text))",
+      }}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
         {content}

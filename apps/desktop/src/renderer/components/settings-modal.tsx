@@ -15,6 +15,14 @@ import {
 } from "../lib/notification-settings";
 import { playSound } from "../lib/notification-sounds";
 import { useAutoModeEnabled } from "../lib/auto-mode-settings";
+import {
+  PROSE_BRIGHTNESS,
+  PROSE_FONTS,
+  PROSE_SIZES,
+  useTranscriptPrefs,
+  type ProseBrightnessId,
+  type ProseFontId,
+} from "../lib/transcript-prefs";
 
 interface Props {
   open: boolean;
@@ -31,6 +39,7 @@ interface Props {
 export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [settings, update] = useNotificationSettings();
   const [autoMode, setAutoMode] = useAutoModeEnabled();
+  const [prose, setProse] = useTranscriptPrefs();
 
   useEffect(() => {
     if (!open) return;
@@ -70,6 +79,90 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <section className="mb-6 flex flex-col gap-3">
+            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+              Reading
+            </h3>
+            <p className="-mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+              Font, size, and contrast for chat and PR text.
+            </p>
+
+            {/* Reading font. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                Font
+              </span>
+              <Select
+                value={prose.fontFamily}
+                onValueChange={(v) => setProse({ fontFamily: v as ProseFontId })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROSE_FONTS.map((opt) => (
+                    <SelectItem
+                      key={opt.id}
+                      value={opt.id}
+                      style={{ fontFamily: opt.stack }}
+                    >
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Size. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                Text size
+              </span>
+              <Select
+                value={String(prose.fontSize)}
+                onValueChange={(v) => setProse({ fontSize: Number(v) })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROSE_SIZES.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}px
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Contrast (text brightness against the reading background). */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                Contrast
+              </span>
+              <Select
+                value={prose.brightness}
+                onValueChange={(v) =>
+                  setProse({ brightness: v as ProseBrightnessId })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROSE_BRIGHTNESS.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Closes the section with a hairline rule. */}
+            <div className="mt-2 h-px bg-[var(--border)]" />
+          </section>
+
           <section className="mb-6 flex flex-col gap-3">
             <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
               Auto mode

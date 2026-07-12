@@ -91,6 +91,7 @@ import {
   recordUse,
   subscribeMru,
 } from "./lib/mru-store";
+import { useApplyTranscriptPrefs } from "./lib/transcript-prefs";
 import { startSessionDoneNotifier } from "./lib/session-done-notifier";
 import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
 import {
@@ -117,6 +118,8 @@ const getSwitchMruVersion = () => getMruScopeVersion(SWITCH_MRU_SCOPE);
 
 function Shell() {
   const projectsSidebar = useSidebar();
+  // Apply the reader's transcript font/size/brightness prefs before first paint.
+  useApplyTranscriptPrefs();
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   // Selected project persists across restarts so focus stays put.
   const [selectedEncoded, setSelectedEncoded] = useState<string | null>(() =>
