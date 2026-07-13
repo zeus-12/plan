@@ -5,7 +5,13 @@ import { FoldEngineProvider } from "@plan/shared/code-folding";
 import App from "./App";
 import { treeSitterFoldEngine } from "./code-folding";
 import { THEMES } from "./lib/themes";
+import { installTightSelectionMirror } from "./lib/live-selection-mirror";
 import "./globals.css";
+
+// Paint drag-selection tight (text boxes only) across the chat/file/diff
+// surfaces — one document-level listener, see the module for why it's a
+// singleton.
+installTightSelectionMirror();
 
 // Desktop uses the tree-sitter fold engine ("preset"); the web app falls back to
 // the default indentation engine. To remove the preset entirely: delete the

@@ -1938,6 +1938,10 @@ function FileViewerImpl({
         <div className="relative min-h-0 flex-1">
           <div
             ref={parentRef}
+            // Read mode paints its own tight drag-selection (see
+            // live-selection-mirror.ts); editor mode keeps the textarea's own
+            // translucent native selection, so it opts out.
+            data-tight-selection={editorMode ? undefined : ""}
             className="absolute inset-0 overflow-auto font-[family-name:var(--font-mono)] text-[13px] leading-[20px]"
           >
             <div

@@ -1808,6 +1808,12 @@ export function InteractiveDiff({
 
       <div
         ref={contentRef}
+        // Opt into the desktop tight drag-selection paint (live-selection-
+        // mirror.ts): native ::selection is suppressed here and mirrored onto a
+        // custom highlight so the drag reads tight, matching the committed
+        // per-character selection. Inert on web (no matching CSS/mirror), which
+        // keeps its native selection.
+        data-tight-selection=""
         onMouseDown={lockSelectionToStartSide}
         onClick={(e) => {
           if (!mergeEnabled) return;
