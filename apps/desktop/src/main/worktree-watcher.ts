@@ -1,6 +1,6 @@
+import { watch, type FSWatcher } from "fs";
 import { readFile } from "fs/promises";
 import { relative, sep, isAbsolute, join } from "path";
-import chokidar, { type FSWatcher } from "chokidar";
 import ignore, { type Ignore } from "ignore";
 import { git } from "./git-exec";
 import { resolveProjectCwd } from "./claude-projects";
@@ -14,6 +14,15 @@ import { IGNORED_DIRS } from "./ignored-dirs";
  * This is separate from session-watcher.ts, which only watches the Claude
  * session `.jsonl` files under ~/.claude/projects. Here we watch the working
  * tree itself plus the few `.git` files that signal a stage/commit/checkout.
+ *
+ * Backend: native recursive `fs.watch` — on macOS that is ONE FSEvents stream
+ * per watch root, O(1) file descriptors regardless of tree size. This used to
+ * be chokidar v4, which (having dropped fsevents) watches each file via
+ * kqueue, holding an OPEN FD PER WATCHED FILE: a big worktree pinned the main
+ * process at its ~10k fd limit, and at that ceiling every new pty and renderer
+ * spawn failed with EMFILE (terminals died instantly, DevTools couldn't open).
+ * FSEvents doesn't walk the tree, so there is no watch-time pruning; filtering
+ * happens per EVENT via `ignored` below instead.
  *
  * Emits a single debounced `worktree-changed` event per encoded project; the
  * renderer re-pulls git status/diff and bumps the per-project content revision
@@ -38,26 +47,28 @@ export function setWorktreeCallbacks(cb: WorktreeWatcherCallbacks) {
 }
 
 interface ActiveWatch {
-  watcher: FSWatcher;
+  /** One recursive watcher per root (worktree + any external git dirs). */
+  watchers: FSWatcher[];
   debounce: ReturnType<typeof setTimeout> | null;
 }
 
 const watchers = new Map<string, ActiveWatch>();
 
-// Directories we never want to watch — they generate enormous event storms and
-// are virtually always git-ignored anyway. Critically, when the opened folder
-// is a *container* of several nested git repos, the parent's `.gitignore` (if
-// any) doesn't cover the nested repos' build/dependency trees, so this fixed
-// set is the only thing stopping chokidar from recursively walking and watching
-// every `target`/`vendor`/`venv`/`Pods`/… across all of them. We share the file
-// finder's comprehensive list ({@link ./ignored-dirs.ts}) so the two can't drift.
-// `.git` is in the set; the real git dir is still reached because the git-dir
-// branch in `ignored` below is checked first and returns before this prune.
+// Directories whose events we always drop — build/dependency churn (a `pnpm
+// install`, a bundler writing `dist`) would otherwise re-fire the debounced
+// refresh continuously, and they are virtually always git-ignored anyway.
+// Critically, when the opened folder is a *container* of several nested git
+// repos, the parent's `.gitignore` (if any) doesn't cover the nested repos'
+// build/dependency trees, so this fixed set is the only thing keeping their
+// churn out. We share the file finder's comprehensive list
+// ({@link ./ignored-dirs.ts}) so the two can't drift. `.git` is in the set;
+// events from the real git dir still get through because the git-dir branch in
+// `ignored` below is checked first and returns before this name check.
 const ALWAYS_IGNORE_DIRS = IGNORED_DIRS;
 
 // Within a git dir, only these signal something the UI cares about (staging,
 // commits, branch switches, fetched/pushed refs). Everything else — objects,
-// packs, etc. — is noise we must prune or a commit floods us with events.
+// packs, etc. — is noise we must drop or a commit floods us with events.
 function gitPathIsRelevant(rel: string): boolean {
   const top = rel.split(sep)[0];
   return (
@@ -108,10 +119,7 @@ async function loadGitignore(cwd: string): Promise<Ignore> {
 export async function startWorktreeWatch(encoded: string): Promise<void> {
   if (watchers.has(encoded)) return;
   // Claim the slot synchronously so concurrent calls don't both build watchers.
-  const slot: ActiveWatch = {
-    watcher: null as unknown as FSWatcher,
-    debounce: null,
-  };
+  const slot: ActiveWatch = { watchers: [], debounce: null };
   watchers.set(encoded, slot);
 
   let cwd: string;
@@ -132,8 +140,9 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
     const gd = gitDirs.find((d) => isInside(d, p));
     if (gd) {
       const rel = relative(gd, p);
-      // The git dir root (and the refs/ , logs/ subtrees) must NOT be ignored,
-      // or chokidar won't descend to reach the index/HEAD/ref files inside.
+      // The git dir root itself (a null-filename event) and the index/HEAD/ref
+      // paths inside it must NOT be ignored — those are the git events the UI
+      // exists to catch.
       if (rel === "") return false;
       return !gitPathIsRelevant(rel);
     }
@@ -155,14 +164,6 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
   // worktrees). For a normal repo the git dir is under cwd and already covered.
   const roots = [cwd, ...gitDirs.filter((d) => !isInside(cwd, d))];
 
-  const watcher = chokidar.watch(roots, {
-    ignored,
-    ignoreInitial: true, // we only care about changes after we start
-    persistent: true,
-    followSymlinks: false,
-  });
-  slot.watcher = watcher;
-
   const schedule = () => {
     if (slot.debounce) clearTimeout(slot.debounce);
     slot.debounce = setTimeout(() => {
@@ -171,9 +172,29 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
     }, DEBOUNCE_MS);
   };
 
-  watcher.on("all", schedule);
-  // A watcher error (e.g. transient EMFILE) shouldn't take the process down.
-  watcher.on("error", () => {});
+  for (const root of roots) {
+    let w: FSWatcher;
+    try {
+      // Callback-style fs.watch, NOT the fs/promises async iterator: the
+      // iterator buffers events into a bounded queue that a dependency-install
+      // storm could overflow (killing the loop); the callback form has no
+      // queue, and this handler is a cheap string check + debounce re-arm.
+      w = watch(root, { recursive: true }, (_event, filename) => {
+        // Paths arrive relative to the watched root. A null filename (rare,
+        // platform-dependent) means "something changed" — refresh
+        // conservatively rather than guess at what.
+        if (filename && ignored(join(root, filename.toString()))) return;
+        schedule();
+      });
+    } catch {
+      // Root vanished between resolve and watch — skip it.
+      continue;
+    }
+    // A watcher error (e.g. the root being deleted mid-watch) must not take
+    // the process down; the next startWorktreeWatch rebuilds cleanly.
+    w.on("error", () => {});
+    slot.watchers.push(w);
+  }
 }
 
 export function stopWorktreeWatch(encoded: string): void {
@@ -181,7 +202,7 @@ export function stopWorktreeWatch(encoded: string): void {
   if (!a) return;
   watchers.delete(encoded);
   if (a.debounce) clearTimeout(a.debounce);
-  void a.watcher?.close();
+  for (const w of a.watchers) w.close();
 }
 
 export function stopAllWorktreeWatches(): void {

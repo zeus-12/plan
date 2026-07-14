@@ -5,10 +5,10 @@
  *
  * Shared by the file finder ({@link ./project-files.ts}) and the worktree
  * watcher ({@link ./worktree-watcher.ts}) so the two can't drift apart: when a
- * project folder is a *container* of several nested git repos, the watcher must
- * prune each nested repo's build/dependency trees (`target`, `vendor`, `venv`,
- * `Pods`, `DerivedData`, …) or chokidar recursively walks and watches hundreds
- * of thousands of files and beachballs the app.
+ * project folder is a *container* of several nested git repos, this set must
+ * cover each nested repo's build/dependency trees (`target`, `vendor`, `venv`,
+ * `Pods`, `DerivedData`, …) or the finder walks hundreds of thousands of files
+ * and the watcher fires on their constant churn.
  *
  * Fixed list on purpose: predictable, fast, and identical with or without git
  * (no `.gitignore` parsing, no `git` subprocess).
