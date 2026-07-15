@@ -130,11 +130,21 @@ export async function gh(
     });
     return { ok: true, stdout, stderr };
   } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
+    const e = err as {
+      code?: string;
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
     return {
       ok: false,
       stdout: e.stdout ?? "",
-      stderr: (e.stderr || e.message || "gh failed").trim(),
+      // A spawn ENOENT means gh isn't on the app's PATH at all — say that
+      // plainly instead of leaking "spawn gh ENOENT" into the PR tab.
+      stderr:
+        e.code === "ENOENT"
+          ? "GitHub CLI (gh) not found. Install it (brew install gh), then restart the app."
+          : (e.stderr || e.message || "gh failed").trim(),
     };
   }
 }

@@ -83,6 +83,7 @@ import {
 import { listSkills } from "./skills";
 import { getProjectIcons } from "./project-icons";
 import { checkForUpdate } from "./updates";
+import { loginShellPath } from "./shell-env";
 import {
   setTerminalCallbacks,
   openTerminal,
@@ -618,6 +619,13 @@ function bridgeTerminal() {
 // ── App lifecycle ──────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // A Finder-launched app gets launchd's stock PATH, which lacks Homebrew &
+  // co. — adopt the login shell's PATH first, so every later spawn (gh, git,
+  // ps) resolves the same binaries a terminal would. Null (unreadable shell)
+  // keeps the inherited PATH.
+  const loginPath = await loginShellPath();
+  if (loginPath) process.env.PATH = loginPath;
+
   buildMenu();
   registerIpc();
   bridgeWatcher();

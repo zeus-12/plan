@@ -1,4 +1,5 @@
 import { app } from "electron";
+import { execFile } from "child_process";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -10,6 +11,43 @@ import { join } from "path";
 export function defaultShell(): string {
   if (process.platform === "win32") return "powershell.exe";
   return process.env.SHELL || "/bin/zsh";
+}
+
+/**
+ * PATH as the user's login shell would build it, or null when it can't be
+ * read. A Finder/Dock-launched app inherits launchd's stock PATH
+ * (/usr/local/bin:/usr/bin:...), which lacks /opt/homebrew/bin on Apple
+ * Silicon — so user-installed CLIs the app shells out to (`gh`) are
+ * unreachable, while the same app launched from a terminal works. Asking the
+ * user's own shell for its PATH picks up whatever their dotfiles configure —
+ * nothing hardcoded, no guessed install locations.
+ *
+ * `-l` (login) runs .zprofile, where `brew shellenv` conventionally lives;
+ * `-i` (interactive) runs .zshrc, where some setups export PATH instead.
+ * Sentinels bracket the value so banners echoed by dotfiles can't corrupt it,
+ * and any failure (odd shell, timeout) resolves null — the caller keeps the
+ * inherited PATH rather than adopting a guess.
+ */
+const PATH_SENTINEL = "__PLAN_PATH__";
+let cachedLoginPath: Promise<string | null> | null = null;
+export function loginShellPath(): Promise<string | null> {
+  if (process.platform === "win32") return Promise.resolve(null);
+  cachedLoginPath ??= new Promise((resolve) => {
+    execFile(
+      defaultShell(),
+      ["-ilc", `printf "${PATH_SENTINEL}%s${PATH_SENTINEL}" "$PATH"`],
+      { timeout: 5000 },
+      (err, stdout) => {
+        const m = err
+          ? null
+          : new RegExp(`${PATH_SENTINEL}(.*?)${PATH_SENTINEL}`, "s").exec(
+              stdout,
+            );
+        resolve(m?.[1] ? m[1] : null);
+      },
+    );
+  });
+  return cachedLoginPath;
 }
 
 /**
