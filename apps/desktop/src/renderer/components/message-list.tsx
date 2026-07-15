@@ -1828,12 +1828,24 @@ export const MessageList = memo(function MessageList({
                     // off-screen rows — width changes (sidebar toggles) would
                     // otherwise reflow the entire transcript.
                     // scroll-mt keeps a jumped-to message off the very top edge.
-                    "group mx-auto flex w-full px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
-                    rowFullWidth ? "max-w-none" : "max-w-[820px]",
+                    "group flex w-full justify-center px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
                     showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
-                    isUser ? "justify-end" : "justify-start",
+                    // Assistant rows: the whole full-width band is a selection
+                    // surface (not just the text), so a drag started in the empty
+                    // gutter left of the reading column still anchors to the prose
+                    // instead of dead-ending on the `user-select:none` scroller —
+                    // you don't have to start exactly on the text. The inner
+                    // column below keeps the reading width centered.
+                    !isUser && "select-text",
                   )}
                 >
+                  <div
+                    className={cn(
+                      "flex w-full",
+                      rowFullWidth ? "max-w-none" : "max-w-[820px]",
+                      isUser ? "justify-end" : "justify-start",
+                    )}
+                  >
                   {(() => {
                     const partNodes = m.parts.map((p, i) => {
                       const partKey = `${m.uuid}:${i}`;
@@ -1910,6 +1922,7 @@ export const MessageList = memo(function MessageList({
                       </div>
                     );
                   })()}
+                  </div>
                 </div>
               );
             })}
