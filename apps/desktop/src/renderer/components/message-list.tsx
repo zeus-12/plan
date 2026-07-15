@@ -45,10 +45,24 @@ const SCROLL_DOWN_THRESHOLD_PX = 400;
 
 type MessageCategory = "user-real" | "tool" | "assistant";
 
+// Cached per message object (messages are immutable — mergeSession swaps the
+// object on any content change): the meta/notification checks below run regex
+// over every part, and classify runs for every row on every streaming tick.
+const categoryCache = new WeakMap<ConversationMessage, MessageCategory>();
+
 function classify(m: ConversationMessage): MessageCategory {
-  if (m.role === "assistant") return "assistant";
-  const hasNonToolResult = m.parts.some((p) => p.kind !== "tool_result");
-  return hasNonToolResult ? "user-real" : "tool";
+  let v = categoryCache.get(m);
+  if (v === undefined) {
+    if (m.role === "assistant") v = "assistant";
+    else if (!m.parts.some((p) => p.kind !== "tool_result")) v = "tool";
+    // Harness machinery rendered as tool-style rows (SystemMetaBlock /
+    // TaskNotificationBlock) — categorized as "tool" so it doesn't count as a
+    // turn change and pick up header spacing around it.
+    else if (isSystemMetaMessage(m) || isTaskNotificationMessage(m)) v = "tool";
+    else v = "user-real";
+    categoryCache.set(m, v);
+  }
+  return v;
 }
 
 /**
@@ -99,11 +113,7 @@ const isUserRowCache = new WeakMap<ConversationMessage, boolean>();
 function isUserRow(m: ConversationMessage): boolean {
   let v = isUserRowCache.get(m);
   if (v === undefined) {
-    v =
-      !isBashMessage(m) &&
-      !isTaskNotificationMessage(m) &&
-      !isSystemMetaMessage(m) &&
-      classify(m) === "user-real";
+    v = !isBashMessage(m) && classify(m) === "user-real";
     isUserRowCache.set(m, v);
   }
   return v;
@@ -1468,12 +1478,13 @@ export const MessageList = memo(function MessageList({
     let prevCat: MessageCategory | null = null;
     for (const m of items) {
       const cat = classify(m);
-      // Tool-result rows never show a header (they belong to the previous turn)
+      // Tool/machinery rows never show a header, and don't break the turn:
+      // an assistant row resuming after a System interlude stays headerless.
       if (cat === "tool") {
         out.push(false);
-      } else {
-        out.push(cat !== prevCat);
+        continue;
       }
+      out.push(cat !== prevCat);
       prevCat = cat;
     }
     return out;
