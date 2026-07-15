@@ -1581,8 +1581,11 @@ function ProjectWorkspaceImpl({
     // (background) workspace on commit; a unique id keeps each self-contained.
     id: `tabs:${project.encoded}`,
     // Only the visible workspace listens for Ctrl+Tab (all mounted workspaces
-    // share the global driver).
-    enabled: active && switcherEntries.length > 1,
+    // share the global driver). Any non-empty list opens the overlay — even a
+    // single entry (common in a fresh worktree: one chat, maybe already the
+    // open tab). Requiring 2+ made Ctrl+Tab silently do nothing there, which
+    // read as "worktrees don't have the switcher".
+    enabled: active && switcherEntries.length > 0,
     triggerCode: "Tab",
     items: switcherEntries,
     currentIndex: switcherCurrentIndex,
