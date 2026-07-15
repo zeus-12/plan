@@ -100,6 +100,9 @@ import {
 } from "./lib/session-notify";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
+// The focused worktree persists alongside it so a relaunch lands back on the
+// worktree, not its parent project's working copy.
+const SELECTED_WORKTREE_KEY = "plan.selectedWorktree";
 
 // How many recently-visited workspaces stay mounted at once. Switching to one
 // already in the pool is instant (just un-hidden); older ones are unmounted
@@ -322,8 +325,20 @@ function Shell() {
   // reads the all-projects map instead.
   const worktrees = useWorktrees(selectedEncoded ?? "");
   const allWorktrees = useAllWorktrees();
-  // null = the live working copy (the real checkout).
-  const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(null);
+  // null = the live working copy (the real checkout). Seeded from the last
+  // session; a stale id (worktree removed since) is cleared once the worktree
+  // list loads, below.
+  const [activeWorktreeId, setActiveWorktreeId] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem(SELECTED_WORKTREE_KEY),
+  );
+  // Persist the focused worktree (cleared when focus is the working copy).
+  useEffect(() => {
+    if (activeWorktreeId)
+      window.localStorage.setItem(SELECTED_WORKTREE_KEY, activeWorktreeId);
+    else window.localStorage.removeItem(SELECTED_WORKTREE_KEY);
+  }, [activeWorktreeId]);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
   // Worktree id whose Create-PR modal is open (null = closed).
@@ -388,8 +403,26 @@ function Shell() {
   // create we relocate the chat into it instead of just selecting it.
   const [pendingMoveOnCreate, setPendingMoveOnCreate] = useState(false);
 
+  // Resolved from the all-projects map (not the selected project's list, which
+  // refetches on every project switch) so a restored id resolves as soon as
+  // the one startup fetch lands. The project match keeps a stale id from ever
+  // pairing another project's worktree with the selected project.
+  const activeWorktreeCandidate = activeWorktreeId
+    ? (worktreeById.get(activeWorktreeId) ?? null)
+    : null;
   const activeWorktree =
-    worktrees.worktrees.find((w) => w.id === activeWorktreeId) ?? null;
+    activeWorktreeCandidate?.projectEncoded === selectedEncoded
+      ? activeWorktreeCandidate
+      : null;
+
+  // A restored worktree id can be stale — removed while the app was closed.
+  // Once the all-worktrees list has loaded, an unresolvable id falls back to
+  // the working copy. (Every in-app flow that sets an id refreshes that list
+  // first, so a live selection never trips this.)
+  useEffect(() => {
+    if (allWorktrees.loaded && activeWorktreeId && !activeWorktree)
+      setActiveWorktreeId(null);
+  }, [allWorktrees.loaded, activeWorktreeId, activeWorktree]);
   const prWorktree = prWorktreeId
     ? (worktreeById.get(prWorktreeId) ?? null)
     : null;
@@ -420,12 +453,16 @@ function Shell() {
   // reconcile effect below would loop.
   const activeTarget = useMemo<MountTarget | null>(() => {
     if (!selectedEncoded) return null;
+    // A worktree id that hasn't resolved yet (restored at launch, list still
+    // loading): mount nothing rather than flash-mounting the working copy and
+    // then switching. It resolves — or is cleared as stale — one fetch later.
+    if (activeWorktreeId && !activeWorktree) return null;
     return {
       encoded: activeWorktree ? activeWorktree.encoded : selectedEncoded,
       projectEncoded: selectedEncoded,
       worktreeId: activeWorktree ? activeWorktree.id : null,
     };
-  }, [selectedEncoded, activeWorktree]);
+  }, [selectedEncoded, activeWorktreeId, activeWorktree]);
 
   // The pool renders against a DEFERRED copy of the target: the click's urgent
   // render (sidebar highlight, header) commits on the next frame with the OLD

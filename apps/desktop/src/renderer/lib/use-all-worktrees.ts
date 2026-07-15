@@ -5,6 +5,8 @@ import type { WorktreeRecord } from "../../shared-types";
 export interface AllWorktrees {
   /** Worktrees grouped by their parent project's encoded cwd. */
   byProject: Map<string, WorktreeRecord[]>;
+  /** True once the first fetch has landed — before that, empty ≠ "none". */
+  loaded: boolean;
   refresh: () => Promise<void>;
 }
 
@@ -17,6 +19,7 @@ export function useAllWorktrees(): AllWorktrees {
   const [byProject, setByProject] = useState<Map<string, WorktreeRecord[]>>(
     new Map(),
   );
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     const all = await window.electronAPI.listAllWorktrees();
@@ -31,6 +34,7 @@ export function useAllWorktrees(): AllWorktrees {
     setByProject((prev) =>
       sameJson([...prev.entries()], [...map.entries()]) ? prev : map,
     );
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -54,5 +58,5 @@ export function useAllWorktrees(): AllWorktrees {
     };
   }, [refresh]);
 
-  return { byProject, refresh };
+  return { byProject, loaded, refresh };
 }

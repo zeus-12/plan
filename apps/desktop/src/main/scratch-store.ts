@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile } from "fs/promises";
+import { readFile, mkdir, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { PLAN_DIR } from "./plan-config";
 import type { ScratchData } from "../shared-types";
@@ -41,4 +41,9 @@ export async function writeScratch(
 ): Promise<void> {
   await mkdir(SCRATCH_DIR, { recursive: true });
   await writeFile(scratchPath(encoded), JSON.stringify(data), "utf-8");
+}
+
+/** Delete a worktree's scratchpad file (no-op if it never wrote one). */
+export async function deleteScratch(encoded: string): Promise<void> {
+  await rm(scratchPath(encoded), { force: true });
 }

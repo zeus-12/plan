@@ -6,6 +6,7 @@ import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
 import { encodeCwd, safeSegment } from "./claude-encoding";
 import { PLAN_DIR } from "./plan-config";
 import { discoverRepos, invalidateRepoLayout } from "./git";
+import { deleteScratch } from "./scratch-store";
 import type { DiscoveredRepo } from "../shared-types";
 
 /**
@@ -296,6 +297,9 @@ export async function removeWorktree(id: string): Promise<void> {
     }
   }
   await rm(rec.rootPath, { recursive: true, force: true }).catch(() => {});
+  // Drop its scratchpad too — a future worktree reusing the same name (and
+  // hence the same encoded path) must not inherit stale notes.
+  await deleteScratch(rec.encoded).catch(() => {});
   invalidateRepoLayout(rec.encoded);
   await deleteWorktreeRecord(id);
 }
