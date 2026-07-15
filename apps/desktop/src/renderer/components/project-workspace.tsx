@@ -1679,7 +1679,14 @@ function ProjectWorkspaceImpl({
         />
       )}
       <div className="flex h-full w-full flex-row">
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className={cn(
+            "content-card flex min-w-0 flex-1 flex-col",
+            // Project sidebar collapsed → the card is flush to the window edge,
+            // so drop its left divider (it'd otherwise be a stray line there).
+            !projectsSidebarOpen && "content-card--flush-left",
+          )}
+        >
           <WorkspaceHeader
             project={project}
             projectsSidebarOpen={projectsSidebarOpen}

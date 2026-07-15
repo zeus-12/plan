@@ -411,6 +411,7 @@ export function ProjectSidebar({
 
   return (
     <Sidebar
+      className="plan-project-sidebar"
       width={width}
       onWidthChange={setWidth}
       minWidth={200}

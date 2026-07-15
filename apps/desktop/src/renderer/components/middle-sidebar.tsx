@@ -319,6 +319,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
 
   return (
     <Sidebar
+      className="plan-right-sidebar"
       side="right"
       width={width}
       onWidthChange={setWidth}

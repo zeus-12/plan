@@ -171,3 +171,35 @@ textarea {
   opacity: 1 !important;
   transition: none !important;
 }
+
+/*
+ * The content column reads as a card with only its TOP corners rounded. The
+ * divider on each side AND the rounded top are ONE continuous border owned by
+ * the card, so the divider curves into the top corners instead of a straight
+ * sidebar border clashing with a separate top line (which left a notch at the
+ * corner). The flanking sidebars drop their content-facing border (below) so it
+ * isn't doubled. `overflow: hidden` clips the header to the rounded shape.
+ */
+.content-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  overflow: hidden;
+}
+
+/* Hand the divider to .content-card (above) so it can round at the top. */
+aside.plan-project-sidebar {
+  border-right-width: 0;
+}
+aside.plan-right-sidebar {
+  border-left-width: 0;
+}
+
+/* Project sidebar collapsed: the card sits flush against the window's left edge,
+   so drop the left divider that would otherwise be a stray line there. The top
+   radius stays, so the rounded top-left still reads. */
+.content-card--flush-left {
+  border-left-width: 0;
+}
