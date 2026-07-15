@@ -506,7 +506,7 @@ function Shell() {
       const ok = await confirm({
         title: `Remove worktree "${wt?.name ?? ""}"?`,
         description:
-          "This deletes the worktree's checkouts and branches-in-progress for every repo. Uncommitted work in it is lost.",
+          "Deletes the checkout and any uncommitted work. Chats move to the project's archive; the branch stays.",
         confirmLabel: "Remove worktree",
       });
       if (!ok) return;

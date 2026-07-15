@@ -126,7 +126,11 @@ import {
   createWorktreePr,
   addReposToWorktree,
 } from "./worktrees";
-import { getProjectDefaults, setProjectDefaults } from "./worktrees-store";
+import {
+  getProjectDefaults,
+  setProjectDefaults,
+  getWorktreeRecord,
+} from "./worktrees-store";
 
 const isMac = process.platform === "darwin";
 
@@ -329,6 +333,32 @@ async function listSessionsForProject(
   }));
 }
 
+/**
+ * Preserve a worktree's chats before the worktree itself is deleted: relocate
+ * every transcript into the parent project's live working copy and archive it
+ * there. Without this the transcripts would be orphaned under an encoded dir
+ * that no longer maps to any worktree — recoverable in theory, invisible in
+ * practice. Landing them in the project's archived-sessions list keeps a
+ * finished worktree's conversations resumable from the main project. Each move
+ * mirrors "session:move": kill the source `claude` and wait for exit, rename the
+ * transcript, then arm the ghost reaper (a dying claude may re-flush a
+ * message-less stub at the old path). A no-op when a worktree shares the
+ * project's encoded, which can't normally happen.
+ */
+async function archiveWorktreeChatsToProject(
+  worktreeEncoded: string,
+  projectEncoded: string,
+): Promise<void> {
+  if (worktreeEncoded === projectEncoded) return;
+  const sessions = await listSessions(worktreeEncoded);
+  for (const s of sessions) {
+    await killTerminalAndWait(chatTerminalId(worktreeEncoded, s.sessionId));
+    await moveSessionTranscript(s.sessionId, worktreeEncoded, projectEncoded);
+    markSessionMovedAway(worktreeEncoded, s.sessionId);
+    await setSessionArchived(s.sessionId, true);
+  }
+}
+
 // ── IPC ─────────────────────────────────────────────────────────────
 
 // Only manually-added projects are shown (persisted in plan-desktop.json), so
@@ -475,7 +505,14 @@ const invokeHandlers: {
   "worktrees:list": (_e, encoded) => listWorktrees(encoded),
   "worktrees:listAll": () => listAllWorktrees(),
   "worktrees:create": (_e, encoded, input) => createWorktree(encoded, input),
-  "worktrees:remove": (_e, id) => removeWorktree(id),
+  "worktrees:remove": async (_e, id) => {
+    // Save the worktree's chats into the parent project's archive before the
+    // checkout is torn down — a deleted worktree should lose its code, not its
+    // conversations.
+    const rec = await getWorktreeRecord(id);
+    if (rec) await archiveWorktreeChatsToProject(rec.encoded, rec.projectEncoded);
+    await removeWorktree(id);
+  },
   "worktrees:addRepos": (_e, id, input) => addReposToWorktree(id, input),
   "worktrees:createPr": (_e, id, input) => createWorktreePr(id, input),
   "worktrees:getDefaults": (_e, encoded) => getProjectDefaults(encoded),
