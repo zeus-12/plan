@@ -202,7 +202,7 @@ export function DiffSettingsControls({
         title="Diff settings"
         aria-label="Diff settings"
         aria-expanded={open}
-        className={`flex h-8 w-8 items-center justify-center rounded-md border text-[15px] transition-colors ${
+        className={`flex h-7 w-7 items-center justify-center rounded-md border text-[15px] transition-colors ${
           open
             ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
             : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"

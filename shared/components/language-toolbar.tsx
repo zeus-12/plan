@@ -47,7 +47,7 @@ export function LanguageToolbar({
         <select
           value={language}
           onChange={(e) => onLanguageChange(e.target.value)}
-          className="cursor-pointer appearance-none rounded-md border bg-transparent px-2.5 py-1 pr-6 font-[family-name:var(--font-mono)] text-[11px] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
+          className="h-7 cursor-pointer appearance-none rounded-md border bg-transparent px-2.5 pr-6 font-[family-name:var(--font-mono)] text-[11px] focus:outline-none focus:ring-1 focus:ring-[var(--border-strong)]"
           style={{
             borderColor: "var(--border)",
             color: "var(--text-secondary)",
@@ -70,6 +70,7 @@ export function LanguageToolbar({
         <Button
           variant="outline"
           size="sm"
+          className="h-7"
           onClick={handleFormat}
           disabled={!formatAvailable || formatting || formatDisabled}
           title={

@@ -423,6 +423,7 @@ function FileDiffViewerImpl({
             <Button
               variant="outline"
               size="sm"
+              className="h-7"
               onClick={onUnstage}
               title="Unstage all changes for this file"
             >
@@ -433,6 +434,7 @@ function FileDiffViewerImpl({
               <Button
                 variant="outline"
                 size="sm"
+                className="h-7"
                 onClick={onDiscard}
                 title="Discard all unstaged changes for this file"
               >
@@ -441,6 +443,7 @@ function FileDiffViewerImpl({
               <Button
                 variant="default"
                 size="sm"
+                className="h-7"
                 onClick={onStage}
                 title="Stage all changes for this file"
               >
@@ -467,6 +470,7 @@ function FileDiffViewerImpl({
                   (formatted !== null && !formatted.changed)
                 }
                 className={cn(
+                  "h-7",
                   formatted &&
                     !formatted.changed &&
                     "opacity-100 ring-1 ring-[var(--accent)]",
