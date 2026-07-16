@@ -36,10 +36,23 @@ export function classifyInputState(rows: string[]): {
   state: TerminalInputState;
   lines: string[];
 } {
-  // Only the bottom chunk matters (the box sits at the foot of the frame), and
-  // ignoring the top avoids matching menu-like text in scrollback history.
-  const tail = rows.slice(-16);
-  const nonEmpty = tail.filter((l) => l.trim().length > 0);
+  // Anchor to the live region: the bottom-most input/prompt line and everything
+  // below it. Scanning from there DOWN — inclusive, because a "❯ 1. Yes" menu
+  // line IS that boundary — keeps transcript prose ABOVE the input box from
+  // being misread as a live menu. A finished normal reply can legitimately end
+  // with the words "Esc to cancel" / "Enter to select" or a "❯ 1." example (a
+  // chat about these very menus); matching those in scrollback flagged the
+  // session as parked-on-approval (amber dot) — and, because the done-notifier
+  // treats a "selection" as "not done", suppressed the green "replied" dot too —
+  // when Claude had simply replied. This is the same scrollback hazard
+  // screenIsBusy already guards against for the working hint.
+  //
+  // When no prompt line exists (e.g. a color-highlighted AskUserQuestion picker
+  // that draws no chevron, and thus no composer either), the whole bottom slice
+  // IS the live menu, so fall back to scanning it.
+  const boundary = findPromptBoundary(rows);
+  const region = boundary >= 0 ? rows.slice(boundary) : rows.slice(-16);
+  const nonEmpty = region.filter((l) => l.trim().length > 0);
   const text = nonEmpty.join("\n");
   let state: TerminalInputState = "unknown";
   if (SELECTION_RE.test(text)) state = "selection";
@@ -79,15 +92,21 @@ const PROMPT_LINE_RE = /^\s*(?:[│|]\s*)?[>❯›](?:\s|$)/;
 // Fallback footer window when no input prompt can be found (unexpected frame).
 const FOOTER_ROWS = 3;
 
+/**
+ * Index of the bottom-most input/prompt line — the boundary between transcript
+ * (above) and the live footer/menu region (below). Returns -1 when no prompt
+ * line is present (e.g. a color-highlighted picker that draws no chevron).
+ */
+function findPromptBoundary(rows: string[]): number {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (PROMPT_LINE_RE.test(rows[i])) return i;
+  }
+  return -1;
+}
+
 /** Whether a rendered screen currently shows Claude's working hint. */
 export function screenIsBusy(rows: string[]): boolean {
-  let boundary = -1;
-  for (let i = rows.length - 1; i >= 0; i--) {
-    if (PROMPT_LINE_RE.test(rows[i])) {
-      boundary = i;
-      break;
-    }
-  }
+  const boundary = findPromptBoundary(rows);
   const region =
     boundary >= 0
       ? rows.slice(boundary + 1)
