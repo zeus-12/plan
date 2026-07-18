@@ -37,8 +37,11 @@ interface Props {
   reposByProject: Map<string, DiscoveredRepo[]>;
   /** The record for a worktree target (null for a working copy). */
   worktreeRecord: WorktreeRecord | null;
+  /** Every project's worktrees (keyed by parent encoded) — for the ⌘K palette. */
+  worktreesByProject: Map<string, WorktreeRecord[]>;
   projectsSidebarOpen: boolean;
   onSelectProject: (encoded: string) => void;
+  onSelectWorktree: (projectEncoded: string, worktreeId: string) => void;
   onMoveSession: (sessionId: string, title: string) => void;
 }
 
@@ -60,8 +63,10 @@ function WorkspaceHostImpl({
   projects,
   reposByProject,
   worktreeRecord,
+  worktreesByProject,
   projectsSidebarOpen,
   onSelectProject,
+  onSelectWorktree,
   onMoveSession,
 }: Props) {
   const isWorktree = target.worktreeId != null;
@@ -158,6 +163,8 @@ function WorkspaceHostImpl({
           projectsSidebarOpen={projectsSidebarOpen}
           projects={projects}
           onSelectProject={onSelectProject}
+          worktreesByProject={worktreesByProject}
+          onSelectWorktree={onSelectWorktree}
           runEntries={runEntries}
           buildEntries={buildEntries}
           isWorktree={isWorktree}

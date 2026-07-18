@@ -824,8 +824,10 @@ function Shell() {
               worktreeRecord={
                 t.worktreeId ? (worktreeById.get(t.worktreeId) ?? null) : null
               }
+              worktreesByProject={allWorktrees.byProject}
               projectsSidebarOpen={projectsSidebar.open}
               onSelectProject={selectProject}
+              onSelectWorktree={selectWorktree}
               onMoveSession={handleRequestMoveSession}
             />
           ))

@@ -28,6 +28,7 @@ import type {
   ParsedSession,
   DiscoveredRepo,
   CommandEntry,
+  WorktreeRecord,
 } from "../../shared-types";
 import { MiddleSidebar } from "./middle-sidebar";
 import { FileDiffViewer } from "./file-diff-viewer";
@@ -118,6 +119,10 @@ interface Props {
   /** All projects + a switch callback — drives the ⌘K palette. */
   projects: ProjectEntry[];
   onSelectProject: (encoded: string) => void;
+  /** Every project's worktrees (keyed by parent encoded) — listed in the ⌘K palette. */
+  worktreesByProject: Map<string, WorktreeRecord[]>;
+  /** Switch focus to a worktree from the ⌘K palette. */
+  onSelectWorktree: (projectEncoded: string, worktreeId: string) => void;
   /** Project-level Run command list (shared across this project's worktrees). */
   runEntries: CommandEntry[];
   /** Project-level Build command list (the Build tab shows only in a worktree). */
@@ -395,6 +400,8 @@ function ProjectWorkspaceImpl({
   projectsSidebarOpen,
   projects,
   onSelectProject,
+  worktreesByProject,
+  onSelectWorktree,
   runEntries,
   buildEntries,
   isWorktree,
@@ -1062,8 +1069,35 @@ function ProjectWorkspaceImpl({
         }
       },
     }));
-    return [...projEntries, ...chatEntries];
-  }, [projects, allChats, project.encoded, onSelectProject, openChatTab]);
+    // Worktrees, tagged with their parent project's name (the inline sublabel),
+    // exactly like chats. Skip any whose parent project is gone/archived.
+    const projectNameOf = new Map(
+      projects.map((p) => [p.encoded, lastSegment(p.cwd)]),
+    );
+    const worktreeEntries: SwitchEntry[] = [];
+    for (const [projectEncoded, list] of worktreesByProject) {
+      const projectName = projectNameOf.get(projectEncoded);
+      if (!projectName) continue;
+      for (const w of list) {
+        worktreeEntries.push({
+          id: `w:${w.id}`,
+          name: w.name,
+          project: projectName,
+          badge: "worktree",
+          run: () => onSelectWorktree(projectEncoded, w.id),
+        });
+      }
+    }
+    return [...projEntries, ...chatEntries, ...worktreeEntries];
+  }, [
+    projects,
+    allChats,
+    worktreesByProject,
+    project.encoded,
+    onSelectProject,
+    onSelectWorktree,
+    openChatTab,
+  ]);
 
   const switchFuse = useMemo(
     () =>
