@@ -80,6 +80,25 @@ export function markSessionReplied(id: string) {
 }
 
 /**
+ * Deliberately flag a session unread from a user action ("Mark as unread"),
+ * even the one you're currently looking at. Unlike markSessionReplied this
+ * ignores the focused+viewed guard — leaving yourself a reminder on the chat
+ * you're about to step away from is the whole point. We also drop it as the
+ * viewed session so merely refocusing the window won't instantly clear the
+ * badge you just set; it clears the normal way once you leave and come back.
+ */
+export function markSessionUnread(id: string) {
+  if (!isChatTerminalId(id)) return;
+  if (id === viewedId) viewedId = null;
+  add(id);
+}
+
+/** Clear a session's unread badge from a user action ("Mark as read"). */
+export function clearSessionUnread(id: string) {
+  clear(id);
+}
+
+/**
  * Report which chat is the on-screen pane (null when the center pane isn't a
  * chat). Called only by the active workspace. Viewing a session with the window
  * focused clears its unread badge.

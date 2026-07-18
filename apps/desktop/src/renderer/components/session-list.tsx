@@ -4,7 +4,11 @@ import { chatTerminalId } from "../../terminal-ids";
 import { relativeTime } from "../lib/time";
 import { useTerminalWorking } from "../lib/terminal-activity-store";
 import { useSessionNeedsApproval } from "../lib/session-approval-store";
-import { useSessionHasUnread } from "../lib/unread-response-store";
+import {
+  useSessionHasUnread,
+  markSessionUnread,
+  clearSessionUnread,
+} from "../lib/unread-response-store";
 import { WorkingIcon } from "./working-icon";
 import { ApprovalDot } from "./approval-dot";
 import { RepliedDot } from "./replied-dot";
@@ -257,6 +261,15 @@ const SessionRow = memo(function SessionRow({
         <ContextMenuItem onSelect={() => onRename(s.sessionId, s.title ?? "")}>
           Rename…
         </ContextMenuItem>
+        {hasUnread ? (
+          <ContextMenuItem onSelect={() => clearSessionUnread(termId)}>
+            Mark as read
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={() => markSessionUnread(termId)}>
+            Mark as unread
+          </ContextMenuItem>
+        )}
         {onMoveSession && (
           <ContextMenuItem
             onSelect={() =>
