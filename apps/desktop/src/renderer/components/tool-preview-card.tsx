@@ -12,6 +12,7 @@ import {
   buildDiffLines,
   buildSplitRows,
   type DiffLine,
+  type WordSegment,
 } from "@plan/shared/lib/diff";
 import {
   highlightPerLine,
@@ -87,33 +88,97 @@ export function toolPreview(tool: string, input: unknown): ToolPreview | null {
 const CARD_WIDTH_DIFF = 720;
 const CARD_WIDTH_CONTENT = 560;
 
-/** Split one line's text into coloured spans from its Shiki tokens. */
-function TokenizedLine({
+/**
+ * One diff line's rendered spans: syntax colour (from Shiki tokens) merged with
+ * word-diff pills (the exact characters that changed within a changed line).
+ * Mirrors the Diffs-tab renderer — token colour rides on `--shiki-color` /
+ * `.shiki-tok` so the `.diff-word` rule can lift muted tokens back to contrast
+ * on the tinted pill. `wordSegments` is null on unpaired lines and the Write view.
+ */
+function LineSpans({
   text,
   tokens,
+  wordSegments,
+  lineType,
 }: {
   text: string;
   tokens: SyntaxToken[];
+  wordSegments: WordSegment[] | null;
+  lineType: DiffLine["type"];
 }): ReactNode {
   if (!text) return " "; // keep empty lines at full row height
-  if (!tokens.length) return text;
-  const spans: ReactNode[] = [];
-  let pos = 0;
-  tokens.forEach((t, i) => {
-    if (t.start > pos) spans.push(text.slice(pos, t.start));
-    const style: CSSProperties = {};
-    if (t.color) style.color = t.color;
-    if (t.italic) style.fontStyle = "italic";
-    if (t.bold) style.fontWeight = 600;
-    spans.push(
-      <span key={i} className={t.className} style={style}>
-        {text.slice(t.start, t.end)}
+  const segs = wordSegments && wordSegments.length ? wordSegments : null;
+  if (!tokens.length && !segs) return text;
+
+  const wordBg =
+    lineType === "add"
+      ? "var(--diff-add-word)"
+      : lineType === "remove"
+        ? "var(--diff-remove-word)"
+        : null;
+
+  // Breakpoints at every token and word-segment boundary; each resulting slice
+  // then carries a single colour and a single changed-flag.
+  const bounds = new Set<number>([0, text.length]);
+  for (const t of tokens) {
+    bounds.add(t.start);
+    bounds.add(t.end);
+  }
+  const words: { start: number; end: number; changed: boolean }[] = [];
+  if (segs) {
+    let off = 0;
+    for (const w of segs) {
+      words.push({ start: off, end: off + w.text.length, changed: w.changed });
+      bounds.add(off);
+      off += w.text.length;
+      bounds.add(off);
+    }
+  }
+  const sorted = [...bounds]
+    .filter((b) => b >= 0 && b <= text.length)
+    .sort((a, b) => a - b);
+
+  const tokenAt = (pos: number) => {
+    for (const t of tokens) if (t.start <= pos && pos < t.end) return t;
+    return null;
+  };
+  const wordAt = (pos: number) => {
+    for (const w of words) if (w.start <= pos && pos < w.end) return w;
+    return null;
+  };
+
+  const parts: ReactNode[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const s = sorted[i];
+    const e = sorted[i + 1];
+    if (s >= e) continue;
+    const tok = tokenAt(s);
+    const changed = !!wordAt(s)?.changed && !!wordBg;
+
+    const classNames: string[] = [];
+    if (tok?.className) classNames.push(tok.className);
+    if (tok?.color) classNames.push("shiki-tok");
+    // The tinted pill lightens the backdrop and guts muted-token contrast;
+    // `.diff-word` lifts the colour back. Round only these discrete pills.
+    if (changed) classNames.push("diff-word", "rounded-sm");
+
+    const style: CSSProperties & Record<string, string | undefined> = {};
+    if (changed && wordBg) style.background = wordBg;
+    if (tok?.color) style["--shiki-color"] = tok.color;
+    if (tok?.italic) style.fontStyle = "italic";
+    if (tok?.bold) style.fontWeight = "600";
+
+    parts.push(
+      <span
+        key={s}
+        className={classNames.join(" ") || undefined}
+        style={Object.keys(style).length ? style : undefined}
+      >
+        {text.slice(s, e)}
       </span>,
     );
-    pos = t.end;
-  });
-  if (pos < text.length) spans.push(text.slice(pos));
-  return spans;
+  }
+  return parts;
 }
 
 function rowStyle(type: DiffLine["type"]): CSSProperties {
@@ -134,8 +199,9 @@ function signColor(type: DiffLine["type"]): string {
   return "var(--text-tertiary)";
 }
 
-/** One side of a split-diff row: sign gutter + wrapped, coloured content. An
- *  absent line (no counterpart on this side) renders as a muted filler cell. */
+/** One side of a split-diff row: sign gutter + wrapped, coloured content with
+ *  word-diff pills. An absent line (no counterpart on this side) renders as a
+ *  muted filler cell. */
 function SplitCell({
   line,
   tokens,
@@ -159,7 +225,12 @@ function SplitCell({
             {sign(line.type)}
           </span>
           <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-2">
-            <TokenizedLine text={line.content} tokens={tokens} />
+            <LineSpans
+              text={line.content}
+              tokens={tokens}
+              wordSegments={line.wordSegments ?? null}
+              lineType={line.type}
+            />
           </span>
         </>
       ) : null}
@@ -249,7 +320,12 @@ function ContentSection({
             +
           </span>
           <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-3">
-            <TokenizedLine text={line} tokens={perLine[i] ?? []} />
+            <LineSpans
+              text={line}
+              tokens={perLine[i] ?? []}
+              wordSegments={null}
+              lineType="context"
+            />
           </span>
         </div>
       ))}
