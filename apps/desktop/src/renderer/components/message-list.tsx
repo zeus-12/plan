@@ -330,8 +330,8 @@ function CollapsibleBlock({
   );
 }
 
-/** Plain text a user turn copies to the clipboard — its text parts joined. */
-function userMessageText(m: ConversationMessage): string {
+/** Plain text a message copies to the clipboard — its text parts joined. */
+function messageText(m: ConversationMessage): string {
   return m.parts
     .filter(
       (p): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text",
@@ -342,18 +342,33 @@ function userMessageText(m: ConversationMessage): string {
 }
 
 /**
- * 12-hour clock time with AM/PM in the viewer's local timezone, e.g. "2:45 PM".
- * The stored timestamp is UTC ISO; toLocaleTimeString converts it to local.
- * Empty on an unparseable ts.
+ * Timestamp shown under a message. Stays relative while the message is recent
+ * — "just now", "5 mins ago", "3 hours ago", "yesterday", "10 days ago" — so
+ * anything within the last two weeks reads at a glance. Past 14 days it flips
+ * to an absolute Indian-format date, DD/MM/YY. The stored timestamp is UTC ISO;
+ * Date does the local-timezone conversion. Empty on an unparseable ts.
  */
-function formatClockTime(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+function formatMessageTime(ts: string): string {
+  const ms = Date.parse(ts);
+  if (!Number.isFinite(ms)) return "";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "just now";
+
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins} min${mins === 1 ? "" : "s"} ago`;
+
+  const hours = Math.floor(diff / 3_600_000);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+
+  const days = Math.floor(diff / 86_400_000);
+  if (days === 1) return "yesterday";
+  if (days <= 14) return `${days} days ago`;
+
+  const d = new Date(ms);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
 }
 
 /** How tall (px) a user bubble grows before it clips behind a "Show more". */
@@ -1925,13 +1940,29 @@ export const MessageList = memo(function MessageList({
                       );
                     });
                     if (!isUser) {
+                      const time = formatMessageTime(m.timestamp);
+                      const text = messageText(m);
                       return (
-                        <div className="flex w-full flex-col gap-1.5">
-                          {partNodes}
+                        <div className="flex w-full flex-col gap-1">
+                          <div className="flex w-full flex-col gap-1.5">
+                            {partNodes}
+                          </div>
+                          {/* Meta row under the reply, bottom-left: reply time
+                          then a copy button. Hidden until the row is hovered or
+                          focused. The copy button only appears when there is
+                          prose to copy (tool-only turns have none). */}
+                          <div className="flex items-center gap-[7px] pl-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                            {time && (
+                              <span className="text-[11px] text-[var(--text-tertiary)]">
+                                {time}
+                              </span>
+                            )}
+                            {text && <CopyButton getText={() => text} />}
+                          </div>
                         </div>
                       );
                     }
-                    const time = formatClockTime(m.timestamp);
+                    const time = formatMessageTime(m.timestamp);
                     return (
                       <div className="flex max-w-[80%] flex-col items-end gap-1">
                         <div className="flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2">
@@ -1948,7 +1979,7 @@ export const MessageList = memo(function MessageList({
                               {time}
                             </span>
                           )}
-                          <CopyButton getText={() => userMessageText(m)} />
+                          <CopyButton getText={() => messageText(m)} />
                         </div>
                       </div>
                     );
