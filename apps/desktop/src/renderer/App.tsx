@@ -91,7 +91,10 @@ import {
   recordUse,
   subscribeMru,
 } from "./lib/mru-store";
-import { useApplyTranscriptPrefs } from "./lib/transcript-prefs";
+import {
+  toggleBionicReading,
+  useApplyTranscriptPrefs,
+} from "./lib/transcript-prefs";
 import { startSessionDoneNotifier } from "./lib/session-done-notifier";
 import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
 import {
@@ -532,6 +535,24 @@ function Shell() {
         e.preventDefault();
         setShortcutsOpen(true);
         return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // ⌘⇧B → toggle bionic reading. Global so it's reachable while reading
+  // anywhere; kept separate because the ⌘,/⌘/ handler above bails on Shift.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "b"
+      ) {
+        e.preventDefault();
+        toggleBionicReading();
       }
     };
     window.addEventListener("keydown", onKey);

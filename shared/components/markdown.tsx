@@ -1,6 +1,7 @@
 import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rehypeBionic } from "./bionic";
 import {
   highlightToHtml,
   stripComments,
@@ -200,9 +201,12 @@ function CheckIcon() {
 export const Markdown = memo(function Markdown({
   content,
   className,
+  bionic = false,
 }: {
   content: string;
   className?: string;
+  /** Bold each word's leading letters (bionic reading). Opt-in per call site. */
+  bionic?: boolean;
 }) {
   return (
     <div
@@ -219,7 +223,11 @@ export const Markdown = memo(function Markdown({
         color: "var(--prose-fg, var(--text))",
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={bionic ? [rehypeBionic] : undefined}
+        components={COMPONENTS}
+      >
         {content}
       </ReactMarkdown>
     </div>

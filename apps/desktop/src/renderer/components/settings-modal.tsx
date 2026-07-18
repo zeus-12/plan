@@ -113,6 +113,22 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               </Select>
             </div>
 
+            {/* Bionic reading: bold each word's leading letters to speed reading. */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-[12px] text-[var(--text)]">
+                  Bionic reading
+                </span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Bold the first letters of each word in chat. (⌘⇧B)
+                </span>
+              </div>
+              <Switch
+                checked={prose.bionic}
+                onCheckedChange={(on) => setProse({ bionic: on })}
+              />
+            </div>
+
             {/* Size. */}
             <div className="flex flex-col gap-1.5">
               <span className="text-[11px] text-[var(--text-tertiary)]">

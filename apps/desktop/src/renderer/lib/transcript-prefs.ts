@@ -70,12 +70,15 @@ export interface TranscriptPrefs {
   fontFamily: ProseFontId;
   fontSize: number;
   brightness: ProseBrightnessId;
+  /** Bionic reading: bold each word's leading letters in the chat transcript. */
+  bionic: boolean;
 }
 
 const DEFAULTS: TranscriptPrefs = {
   fontFamily: "inter",
   fontSize: 14,
   brightness: "soft",
+  bionic: false,
 };
 
 const store = createPersistedValue<TranscriptPrefs>("plan.transcript", (raw) => {
@@ -90,6 +93,7 @@ const store = createPersistedValue<TranscriptPrefs>("plan.transcript", (raw) => 
     brightness: PROSE_BRIGHTNESS.some((b) => b.id === r.brightness)
       ? (r.brightness as ProseBrightnessId)
       : DEFAULTS.brightness,
+    bionic: typeof r.bionic === "boolean" ? r.bionic : DEFAULTS.bionic,
   };
 });
 
@@ -113,6 +117,15 @@ export function setTranscriptPrefs(patch: Partial<TranscriptPrefs>) {
   const next = { ...store.get(), ...patch };
   store.set(next);
   applyTranscriptPrefs(next);
+}
+
+/**
+ * Flip bionic reading on/off. Bound to ⌘⇧B (App.tsx) and the Settings toggle.
+ * Unlike font/size/brightness this isn't a `--prose-*` variable — it's read by
+ * the chat renderer as a prop — so there's nothing to re-apply on <html>.
+ */
+export function toggleBionicReading() {
+  setTranscriptPrefs({ bionic: !store.get().bionic });
 }
 
 /** React binding for the Settings UI. */

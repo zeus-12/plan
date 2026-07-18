@@ -27,6 +27,7 @@ import {
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
+import { useTranscriptPrefs } from "../lib/transcript-prefs";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
 import { ImageLightbox } from "./image-lightbox";
@@ -646,9 +647,12 @@ function rangeForCover(root: HTMLElement, cover: PartCover): Range | null {
  * the renderer.
  */
 function MarkdownText({ text }: { text: string }) {
+  // Bionic reading is a chat-only reading pref — the shared Markdown is also
+  // used for PR transcripts, so we opt in here and leave those untouched.
+  const [{ bionic }] = useTranscriptPrefs();
   return (
     <div className="[cursor:text]">
-      <Markdown content={text} />
+      <Markdown content={text} bionic={bionic} />
     </div>
   );
 }
