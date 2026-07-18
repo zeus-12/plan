@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
@@ -30,6 +31,11 @@ import { Markdown } from "@plan/shared/components/markdown";
 import { useTranscriptPrefs } from "../lib/transcript-prefs";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
+import {
+  ToolPreviewCard,
+  toolPreview,
+  useToolPreviewHover,
+} from "./tool-preview-card";
 import { ImageLightbox } from "./image-lightbox";
 import { UserMessageOverview } from "./user-message-overview";
 import type { ConversationMessage, MessagePart } from "../../shared-types";
@@ -492,10 +498,18 @@ function ToolCallBlock({
 }) {
   const [open, setOpen] = useState(false);
   const { verb, target } = toolHeader(tool, input);
+  const preview = useMemo(() => toolPreview(tool, input), [tool, input]);
+  const hover = useToolPreviewHover();
   return (
     <div>
       <button
         onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
+        onMouseEnter={
+          preview
+            ? (e) => hover.onEnter(e.currentTarget.getBoundingClientRect())
+            : undefined
+        }
+        onMouseLeave={preview ? hover.onLeave : undefined}
         className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
       >
         <span className="shrink-0 text-[var(--text-tertiary)]">{verb}</span>
@@ -535,6 +549,17 @@ function ToolCallBlock({
           </div>
         </div>
       </div>
+      {preview &&
+        hover.anchor &&
+        createPortal(
+          <ToolPreviewCard
+            preview={preview}
+            anchor={hover.anchor}
+            onMouseEnter={hover.onCardEnter}
+            onMouseLeave={hover.onCardLeave}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
