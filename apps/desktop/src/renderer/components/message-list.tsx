@@ -1376,6 +1376,18 @@ export const MessageList = memo(function MessageList({
     [deferredMessages],
   );
 
+  // The reply meta row (time + copy) shows on exactly ONE row: the newest
+  // assistant turn that carries prose. A single response can span several rows
+  // (a tool call, then a short text, then more) — we anchor the meta to the
+  // last of those that has text, so it lands at the visual end of the reply and
+  // never repeats up the transcript. -1 while the last turn is still tool-only.
+  const lastAssistantTextIdx = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (!isUserRow(items[i]) && messageText(items[i]).trim()) return i;
+    }
+    return -1;
+  }, [items]);
+
   // The inline plan card is sourced from the plan FILE Claude writes to
   // ~/.claude/plans/ (see planFilePath): each Write is a new revision, and
   // Edits/MultiEdits fold into the latest revision's text — all reconstructed
@@ -1947,18 +1959,21 @@ export const MessageList = memo(function MessageList({
                           <div className="flex w-full flex-col gap-1.5">
                             {partNodes}
                           </div>
-                          {/* Meta row under the reply, bottom-left: reply time
-                          then a copy button. Hidden until the row is hovered or
-                          focused. The copy button only appears when there is
-                          prose to copy (tool-only turns have none). */}
-                          <div className="flex items-center gap-[7px] pl-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                            {time && (
-                              <span className="text-[11px] text-[var(--text-tertiary)]">
-                                {time}
-                              </span>
-                            )}
-                            {text && <CopyButton getText={() => text} />}
-                          </div>
+                          {/* Meta row (reply time + copy) shows on ONLY the
+                          newest prose-bearing assistant row, and only once the
+                          reply has finished (`!working`) — so it marks the end
+                          of the latest response instead of trailing every turn
+                          or flashing mid-stream. */}
+                          {idx === lastAssistantTextIdx && !working && text && (
+                            <div className="flex items-center gap-[7px] pl-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                              {time && (
+                                <span className="text-[11px] text-[var(--text-tertiary)]">
+                                  {time}
+                                </span>
+                              )}
+                              <CopyButton getText={() => text} />
+                            </div>
+                          )}
                         </div>
                       );
                     }
