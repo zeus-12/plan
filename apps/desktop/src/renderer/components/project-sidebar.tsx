@@ -257,15 +257,6 @@ export function ProjectSidebar({
 }: Props) {
   const sidebar = useSidebar();
   const selected = selectedProject;
-  // Pick a representative branch per project: first repo's branch.
-  // (Multi-repo projects don't worktree-group, so this is the right label.)
-  const branches = useMemo(() => {
-    const map = new Map<string, string | null>();
-    for (const [enc, repos] of reposByProject) {
-      map.set(enc, repos[0]?.branch ?? null);
-    }
-    return map;
-  }, [reposByProject]);
   // Target cwds (projects + worktrees) with a session parked on a menu. Rolled
   // up onto rows below so a waiting session in a collapsed project/worktree
   // still surfaces on the sidebar without expanding it.
@@ -671,7 +662,6 @@ export function ProjectSidebar({
                 const isLiveActive =
                   p.encoded === selected && activeWorktreeId === null;
                 const shortName = lastSegment(p.cwd);
-                const branch = branches.get(p.encoded);
                 const hasWorktrees = row.worktrees.length > 0;
                 const showCount = !row.expanded && hasWorktrees;
                 // The project's own live-copy session, plus (while collapsed)
@@ -697,7 +687,7 @@ export function ProjectSidebar({
                       >
                         <div
                           className={cn(
-                            "group flex h-full items-center pr-2.5 transition-colors",
+                            "group flex h-full items-center pr-2 transition-colors",
                             p.archived && "opacity-60",
                             isLiveActive
                               ? "bg-[var(--bg-surface-hover)]"
@@ -754,35 +744,22 @@ export function ProjectSidebar({
                               </span>
                             </span>
                           </button>
-                          <StatusDots
-                            approval={projNeedsApproval}
-                            unread={projHasUnread}
-                            working={projWorking}
-                            className="mr-1.5"
-                          />
-                          {/* Right slot: metadata at rest, actions on hover. The
-                            actions overlay the metadata (absolute), so the row
-                            never reflows and they never collide with the label. */}
-                          <div className="relative flex min-w-[3.25rem] shrink-0 items-center justify-end">
-                            <div
-                              className={cn(
-                                "flex items-center gap-1.5 transition-opacity",
-                                !p.archived && "group-hover:opacity-0",
-                              )}
-                            >
-                              {showCount && (
-                                <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full border border-[var(--border)] px-1 font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
-                                  {row.worktrees.length}
-                                </span>
-                              )}
-                              {branch && (
-                                <span className="max-w-[92px] truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                                  {branch}
-                                </span>
-                              )}
-                            </div>
+                          {/* Right slot: count + status dots flush to the edge at
+                            rest; actions overlay them on hover (absolute + an
+                            occluding bg), so the row never reflows. */}
+                          <div className="relative flex shrink-0 items-center justify-end gap-1.5">
+                            {showCount && (
+                              <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full border border-[var(--border)] px-1 font-[family-name:var(--font-mono)] text-[9px] leading-none text-[var(--text-tertiary)]">
+                                {row.worktrees.length}
+                              </span>
+                            )}
+                            <StatusDots
+                              approval={projNeedsApproval}
+                              unread={projHasUnread}
+                              working={projWorking}
+                            />
                             {!p.archived && (
-                              <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                              <div className="absolute -right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md bg-[var(--bg-surface-hover)] pl-2 opacity-0 transition-opacity group-hover:opacity-100">
                                 <button
                                   onClick={() =>
                                     onOpenProjectDefaults(p.encoded)
