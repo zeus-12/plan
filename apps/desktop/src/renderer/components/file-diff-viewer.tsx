@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Annotation } from "@plan/shared/lib/store";
 import type { FileDiff } from "@plan/shared/lib/diff-parser";
 import type { FileView, FileImageDiff } from "../../shared-types";
 import { useProjectAnnotations } from "../lib/annotation-store";
@@ -49,6 +50,8 @@ interface Props {
     confirmLabel?: string;
   }) => Promise<boolean>;
 }
+
+const EMPTY_ANNOTATIONS: Annotation[] = [];
 
 interface FormattedState {
   oldText: string;
@@ -236,7 +239,10 @@ function FileDiffViewerImpl({
     removeFileAnnotation,
     clearFileAnnotations,
   } = useProjectAnnotations(encoded);
-  const annotations = annotationsByFile[file.path] ?? [];
+  // Fall back to a stable constant: a fresh `[]` per render would change the
+  // annotations prop's identity every time and defeat InteractiveDiff's
+  // memoized row trees.
+  const annotations = annotationsByFile[file.path] ?? EMPTY_ANNOTATIONS;
 
   // If the underlying old/new content changes, drop stale annotations for this
   // file — their offsets won't match the new text.

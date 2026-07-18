@@ -33,6 +33,7 @@ export function installTightSelectionMirror(): void {
   };
 
   const sync = () => {
+    scheduled = false;
     hl.clear();
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
@@ -44,7 +45,16 @@ export function installTightSelectionMirror(): void {
     hl.add(sel.getRangeAt(0).cloneRange());
   };
 
-  document.addEventListener("selectionchange", sync);
+  // Coalesce to one sync per frame: during a drag over a large surface,
+  // selectionchange can fire faster than frames paint, and each sync
+  // invalidates the highlight's paint. The selection is only visible once per
+  // frame anyway, so extra syncs are pure overhead.
+  let scheduled = false;
+  document.addEventListener("selectionchange", () => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(sync);
+  });
   // Never removed: a document-level singleton, cheap when idle (no surface
   // selection → clears an already-empty highlight and returns).
 }

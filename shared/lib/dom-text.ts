@@ -192,6 +192,34 @@ export function rangeForOffsets(
   return range;
 }
 
+/**
+ * The (text node, local offset) boundary `offset` characters into `root`'s
+ * text, clamped to the last text node's end when `offset` overshoots. Returns
+ * null only when `root` contains no text at all. Unlike the Range builders
+ * above this resolves a single boundary, for callers composing a Range whose
+ * two ends live under different roots (e.g. a highlight spanning diff rows).
+ */
+export function textBoundaryAt(
+  root: Element,
+  offset: number,
+): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let acc = 0;
+  let last: Text | null = null;
+  for (
+    let n = walker.nextNode() as Text | null;
+    n;
+    n = walker.nextNode() as Text | null
+  ) {
+    if (acc + n.data.length >= offset) {
+      return { node: n, offset: Math.max(0, offset - acc) };
+    }
+    acc += n.data.length;
+    last = n;
+  }
+  return last ? { node: last, offset: last.data.length } : null;
+}
+
 export interface TextSegment {
   node: Text;
   start: number;

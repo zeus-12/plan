@@ -17,9 +17,12 @@
  */
 
 import { useCallback, useState } from "react";
+import type { Annotation } from "@plan/shared/lib/store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
 import { useProjectAnnotations } from "../lib/annotation-store";
+
+const EMPTY_ANNOTATIONS: Annotation[] = [];
 
 export interface PlanVersionInfo {
   text: string;
@@ -92,7 +95,11 @@ export function PlanCard({
   // One bucket per (file, base→current) pair so switching the compare base never
   // mismatches existing highlights. Null (no file) → diff stays read-only.
   const diffKey = planPath ? `${planPath}#${baseIdx}-${versionIndex}` : null;
-  const diffAnnotations = diffKey ? (annotationsByFile[diffKey] ?? []) : [];
+  // Stable fallback: fresh `[]`s would change the prop's identity every render
+  // and defeat InteractiveDiff's memoized row trees.
+  const diffAnnotations = diffKey
+    ? (annotationsByFile[diffKey] ?? EMPTY_ANNOTATIONS)
+    : EMPTY_ANNOTATIONS;
 
   const addDiffAnnotation = useCallback(
     (

@@ -38,6 +38,7 @@ import {
   useShikiReady,
 } from "../lib/shiki";
 import { computeFoldRanges } from "../lib/folding";
+import { textBoundaryAt } from "../lib/dom-text";
 import { cn, toggleInSet } from "../lib/utils";
 import { useCommentSelection } from "../lib/use-comment-selection";
 import { useTextFind } from "../lib/use-text-find";
@@ -60,6 +61,40 @@ export type { HunkRange } from "../lib/git-hunks";
 
 // Stable empty per-line token array used while highlighting is deferred.
 const EMPTY_LINE_TOKENS: SyntaxToken[][] = [];
+// Stable default for the annotations prop — a `= []` default would mint a new
+// identity every render and invalidate the memoized row trees for nothing.
+const EMPTY_ANNOTATIONS: Annotation[] = [];
+// The pending-comment highlight (the selection kept visible while the comment
+// popover is open, after the popover's focus clears the native selection)
+// paints through the CSS Highlight API: a Range in this registry entry, styled
+// by ::highlight(pending-comment) in each app's global CSS. Painting it as
+// per-line span decorations instead would make `pending` an input of the
+// memoized row trees — rebuilding every row on each selection commit, the last
+// per-gesture full rebuild. Guarded for SSR/engines without the API; when
+// unsupported, hlsForLine falls back to span painting.
+// The ::highlight() rule is injected at runtime (not static CSS) because this
+// component is shared and Turbopack's CSS parser (web build) rejects the
+// ::highlight() syntax — same approach as the chat surface's highlights.
+const pendingHl =
+  typeof Highlight !== "undefined" &&
+  typeof CSS !== "undefined" &&
+  "highlights" in CSS
+    ? new Highlight()
+    : null;
+if (pendingHl) {
+  CSS.highlights.set("pending-comment", pendingHl);
+  const STYLE_ID = "diff-pending-comment-highlight";
+  if (!document.getElementById(STYLE_ID)) {
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+::highlight(pending-comment) {
+  background-color: var(--selection-bg);
+}
+`;
+    document.head.appendChild(style);
+  }
+}
 // Stable empty list for the searchable visible-line set while find is closed.
 const EMPTY_VISIBLE_LINES: DiffLine[] = [];
 const LINE_HEIGHT_PX = 22;
@@ -268,7 +303,7 @@ export function InteractiveDiff({
   onSettingsChange,
   isFirstVersion = false,
   language = "plaintext",
-  annotations = [],
+  annotations = EMPTY_ANNOTATIONS,
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
@@ -281,6 +316,9 @@ export function InteractiveDiff({
 }: Props) {
   const mergeEnabled = !!onMergeChange;
   const hunkActionsEnabled = !!hunkActions;
+  // Presence-only flag used inside the memoized row trees (the blame object's
+  // identity changes every parent render; the rows only care that it exists).
+  const blameEnabled = !!blame;
   const contentRef = useRef<HTMLDivElement>(null);
   // Split-view column wrappers — used to lock a text selection to the side it
   // started in (the two versions are separate tables, so a native drag-select
@@ -316,10 +354,27 @@ export function InteractiveDiff({
     setBlameSel(null);
   }, [oldText, newText]);
 
-  /** The clicked row's trailing blame annotation, or null. */
-  function renderBlameChip(side: "left" | "right", line: DiffLine) {
+  // Row click → blame selection. A click that ends a text-selection gesture
+  // (double-click word select, drag release over the same cell) is not a blame
+  // request — and acting on it would rebuild the row trees mid-gesture, which
+  // is exactly the jank this guards against. Re-clicking the selected row
+  // returns the same state so React bails out of the render entirely.
+  const blameRowClick = useCallback((side: "left" | "right", idx: number) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    setBlameSel((prev) =>
+      prev && prev.side === side && prev.idx === idx ? prev : { side, idx },
+    );
+  }, []);
+
+  /** The selected row's trailing blame annotation, or null. Rendered through a
+   *  portal into that row's content cell (see blameChipHost below) so toggling
+   *  it re-renders one chip, never the memoized row trees. */
+  function renderBlameChipContent() {
     if (!blame || !blameSel) return null;
-    if (blameSel.side !== side || blameSel.idx !== line.idx) return null;
+    const line = dLines[blameSel.idx];
+    if (!line) return null;
+    const side = blameSel.side;
     const num = side === "left" ? line.oldNum : line.newNum;
     if (num == null) return null;
     const label = blame.labelFor(side, num);
@@ -910,16 +965,78 @@ export function InteractiveDiff({
 
   /* ── Inline hunk-staging affordance ─────────────────────── */
 
-  const [hoverChangeIdx, setHoverChangeIdx] = useState<number | null>(null);
-  const [hunkCtrlTop, setHunkCtrlTop] = useState<number | null>(null);
-  // Split-view: which hunk's box is currently revealed (hover/focus). Only one
-  // box is ever shown, so oversized boxes on small hunks can't collide.
-  const [hoveredHunkIdx, setHoveredHunkIdx] = useState<number | null>(null);
+  // Hover reveal is IMPERATIVE (refs + direct style writes), not React state.
+  // It rides mousemove, and a state flip here re-rendered the entire
+  // (unvirtualized) diff on every hunk crossing — the main source of pointer
+  // lag on large files. The boxes/control are always mounted; only their
+  // visibility and position are touched, so no render work happens on hover.
 
+  // Split-view: which hunk's gutter box is currently revealed. Only one box is
+  // ever shown, so oversized boxes on small hunks can't collide.
+  const hunkHoverRef = useRef<number | null>(null);
+  const applyHunkHover = useCallback((idx: number | null) => {
+    if (hunkHoverRef.current === idx) return;
+    const prev =
+      hunkHoverRef.current == null
+        ? null
+        : hunkBoxRefs.current.get(hunkHoverRef.current);
+    hunkHoverRef.current = idx;
+    if (prev) {
+      prev.style.opacity = "0";
+      prev.style.pointerEvents = "none";
+    }
+    const next = idx == null ? null : hunkBoxRefs.current.get(idx);
+    if (next) {
+      next.style.opacity = "1";
+      next.style.pointerEvents = "auto";
+    }
+  }, []);
+
+  // Unified-view: the floating stage/revert control. Same imperative pattern —
+  // the mousemove handler positions/reveals it directly; the buttons read the
+  // hovered change back through hoverChangeRef at click time.
+  const hoverChangeRef = useRef<number | null>(null);
+  const unifiedCtrlRef = useRef<HTMLDivElement>(null);
+  const changesRef = useRef<Change[]>([]);
+  changesRef.current = changes;
+  const applyChangeHover = useCallback((idx: number | null) => {
+    if (hoverChangeRef.current === idx) return;
+    hoverChangeRef.current = idx;
+    const ctrl = unifiedCtrlRef.current;
+    if (!ctrl) return;
+    const root = contentRef.current;
+    const change = idx == null ? undefined : changesRef.current[idx];
+    if (!change || !root) {
+      ctrl.style.display = "none";
+      return;
+    }
+    const startEl = root.querySelector<HTMLElement>(
+      `[data-dline="${change.startLineIdx}"]`,
+    );
+    if (!startEl) {
+      ctrl.style.display = "none";
+      return;
+    }
+    const endEl =
+      root.querySelector<HTMLElement>(`[data-dline="${change.endLineIdx}"]`) ??
+      startEl;
+    const rootRect = root.getBoundingClientRect();
+    // Center the control vertically on the hunk (VS Code-style).
+    const top =
+      (startEl.getBoundingClientRect().top +
+        endEl.getBoundingClientRect().bottom) /
+        2 -
+      rootRect.top;
+    ctrl.style.top = `${Math.max(10, top)}px`;
+    ctrl.style.display = "flex";
+  }, []);
+
+  // Clear both hovers when the texts change (indices no longer valid) or the
+  // view mode swaps (the elements remount hidden; the refs must match).
   useEffect(() => {
-    setHoverChangeIdx(null);
-    setHoveredHunkIdx(null);
-  }, [oldText, newText]);
+    applyHunkHover(null);
+    applyChangeHover(null);
+  }, [oldText, newText, effectiveViewMode, applyHunkHover, applyChangeHover]);
 
   // dLines index → the hunk it belongs to, spanning each hunk's full extent
   // (incl. internal context) so hovering anywhere in a block reveals its box.
@@ -957,35 +1074,6 @@ export function InteractiveDiff({
     if (!el) return null;
     return dlineToHunk.get(parseInt(el.getAttribute("data-dline")!)) ?? null;
   }
-
-  useEffect(() => {
-    if (!hunkActionsEnabled || hoverChangeIdx === null || !contentRef.current) {
-      setHunkCtrlTop(null);
-      return;
-    }
-    const change = changes[hoverChangeIdx];
-    if (!change) return;
-    const root = contentRef.current;
-    const startEl = root.querySelector<HTMLElement>(
-      `[data-dline="${change.startLineIdx}"]`,
-    );
-    if (!startEl) return;
-    const endEl =
-      root.querySelector<HTMLElement>(`[data-dline="${change.endLineIdx}"]`) ??
-      startEl;
-    const rootRect = root.getBoundingClientRect();
-    const startRect = startEl.getBoundingClientRect();
-    const endRect = endEl.getBoundingClientRect();
-    // Center the control vertically on the hunk (VS Code-style).
-    setHunkCtrlTop((startRect.top + endRect.bottom) / 2 - rootRect.top);
-  }, [
-    hunkActionsEnabled,
-    hoverChangeIdx,
-    changes,
-    settings.viewMode,
-    settings.hideUnchanged,
-    expandedSeparators,
-  ]);
 
   const changeRange = useCallback((change: Change): HunkRange => {
     const olds = change.removed
@@ -1193,6 +1281,10 @@ export function InteractiveDiff({
       ),
   });
   const pending = selection.pending;
+  // Span-painting fallback for engines without the Highlight API. Null on
+  // modern engines, so the row-tree memo deps stay inert across selection
+  // commits and the pending paint goes through pendingHl instead.
+  const pendingFallback = pendingHl ? null : pending;
 
   function submitEdit(comment: string) {
     if (!editing || !onUpdateAnnotation) return;
@@ -1243,14 +1335,14 @@ export function InteractiveDiff({
     }
 
     if (
-      pending &&
-      (!side || pending.data.side === side) &&
-      pending.data.startOffset < le &&
-      pending.data.endOffset > ls
+      pendingFallback &&
+      (!side || pendingFallback.data.side === side) &&
+      pendingFallback.data.startOffset < le &&
+      pendingFallback.data.endOffset > ls
     ) {
       out.push({
-        s: Math.max(pending.data.startOffset, ls) - ls,
-        e: Math.min(pending.data.endOffset, le) - ls,
+        s: Math.max(pendingFallback.data.startOffset, ls) - ls,
+        e: Math.min(pendingFallback.data.endOffset, le) - ls,
         kind: "pending",
       });
     }
@@ -1475,12 +1567,12 @@ export function InteractiveDiff({
                       // Unified rows: removed lines only exist in the old
                       // text, everything else is annotated via the new text.
                       onClick={
-                        blame
+                        blameEnabled
                           ? () =>
-                              setBlameSel({
-                                side: item.type === "remove" ? "left" : "right",
-                                idx: item.idx,
-                              })
+                              blameRowClick(
+                                item.type === "remove" ? "left" : "right",
+                                item.idx,
+                              )
                           : undefined
                       }
                     >
@@ -1500,10 +1592,6 @@ export function InteractiveDiff({
                         onHoverAnn={handleHoverAnn}
                       />
                       {fold && renderFoldEllipsis(fold.key)}
-                      {renderBlameChip(
-                        item.type === "remove" ? "left" : "right",
-                        item,
-                      )}
                     </td>
                   </tr>
                   {lineAnns?.map(({ annotation: ann, index }) => (
@@ -1579,7 +1667,7 @@ export function InteractiveDiff({
           data-dline={line.idx}
           style={contentCellStyle(vt)}
           onClick={
-            blame ? () => setBlameSel({ side, idx: line.idx }) : undefined
+            blameEnabled ? () => blameRowClick(side, line.idx) : undefined
           }
         >
           {foldKey != null && renderFoldToggle(foldKey)}
@@ -1598,7 +1686,6 @@ export function InteractiveDiff({
             onHoverAnn={handleHoverAnn}
           />
           {foldKey != null && renderFoldEllipsis(foldKey)}
-          {renderBlameChip(side, line)}
         </td>
       </tr>
     );
@@ -1668,13 +1755,11 @@ export function InteractiveDiff({
                 else hunkBoxRefs.current.delete(block.hunkIdx);
               }}
               data-hunk-control
-              onMouseEnter={() => setHoveredHunkIdx(block.hunkIdx)}
-              className={`absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-0.5 shadow-sm transition-opacity ${
-                hoveredHunkIdx === block.hunkIdx
-                  ? "opacity-100"
-                  : "pointer-events-none opacity-0"
-              }`}
-              style={{ top: 0 }}
+              onMouseEnter={() => applyHunkHover(block.hunkIdx)}
+              // Hidden by default; applyHunkHover reveals it with direct style
+              // writes (opacity/pointerEvents) so hover never re-renders.
+              className="absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-0.5 shadow-sm transition-opacity"
+              style={{ top: 0, opacity: 0, pointerEvents: "none" }}
             >
               {renderHunkButtons(block)}
             </div>
@@ -1684,101 +1769,286 @@ export function InteractiveDiff({
     );
   }
 
-  function renderSplit() {
-    const sepIndices: number[] = [];
+  const splitSepIndices = useMemo(() => {
+    const arr: number[] = [];
     let si = 0;
     for (const row of splitRows) {
-      sepIndices.push(row.type === "separator" ? si++ : -1);
+      arr.push(row.type === "separator" ? si++ : -1);
     }
+    return arr;
+  }, [splitRows]);
 
-    const splitRowComments = splitRows.map((row) => {
-      if (row.type === "separator") return [];
-      const seen = new Set<string>();
-      const result: { annotation: Annotation; index: number }[] = [];
-      for (const line of [row.right, row.left]) {
-        if (!line) continue;
-        const anns = annotationsByEndLine.get(line.idx);
-        if (!anns) continue;
-        for (const a of anns) {
-          if (!seen.has(a.annotation.id)) {
-            seen.add(a.annotation.id);
-            result.push(a);
+  const splitRowComments = useMemo(
+    () =>
+      splitRows.map((row) => {
+        if (row.type === "separator") return [];
+        const seen = new Set<string>();
+        const result: { annotation: Annotation; index: number }[] = [];
+        for (const line of [row.right, row.left]) {
+          if (!line) continue;
+          const anns = annotationsByEndLine.get(line.idx);
+          if (!anns) continue;
+          for (const a of anns) {
+            if (!seen.has(a.annotation.id)) {
+              seen.add(a.annotation.id);
+              result.push(a);
+            }
           }
         }
-      }
-      return result;
-    });
+        return result;
+      }),
+    [splitRows, annotationsByEndLine],
+  );
 
-    function renderColumn(side: "left" | "right") {
-      return (
-        <div
-          data-split-side={side}
-          ref={side === "left" ? leftColRef : rightColRef}
-          {...editableHostProps}
-          className={hostClassName}
-        >
-          <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
-            <tbody>
-              {splitRows.map((row, i) => {
-                // Hidden by a fold — drop from BOTH columns (same index) so the
-                // two panes stay aligned.
-                if (splitFold.hidden.has(i)) return null;
-                if (row.type === "separator") {
-                  return (
-                    <tr key={`s${side}${i}`}>
-                      {renderSeparatorTd(3, row.hiddenCount, sepIndices[i])}
-                    </tr>
-                  );
-                }
-
-                const line = side === "left" ? row.left : row.right;
-                const comments = splitRowComments[i];
-                // The chevron shows once per fold-start row, on the column that
-                // holds the representative line (right unless it's a remove).
-                const fold = splitFold.startByRow.get(i);
-                const repSide = row.right ? "right" : "left";
-                const foldKey = fold && side === repSide ? fold.key : null;
-
+  function renderColumn(side: "left" | "right") {
+    return (
+      <div
+        data-split-side={side}
+        ref={side === "left" ? leftColRef : rightColRef}
+        {...editableHostProps}
+        className={hostClassName}
+      >
+        <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
+          <tbody>
+            {splitRows.map((row, i) => {
+              // Hidden by a fold — drop from BOTH columns (same index) so the
+              // two panes stay aligned.
+              if (splitFold.hidden.has(i)) return null;
+              if (row.type === "separator") {
                 return (
-                  <Fragment key={`${side}${i}`}>
-                    {renderSplitRow(line, side, `r${side}${i}`, foldKey)}
-                    {comments.map(({ annotation: ann, index: idx }) => (
-                      <tr key={`cmt-${side}-${ann.id}`}>
-                        <td
-                          colSpan={3}
-                          className="border-y border-[var(--border)] p-0"
-                        >
-                          <div
-                            className="overflow-hidden"
-                            style={{ height: INLINE_COMMENT_ROW_HEIGHT_PX }}
-                          >
-                            {side === "right"
-                              ? renderInlineComment(ann, idx)
-                              : null}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </Fragment>
+                  <tr key={`s${side}${i}`}>
+                    {renderSeparatorTd(3, row.hiddenCount, splitSepIndices[i])}
+                  </tr>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
+              }
 
+              const line = side === "left" ? row.left : row.right;
+              const comments = splitRowComments[i];
+              // The chevron shows once per fold-start row, on the column that
+              // holds the representative line (right unless it's a remove).
+              const fold = splitFold.startByRow.get(i);
+              const repSide = row.right ? "right" : "left";
+              const foldKey = fold && side === repSide ? fold.key : null;
+
+              return (
+                <Fragment key={`${side}${i}`}>
+                  {renderSplitRow(line, side, `r${side}${i}`, foldKey)}
+                  {comments.map(({ annotation: ann, index: idx }) => (
+                    <tr key={`cmt-${side}-${ann.id}`}>
+                      <td
+                        colSpan={3}
+                        className="border-y border-[var(--border)] p-0"
+                      >
+                        <div
+                          className="overflow-hidden"
+                          style={{ height: INLINE_COMMENT_ROW_HEIGHT_PX }}
+                        >
+                          {side === "right"
+                            ? renderInlineComment(ann, idx)
+                            : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  /* ── Memoized row trees ─────────────────────────────────── */
+  //
+  // The row trees are the expensive part of a render: thousands of cells on a
+  // large file, of which only the LineContent leaves are memoized. Freezing
+  // the rendered trees behind useMemo means interaction state that lives
+  // OUTSIDE them — the imperative hover reveals, the blame chip (portaled),
+  // popovers, the merge overlay, the find widget — re-renders this component
+  // without rebuilding a single row. Everything the rows read is a dependency;
+  // stable callbacks (blameRowClick, toggle*, handle*Ann, LineContent
+  // handlers) and editableHostProps (constant contents, fresh identity each
+  // render) are deliberately not.
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const unifiedBody = useMemo(
+    () => (effectiveViewMode === "unified" ? renderUnified() : null),
+    [
+      effectiveViewMode,
+      expandedFiltered,
+      unifiedFold,
+      isFirstVersion,
+      annotationsByEndLine,
+      collapsedFolds,
+      oldLineTokens,
+      newLineTokens,
+      annotations,
+      pendingFallback,
+      findByLine,
+      find.current,
+      hoveredAnnId,
+      settings.fontSize,
+      settings.lineWrap,
+      numColW,
+      hostClassName,
+      blameEnabled,
+      dLines,
+    ],
+  );
+  const leftColumn = useMemo(
+    () => (effectiveViewMode === "split" ? renderColumn("left") : null),
+    [
+      effectiveViewMode,
+      splitRows,
+      splitFold,
+      splitSepIndices,
+      splitRowComments,
+      collapsedFolds,
+      oldLineTokens,
+      newLineTokens,
+      annotations,
+      pendingFallback,
+      findByLine,
+      find.current,
+      hoveredAnnId,
+      settings.fontSize,
+      settings.lineWrap,
+      numColW,
+      hostClassName,
+      blameEnabled,
+      dLines,
+    ],
+  );
+  const rightColumn = useMemo(
+    () => (effectiveViewMode === "split" ? renderColumn("right") : null),
+    [
+      effectiveViewMode,
+      splitRows,
+      splitFold,
+      splitSepIndices,
+      splitRowComments,
+      collapsedFolds,
+      oldLineTokens,
+      newLineTokens,
+      annotations,
+      pendingFallback,
+      findByLine,
+      find.current,
+      hoveredAnnId,
+      settings.fontSize,
+      settings.lineWrap,
+      numColW,
+      hostClassName,
+      blameEnabled,
+      dLines,
+    ],
+  );
+  /* eslint-enable react-hooks/exhaustive-deps */
+
+  // Portal host for the blame chip: the selected row's content cell. Re-query
+  // whenever the selection changes or a rebuilt row tree may have replaced the
+  // node. Same-element results bail out of the state update.
+  const [blameChipHost, setBlameChipHost] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!blameEnabled || !blameSel) {
+      setBlameChipHost(null);
+      return;
+    }
+    const selector =
+      effectiveViewMode === "split"
+        ? `[data-split-side="${blameSel.side}"] td[data-dline="${blameSel.idx}"]`
+        : `td[data-dline="${blameSel.idx}"]`;
+    setBlameChipHost(
+      contentRef.current?.querySelector<HTMLElement>(selector) ?? null,
+    );
+  }, [
+    blameEnabled,
+    blameSel,
+    effectiveViewMode,
+    unifiedBody,
+    leftColumn,
+    rightColumn,
+  ]);
+
+  /** DOM Range for a diff anchor's [startOffset, endOffset) on its side. */
+  function rangeForAnchor(a: DiffAnchor): Range | null {
+    const root = contentRef.current;
+    if (!root) return null;
+    const scope =
+      effectiveViewMode === "split"
+        ? root.querySelector(`[data-split-side="${a.side}"]`)
+        : root;
+    if (!scope) return null;
+    const startLine = dLines[getDiffLineForOffset(a.startOffset, dLines)];
+    const endLine =
+      dLines[
+        getDiffLineForOffset(Math.max(a.startOffset, a.endOffset - 1), dLines)
+      ];
+    if (!startLine || !endLine) return null;
+    const startCell = scope.querySelector(`td[data-dline="${startLine.idx}"]`);
+    const endCell = scope.querySelector(`td[data-dline="${endLine.idx}"]`);
+    if (!startCell || !endCell) return null;
+    const s = textBoundaryAt(startCell, a.startOffset - startLine.flatOffset);
+    const e = textBoundaryAt(endCell, a.endOffset - endLine.flatOffset);
+    if (!s || !e) return null;
+    const range = document.createRange();
+    try {
+      range.setStart(s.node, s.offset);
+      range.setEnd(e.node, e.offset);
+    } catch {
+      return null;
+    }
+    return range;
+  }
+
+  // Paint the pending-comment highlight (see pendingHl at module scope).
+  // Re-anchored after any row-tree rebuild, which replaces the text nodes the
+  // Range points into.
+  const pendingRangeRef = useRef<Range | null>(null);
+  useLayoutEffect(() => {
+    if (!pendingHl) return;
+    if (pendingRangeRef.current) {
+      pendingHl.delete(pendingRangeRef.current);
+      pendingRangeRef.current = null;
+    }
+    if (!pending) return;
+    const range = rangeForAnchor(pending.data);
+    if (range) {
+      pendingHl.add(range);
+      pendingRangeRef.current = range;
+    }
+    // rangeForAnchor reads only dep-covered values (effectiveViewMode, dLines)
+    // plus refs, so the closure itself isn't a meaningful dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pending,
+    effectiveViewMode,
+    dLines,
+    unifiedBody,
+    leftColumn,
+    rightColumn,
+  ]);
+  useEffect(
+    () => () => {
+      if (pendingHl && pendingRangeRef.current) {
+        pendingHl.delete(pendingRangeRef.current);
+      }
+    },
+    [],
+  );
+
+  function renderSplit() {
     return (
       <div className="flex">
         {/* rounded-l/r-lg matches the container's rounded-lg so the inset focus
             ring follows the curve at the outer corners (it stays square at the
             inner divider, which is correct). */}
         <div className="min-w-0 flex-1 rounded-l-lg border-r border-[var(--border)] focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
-          {renderColumn("left")}
+          {leftColumn}
         </div>
         {showGutter && renderGutter()}
         <div className="min-w-0 flex-1 rounded-r-lg focus-within:ring-1 focus-within:ring-inset focus-within:ring-[var(--accent)]">
-          {renderColumn("right")}
+          {rightColumn}
         </div>
       </div>
     );
@@ -1836,18 +2106,25 @@ export function InteractiveDiff({
         onMouseMove={
           hunkActionsEnabled
             ? (e) => {
+                // While a button is held the pointer is dragging a selection, not
+                // hovering — recomputing the hunk hover here flips state as the
+                // drag crosses hunk boundaries, re-rendering the whole (un-
+                // virtualized) diff mid-gesture and making selection lag. Hover
+                // only needs to track a free-moving pointer, so bail when buttons
+                // are down; the next plain move after mouseup restores it.
+                if (e.buttons !== 0) return;
                 // `undefined` → cursor is on the box itself; keep it revealed
                 // (moving onto it must NOT clear the hover, or it would blink).
                 if (effectiveViewMode === "split") {
                   const h = hunkHoverFromEvent(e);
-                  if (h !== undefined) setHoveredHunkIdx(h);
+                  if (h !== undefined) applyHunkHover(h);
                   return;
                 }
                 let el: HTMLElement | null = e.target as HTMLElement | null;
                 while (el && !el.hasAttribute("data-dline")) {
                   if (el.hasAttribute("data-hunk-control")) return;
                   if (el === contentRef.current) {
-                    setHoverChangeIdx(null);
+                    applyChangeHover(null);
                     return;
                   }
                   el = el.parentElement;
@@ -1855,15 +2132,15 @@ export function InteractiveDiff({
                 if (!el) return;
                 const lineIdx = parseInt(el.getAttribute("data-dline")!);
                 const changeIdx = lineToChange.get(lineIdx);
-                setHoverChangeIdx(changeIdx ?? null);
+                applyChangeHover(changeIdx ?? null);
               }
             : undefined
         }
         onMouseLeave={
           hunkActionsEnabled
             ? () => {
-                setHoverChangeIdx(null);
-                setHoveredHunkIdx(null);
+                applyChangeHover(null);
+                applyHunkHover(null);
               }
             : undefined
         }
@@ -1876,7 +2153,8 @@ export function InteractiveDiff({
             : "relative select-text overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] [cursor:text]"
         }
       >
-        {effectiveViewMode === "unified" ? renderUnified() : renderSplit()}
+        {effectiveViewMode === "unified" ? unifiedBody : renderSplit()}
+        {blameChipHost && createPortal(renderBlameChipContent(), blameChipHost)}
         {mergeEnabled && activeChangeIdx !== null && overlayPos && (
           <MergeOverlay
             top={overlayPos.top}
@@ -1890,52 +2168,57 @@ export function InteractiveDiff({
             onApplyRightToLeft={() => applyMerge("rightToLeft")}
           />
         )}
-        {hunkActionsEnabled &&
-          hunkActions &&
-          effectiveViewMode !== "split" &&
-          hoverChangeIdx !== null &&
-          hunkCtrlTop !== null &&
-          changes[hoverChangeIdx] && (
-            <div
-              data-hunk-control
-              contentEditable={false}
-              className="absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 select-none items-center gap-1"
-              style={{ top: Math.max(10, hunkCtrlTop) }}
-            >
-              {hunkActions.isStaged ? (
+        {hunkActionsEnabled && hunkActions && effectiveViewMode !== "split" && (
+          // Always mounted, display:none until applyChangeHover positions and
+          // reveals it. Buttons resolve the hovered change through the ref at
+          // click time — the hover never passes through React state.
+          <div
+            ref={unifiedCtrlRef}
+            data-hunk-control
+            contentEditable={false}
+            className="absolute left-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 select-none items-center gap-1"
+            style={{ display: "none", top: 0 }}
+          >
+            {hunkActions.isStaged ? (
+              <button
+                onClick={() => {
+                  const i = hoverChangeRef.current;
+                  const c = i == null ? undefined : changes[i];
+                  if (c) hunkActions.onUnstage(changeRange(c));
+                }}
+                title="Unstage this hunk"
+                className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-[var(--bg-surface-hover)]"
+              >
+                − Unstage hunk
+              </button>
+            ) : (
+              <>
                 <button
-                  onClick={() =>
-                    hunkActions.onUnstage(changeRange(changes[hoverChangeIdx]))
-                  }
-                  title="Unstage this hunk"
-                  className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-[var(--bg-surface-hover)]"
+                  onClick={() => {
+                    const i = hoverChangeRef.current;
+                    const c = i == null ? undefined : changes[i];
+                    if (c) hunkActions.onRevert(changeRange(c));
+                  }}
+                  title="Revert this hunk"
+                  className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--removed-text)]"
                 >
-                  − Unstage hunk
+                  ↺ Revert
                 </button>
-              ) : (
-                <>
-                  <button
-                    onClick={() =>
-                      hunkActions.onRevert(changeRange(changes[hoverChangeIdx]))
-                    }
-                    title="Revert this hunk"
-                    className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--removed-text)]"
-                  >
-                    ↺ Revert
-                  </button>
-                  <button
-                    onClick={() =>
-                      hunkActions.onStage(changeRange(changes[hoverChangeIdx]))
-                    }
-                    title="Stage this hunk"
-                    className="rounded bg-[var(--accent)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--bg)] shadow-sm transition-opacity hover:opacity-90"
-                  >
-                    + Stage hunk
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+                <button
+                  onClick={() => {
+                    const i = hoverChangeRef.current;
+                    const c = i == null ? undefined : changes[i];
+                    if (c) hunkActions.onStage(changeRange(c));
+                  }}
+                  title="Stage this hunk"
+                  className="rounded bg-[var(--accent)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-medium text-[var(--bg)] shadow-sm transition-opacity hover:opacity-90"
+                >
+                  + Stage hunk
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Popovers are position:fixed with viewport coordinates, so they must
