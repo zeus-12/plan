@@ -174,6 +174,11 @@ export const LineContent = memo(function LineContent({
     const classNames: string[] = [];
     if (synTok?.className) classNames.push(synTok.className);
     if (synTok?.color) classNames.push("shiki-tok");
+    // Characters that actually changed sit on a tinted pill. The tint lightens
+    // the backdrop, which guts the contrast of already-muted tokens (comments
+    // are the worst case) — so lift their colour to keep them legible. See
+    // `.diff-word` in highlight.css.
+    if (wordSeg?.changed) classNames.push("diff-word");
     // Round only the discrete word-diff pills. A range highlight (selection,
     // annotation, find) spans many syntax-token segments, so rounding each one
     // scallops the highlight into separate boxes with gaps — it must read as a

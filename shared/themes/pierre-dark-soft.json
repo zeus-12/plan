@@ -24,11 +24,11 @@
     "diff-add-bg": "rgba(96, 209, 153, 0.12)",
     "diff-add-gutter": "rgba(96, 209, 153, 0.22)",
     "diff-add-bar": "#60d199",
-    "diff-add-word": "rgba(96, 209, 153, 0.22)",
+    "diff-add-word": "color-mix(in srgb, var(--diff-add-bar) 26%, var(--bg))",
     "diff-remove-bg": "rgba(255, 145, 168, 0.12)",
     "diff-remove-gutter": "rgba(255, 145, 168, 0.22)",
     "diff-remove-bar": "#ff91a8",
-    "diff-remove-word": "rgba(255, 145, 168, 0.22)"
+    "diff-remove-word": "color-mix(in srgb, var(--diff-remove-bar) 26%, var(--bg))"
   },
   "terminal": {
     "black": "#4b4b4b",

@@ -17,6 +17,23 @@
   color: var(--shiki-color, currentColor);
 }
 
+/*
+ * Word-diff pills: the changed characters within a changed line.
+ *
+ * The pill is a translucent tint of the line's diff colour, so it LIGHTENS the
+ * backdrop on a dark theme. Muted tokens — comments most of all — then sit at
+ * roughly 3:1 against it and turn to mush. Lifting the token's own colour part
+ * way toward the body text keeps its hue (so syntax still reads) while pulling
+ * the dim end of the palette up to a legible contrast. Bright tokens are already
+ * near `--text`'s luminance, so they barely move.
+ *
+ * Declared after `.shiki-tok` deliberately: same specificity, so source order
+ * decides and this wins for a changed word.
+ */
+.diff-word {
+  color: color-mix(in srgb, var(--shiki-color, var(--text)) 65%, var(--text));
+}
+
 /* Theme-aware syntax-highlight token colors. Mirrors highlight.js class names. */
 
 :root {

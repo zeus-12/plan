@@ -1728,16 +1728,20 @@ export function InteractiveDiff({
     );
   }
 
-  // The center gutter: a slim, full-height column holding one grey line + one
+  // The center gutter: a narrow full-height column holding one grey line + one
   // control box per git hunk. Line and box are absolutely positioned children,
   // so they scroll with the content for free; their vertical positions are set
   // imperatively by the measure/place effect above (`opacity-0` until placed).
+  //
+  // Sized to hold the stage/revert control box (~26px: 20px buttons + padding +
+  // border) without it overhanging the code, while still trimming the divider
+  // from the old w-8 (32px). w-7 (28px) is the tightest that fits the box.
   function renderGutter() {
     return (
       <div
         ref={gutterRef}
         contentEditable={false}
-        className="relative w-8 shrink-0 select-none self-stretch border-r border-[var(--border)] bg-[var(--bg)]"
+        className="relative w-7 shrink-0 select-none self-stretch border-r border-[var(--border)] bg-[var(--bg)]"
       >
         {hunkBlocks.map((block) => (
           <Fragment key={block.hunkIdx}>
