@@ -703,6 +703,8 @@ function TranscriptImage({ path }: { path: string }) {
       <img
         src={src}
         alt="Attached image"
+        loading="lazy"
+        decoding="async"
         onError={() => setFailed(true)}
         onClick={() => setPreview(true)}
         className="my-1 max-h-[340px] max-w-full cursor-zoom-in rounded-md border border-[var(--border)] object-contain"
@@ -1933,15 +1935,16 @@ export const MessageList = memo(function MessageList({
             )}
           </div>
         </div>
-        {/* Soft blur-fade where messages scroll up under the composer — the
-          bottom rows dissolve into the background instead of cutting off hard.
-          pointer-events-none so it never blocks scrolling/selection. */}
+        {/* Blur-fade where messages scroll up under the composer. Deliberately
+          faint — a thin strip with a light blur that the mask ramps out to
+          nothing, so the last line dissolves instead of sitting under a fog
+          band. pointer-events-none so it never blocks scrolling/selection. */}
         <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 backdrop-blur-[2px]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-4 backdrop-blur-[1px]"
           style={{
-            background: "linear-gradient(to top, var(--bg) 20%, transparent)",
-            WebkitMaskImage: "linear-gradient(to top, black 40%, transparent)",
-            maskImage: "linear-gradient(to top, black 40%, transparent)",
+            background: "linear-gradient(to top, var(--bg), transparent)",
+            WebkitMaskImage: "linear-gradient(to top, black, transparent)",
+            maskImage: "linear-gradient(to top, black, transparent)",
           }}
         />
         {showScrollDown && (

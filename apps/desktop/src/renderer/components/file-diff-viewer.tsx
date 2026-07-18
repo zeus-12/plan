@@ -606,6 +606,8 @@ function ImagePane({
         <img
           src={imageUrl(path, cacheKey)}
           alt={label}
+          loading="lazy"
+          decoding="async"
           onError={() => setFailed(true)}
           className="max-h-[70vh] max-w-full rounded-md border border-[var(--border)] object-contain"
           style={{

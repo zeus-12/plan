@@ -1918,6 +1918,7 @@ function FileViewerImpl({
             <img
               src={imageUrl}
               alt={basename(path)}
+              decoding="async"
               onClick={() => setLightbox(true)}
               onError={() => setImgBroken(true)}
               className="max-h-full max-w-full cursor-zoom-in rounded-md border border-[var(--border)] object-contain"
