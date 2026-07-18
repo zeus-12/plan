@@ -34,6 +34,10 @@ export function useTerminalRegistry(
   setActiveShellId: Dispatch<SetStateAction<string | null>>;
   /** Mount a pty's pane (no-op if already opened). */
   ensureOpened: (tid: string) => void;
+  /** Follow a live pty that migrated to a new session id: re-key it in main and
+   *  in the opened set, in place. Resolves false if there was no live pty under
+   *  `oldTid` (nothing to follow) — the caller must not repoint the UI then. */
+  rekeyChatTerminal: (oldTid: string, newTid: string) => Promise<boolean>;
   /** A TerminalPanel finished attaching — flush any queued paste for it. */
   handleTerminalReady: (tid: string) => void;
   /** Send text (+ optional image paths) to a pty, queuing until it's ready. */
@@ -77,6 +81,24 @@ export function useTerminalRegistry(
   const ensureOpened = useCallback(
     (tid: string) => {
       setOpenedIds((ids) => (ids.includes(tid) ? ids : [...ids, tid]));
+    },
+    [setOpenedIds],
+  );
+
+  const rekeyChatTerminal = useCallback(
+    async (oldTid: string, newTid: string): Promise<boolean> => {
+      // Main owns the pty table — rename there first (same process, same
+      // scrollback). Only mirror the renderer's view once main confirms, so we
+      // never point the UI at a pty that didn't actually move.
+      const ok = await window.electronAPI.terminalRekey(oldTid, newTid);
+      if (!ok) return false;
+      readyIds.current.delete(oldTid); // the new pane re-signals ready on attach
+      setOpenedIds((ids) =>
+        ids.includes(oldTid)
+          ? ids.map((id) => (id === oldTid ? newTid : id))
+          : ids,
+      );
+      return true;
     },
     [setOpenedIds],
   );
@@ -185,6 +207,7 @@ export function useTerminalRegistry(
     activeShellId,
     setActiveShellId,
     ensureOpened,
+    rekeyChatTerminal,
     handleTerminalReady,
     sendToTerminal,
     shellNumber,

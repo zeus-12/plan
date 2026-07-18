@@ -42,6 +42,11 @@ export function useChatSession(opts: {
   /** Surface THIS workspace's chat terminal (tab + dock) — used by the
    *  stuck-message toast and the selection-menu auto-reveal. */
   revealChatTerminal: (sid: string) => void;
+  /** The composer just submitted `/branch` for `fromSid`: its `claude` is about
+   *  to fork into a new session id. `rootUuid` fingerprints the conversation
+   *  (the branch copies it) so the caller can confirm which new transcript is
+   *  the fork and follow the pty to it. Null root = can't fingerprint. */
+  onBranchCommand?: (fromSid: string, rootUuid: string | null) => void;
 }) {
   const {
     encoded,
@@ -51,6 +56,7 @@ export function useChatSession(opts: {
     ensureOpened,
     sendToTerminal,
     revealChatTerminal,
+    onBranchCommand,
   } = opts;
   const chatPrefix = chatTerminalPrefix(encoded);
   const [globalAutoMode] = useAutoModeEnabled();
@@ -128,12 +134,33 @@ export function useChatSession(opts: {
       if (!selectedSessionId) return;
       const tid = chatTerminalId(encoded, selectedSessionId);
       if (!openedIds.includes(tid)) return;
+
+      // `/branch` forks this session's `claude` into a NEW session id in the
+      // same pty. Arm the follow BEFORE sending so the caller can rebind the tab
+      // to the fork when its transcript appears. A branch lands no user message
+      // in THIS transcript, so we must not arm the delivery watchdog (it would
+      // cry "stuck") — we return right after sending.
+      if (text.trim() === "/branch") {
+        const rootUuid =
+          sessionRef.current?.messages.find((m) => m.uuid)?.uuid ?? null;
+        onBranchCommand?.(selectedSessionId, rootUuid);
+        sendToTerminal(tid, text, imagePaths, true);
+        return;
+      }
+
       sendToTerminal(tid, text, imagePaths, true);
       // The transcript will confirm delivery; if it doesn't within 12s, the
       // watchdog says so (toast + notification) instead of leaving you lost.
       armSendWatchdog(selectedSessionId);
     },
-    [selectedSessionId, encoded, openedIds, sendToTerminal, armSendWatchdog],
+    [
+      selectedSessionId,
+      encoded,
+      openedIds,
+      sendToTerminal,
+      armSendWatchdog,
+      onBranchCommand,
+    ],
   );
 
   // Drive the chat terminal's TUI selectors (e.g. AskUserQuestion options)

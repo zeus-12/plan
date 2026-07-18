@@ -85,7 +85,11 @@ import {
   setCachedTranscripts,
 } from "../lib/session-cache";
 import { pushToast } from "../lib/toast-store";
-import { markNewSession, isNewSession } from "../lib/new-session-ids";
+import {
+  markNewSession,
+  isNewSession,
+  forgetNewSession,
+} from "../lib/new-session-ids";
 
 // Stable identity for the middle sidebar's ⌘E toggle shortcut (see the keyed
 // SidebarProvider below). A module constant so it isn't a fresh object each
@@ -599,6 +603,18 @@ function ProjectWorkspaceImpl({
   const chatSessionIdsRef = useRef(chatSessionIds);
   chatSessionIdsRef.current = chatSessionIds;
 
+  // `/branch` follow. When the composer sends `/branch`, its `claude` forks into
+  // a new session id in the SAME pty — leaving the tab bound to a session the
+  // process left (the mismatch we're fixing). We record the branching session +
+  // a fingerprint of its conversation here; when the fork's transcript appears,
+  // followBranch (defined below, reached via a ref so the rarely-resubscribed
+  // watcher always calls the latest) rebinds the tab and the pty to the fork.
+  const pendingBranchRef = useRef<{
+    fromSid: string;
+    rootUuid: string | null;
+  } | null>(null);
+  const followBranchRef = useRef<(candidateSids: string[]) => void>(() => {});
+
   const refreshSessions = useCallback(async () => {
     try {
       // List metadata comes straight from main's mtime cache — never fetch
@@ -785,8 +801,11 @@ function ProjectWorkspaceImpl({
     let sawWorktree = false;
     let sawSession = false;
     const changedSids = new Set<string>();
+    // Freshly-appeared transcripts this tick — candidates for a `/branch` follow.
+    const newSids = new Set<string>();
     const off = window.electronAPI.onWatcherEvent((e) => {
       if (e.encoded !== project.encoded) return;
+      if (e.kind === "new-session" && e.sessionId) newSids.add(e.sessionId);
       // A worktree change (file edit / git op on disk) bumps the content
       // revision so open diff/file/image panes re-fetch — refreshDiff below
       // covers the sidebar status, this covers the mounted content panes.
@@ -809,6 +828,12 @@ function ProjectWorkspaceImpl({
         sawSession = false;
         for (const sid of changedSids) void refreshTranscript(sid);
         changedSids.clear();
+        // If a `/branch` is armed, see whether one of the new transcripts is its
+        // fork and, if so, follow the pty to it.
+        if (newSids.size > 0 && pendingBranchRef.current) {
+          followBranchRef.current([...newSids]);
+        }
+        newSids.clear();
       }, 250);
     });
     return () => {
@@ -1155,6 +1180,7 @@ function ProjectWorkspaceImpl({
     activeShellId,
     setActiveShellId,
     ensureOpened,
+    rekeyChatTerminal,
     handleTerminalReady,
     sendToTerminal,
     shellNumber,
@@ -1192,6 +1218,60 @@ function ProjectWorkspaceImpl({
     [openChatTab, setActiveShellId, setTerminalOpen],
   );
 
+  // Record a `/branch` submit so the watcher can follow the fork. Stable so
+  // useChatSession's send callback doesn't churn.
+  const handleBranchCommand = useCallback(
+    (fromSid: string, rootUuid: string | null) => {
+      pendingBranchRef.current = { fromSid, rootUuid };
+    },
+    [],
+  );
+
+  // Follow a `/branch`: when one of the tick's new transcripts is the fork of
+  // the armed session, re-key its live pty and move the tab onto it in place.
+  const followBranch = useCallback(
+    async (candidateSids: string[]) => {
+      const pending = pendingBranchRef.current;
+      // No fingerprint → can't confirm the fork; don't guess (a wrong rebind is
+      // worse than none). The armed marker just lingers until a real branch.
+      if (!pending || !pending.rootUuid) return;
+      for (const b of candidateSids) {
+        if (b === pending.fromSid) continue;
+        // A branch copies the parent's history, so the fork shares its root
+        // message uuid. That equality is the reliable confirm that THIS new
+        // transcript is the fork — not timing or "newest file" guesswork.
+        const parsed = await fetchTranscript(project.encoded, b);
+        const root = parsed?.messages.find((m) => m.uuid)?.uuid ?? null;
+        if (!root || root !== pending.rootUuid) continue;
+        // The same live pty is on B now: re-key it (main + opened set), then
+        // swap the tab A→B in place (keeps position + focus). The old session
+        // stays a frozen history row — resuming it later spawns its own pty.
+        const ok = await rekeyChatTerminal(
+          `${chatPrefix}${pending.fromSid}`,
+          `${chatPrefix}${b}`,
+        );
+        if (!ok) return; // no live pty actually moved — leave B as a new session
+        // The parent (A) was branched, so its transcript exists on disk AND its
+        // pty just moved to B — it now has no live pty of its own. If A was a
+        // brand-new chat it's still flagged "new" (→ `--session-id A`); clear
+        // that so reopening it RESUMES instead of trying to re-create an id
+        // that's already on disk ("Session ID already in use"). B is claude's
+        // own id, never app-marked-new, so it already resumes correctly.
+        forgetNewSession(pending.fromSid);
+        replaceProjectTab(
+          project.encoded,
+          chatTabId(pending.fromSid),
+          makeChatTab(b),
+        );
+        void refreshTranscript(b);
+        pendingBranchRef.current = null;
+        return;
+      }
+    },
+    [project.encoded, chatPrefix, rekeyChatTerminal, refreshTranscript],
+  );
+  followBranchRef.current = followBranch;
+
   // The selected chat's lifecycle: terminal binding (the dock ⌘J mirrors
   // activeTerminalId — never a plain shell), sending + the stuck-message
   // watchdog, and the observed activity signals. See useChatSession.
@@ -1214,6 +1294,7 @@ function ProjectWorkspaceImpl({
     ensureOpened,
     sendToTerminal,
     revealChatTerminal,
+    onBranchCommand: handleBranchCommand,
   });
   const activeTerminalIdRef = useRef(activeTerminalId);
   activeTerminalIdRef.current = activeTerminalId;

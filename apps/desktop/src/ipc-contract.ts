@@ -318,6 +318,18 @@ export interface IpcInvokeContract {
   /** Ids of every live pty parked on a selection/approval menu (agent live). */
   "terminal:selectionIds": { args: []; result: string[] };
   "terminal:list": { args: []; result: TerminalInfo[] };
+  /**
+   * Re-key a live pty from `oldId` to `newId` in place (same process, same
+   * scrollback). Used when a chat's `claude` migrates to a different session id
+   * (e.g. `/branch` forks A into B): the pty that was `chat:enc:A` is really
+   * driving B now, so we rename it to `chat:enc:B` instead of leaving the UI
+   * bound to a session the process left. Returns false if no pty exists under
+   * `oldId` or one already exists under `newId`.
+   */
+  "terminal:rekey": {
+    args: [oldId: string, newId: string];
+    result: boolean;
+  };
   /** Write a pasted image to a temp file; null when the write fails. */
   "terminal:saveTempImage": {
     args: [data: Uint8Array, ext: string];
@@ -429,6 +441,7 @@ export const API_INVOKE = {
   terminalBusyIds: "terminal:busyIds",
   terminalSelectionIds: "terminal:selectionIds",
   terminalList: "terminal:list",
+  terminalRekey: "terminal:rekey",
   saveTempImage: "terminal:saveTempImage",
   fileExists: "terminal:fileExists",
 

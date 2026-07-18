@@ -25,6 +25,7 @@ import {
   searchSkills,
   type FileEntry,
 } from "./mention-data";
+import { searchBuiltinCommands, type BuiltinCommand } from "./builtin-commands";
 import type { SkillInfo } from "../../shared-types";
 
 class FileOption extends MenuOption {
@@ -38,6 +39,15 @@ class SkillOption extends MenuOption {
     super(`skill:${skill.name}`);
   }
 }
+
+class CommandOption extends MenuOption {
+  constructor(public command: BuiltinCommand) {
+    super(`command:${command.name}`);
+  }
+}
+
+/** The `/` menu mixes native commands (listed first) with on-disk skills. */
+type SlashOption = CommandOption | SkillOption;
 
 const MENU_MAX_H = 280;
 const MENU_GAP = 6;
@@ -309,7 +319,7 @@ export function SkillMentionPlugin({
 }) {
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
-  const [options, setOptions] = useState<SkillOption[]>([]);
+  const [options, setOptions] = useState<SlashOption[]>([]);
 
   useEffect(() => {
     if (query === null) {
@@ -317,9 +327,17 @@ export function SkillMentionPlugin({
       return;
     }
     let alive = true;
+    // Native commands (e.g. `/branch`) rank above skills so they're one keystroke
+    // away, then the fuzzy skill matches fill the rest.
+    const commands = searchBuiltinCommands(query).map(
+      (c) => new CommandOption(c),
+    );
     void loadSkillIndex(projectEncoded).then((idx) => {
       if (alive)
-        setOptions(searchSkills(idx, query).map((s) => new SkillOption(s)));
+        setOptions([
+          ...commands,
+          ...searchSkills(idx, query).map((s) => new SkillOption(s)),
+        ]);
     });
     return () => {
       alive = false;
@@ -338,12 +356,17 @@ export function SkillMentionPlugin({
 
   const onSelectOption = useCallback(
     (
-      option: SkillOption,
+      option: SlashOption,
       nodeToReplace: TextNode | null,
       closeMenu: () => void,
     ) => {
       editor.update(() => {
-        const ref = $createReferenceNode("skill", option.skill.name);
+        // Both commands and skills serialize as `/name` (kind "skill" chip).
+        const name =
+          option instanceof CommandOption
+            ? option.command.name
+            : option.skill.name;
+        const ref = $createReferenceNode("skill", name);
         if (nodeToReplace) nodeToReplace.replace(ref);
         const space = $createTextNode(" ");
         ref.insertAfter(space);
@@ -355,7 +378,7 @@ export function SkillMentionPlugin({
   );
 
   return (
-    <LexicalTypeaheadMenuPlugin<SkillOption>
+    <LexicalTypeaheadMenuPlugin<SlashOption>
       onQueryChange={setQuery}
       onSelectOption={onSelectOption}
       onOpen={menuOpened}
@@ -380,14 +403,24 @@ export function SkillMentionPlugin({
                     /
                   </span>
                 }
-                title={opt.skill.name}
-                subtitle={opt.skill.description || undefined}
+                title={
+                  opt instanceof CommandOption
+                    ? opt.command.name
+                    : opt.skill.name
+                }
+                subtitle={
+                  opt instanceof CommandOption
+                    ? opt.command.description
+                    : opt.skill.description || undefined
+                }
                 badge={
-                  opt.skill.source === "project"
-                    ? "proj"
-                    : opt.skill.source === "plugin"
-                      ? "plug"
-                      : "user"
+                  opt instanceof CommandOption
+                    ? "cmd"
+                    : opt.skill.source === "project"
+                      ? "proj"
+                      : opt.skill.source === "plugin"
+                        ? "plug"
+                        : "user"
                 }
               />
             ))}

@@ -12,6 +12,10 @@ import type {
 } from "../shared-types";
 
 interface Session {
+  /** The pty's CURRENT terminal id — the key it's stored under in `sessions`.
+   *  Lives on the session (not just captured in closures) so a rekey can
+   *  re-tag the id every emit path reports under (data/exit/activity). */
+  id: string;
   pty: IPty;
   cwd: string;
   /** Output coalescing: TUIs emit many tiny chunks (spinners redraw constantly);
@@ -125,6 +129,7 @@ export async function openTerminal(
       scrollback: 200,
     });
     const session: Session = {
+      id,
       pty,
       cwd,
       pendingOut: "",
@@ -137,27 +142,27 @@ export async function openTerminal(
     };
     pty.onData((data) => {
       session.screen.write(data);
-      scheduleActivityEval(id, session);
+      scheduleActivityEval(session);
       session.pendingOut += data;
       if (session.flushTimer) return;
       session.flushTimer = setTimeout(() => {
         session.flushTimer = null;
         const out = session.pendingOut;
         session.pendingOut = "";
-        if (out) onData?.({ id, data: out });
+        if (out) onData?.({ id: session.id, data: out });
       }, 16);
     });
     pty.onExit(() => {
       if (session.flushTimer) clearTimeout(session.flushTimer);
       if (session.evalTimer) clearTimeout(session.evalTimer);
-      if (session.pendingOut) onData?.({ id, data: session.pendingOut });
+      if (session.pendingOut) onData?.({ id: session.id, data: session.pendingOut });
       try {
         session.screen.dispose();
       } catch {
         /* already disposed */
       }
-      sessions.delete(id);
-      onExit?.(id);
+      sessions.delete(session.id);
+      onExit?.(session.id);
     });
     sessions.set(id, session);
     if (initialCommand) {
@@ -368,16 +373,19 @@ export function isTerminalBusy(id: string): boolean {
 // comfortably after the headless emulator has parsed the burst.
 const EVAL_DELAY_MS = 250;
 
-function scheduleActivityEval(id: string, session: Session) {
+function scheduleActivityEval(session: Session) {
   if (session.evalTimer) return;
   session.evalTimer = setTimeout(() => {
     session.evalTimer = null;
-    void evaluateActivity(id, session);
+    void evaluateActivity(session);
   }, EVAL_DELAY_MS);
 }
 
-async function evaluateActivity(id: string, session: Session) {
-  if (!sessions.has(id)) return; // exited while the timer was pending
+async function evaluateActivity(session: Session) {
+  // Read the id off the session each time — a rekey may have renamed it since
+  // this eval was scheduled, and every lookup/emit below must use the live key.
+  const id = session.id;
+  if (sessions.get(id) !== session) return; // exited/rekeyed while pending
   const gen = ++session.evalGen;
   const rows = readScreen(id);
   const busy = screenIsBusy(rows);
@@ -392,13 +400,34 @@ async function evaluateActivity(id: string, session: Session) {
       awaitingSelection = false;
     }
     // A newer evaluation started while we awaited ps — let it do the emitting.
-    if (session.evalGen !== gen || !sessions.has(id)) return;
+    if (session.evalGen !== gen || sessions.get(session.id) !== session) return;
   }
   const prev = session.lastActivity;
   if (prev.busy === busy && prev.awaitingSelection === awaitingSelection)
     return;
   session.lastActivity = { busy, awaitingSelection };
-  onActivity?.(id, session.lastActivity);
+  onActivity?.(session.id, session.lastActivity);
+}
+
+/**
+ * Re-key a live pty from `oldId` to `newId` in place — same process, same
+ * headless screen, same pending output. Used when a chat's `claude` migrates to
+ * a different session id (a `/branch` fork writes a new transcript from the same
+ * process): the pty registered as the old session is really driving the new one,
+ * so we rename it rather than leave it addressable under a session it left.
+ *
+ * Returns false when there's nothing to move (no pty under `oldId`) or the
+ * destination is taken (`newId` already live) — the caller must not proceed to
+ * repoint the UI in either case.
+ */
+export function rekeyTerminal(oldId: string, newId: string): boolean {
+  if (oldId === newId) return false;
+  const s = sessions.get(oldId);
+  if (!s || sessions.has(newId)) return false;
+  sessions.delete(oldId);
+  s.id = newId;
+  sessions.set(newId, s);
+  return true;
 }
 
 /** Ids of every live pty currently showing the "working" hint. */

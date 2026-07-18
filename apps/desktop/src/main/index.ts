@@ -99,6 +99,7 @@ import {
   killTerminalAndWait,
   killAllTerminals,
   listTerminals,
+  rekeyTerminal,
 } from "./terminal";
 import {
   applyPatch,
@@ -568,6 +569,7 @@ const invokeHandlers: {
   "terminal:busyIds": () => busyTerminalIds(),
   "terminal:selectionIds": () => awaitingSelectionIds(),
   "terminal:list": () => listTerminals(),
+  "terminal:rekey": (_e, oldId, newId) => rekeyTerminal(oldId, newId),
 
   // Write a pasted image to a temp file; the renderer types the path into the
   // terminal (Claude Code reads image paths as attachments).
