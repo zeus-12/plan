@@ -237,20 +237,11 @@ function FileDiffViewerImpl({
     addFileAnnotation,
     updateFileAnnotation,
     removeFileAnnotation,
-    clearFileAnnotations,
   } = useProjectAnnotations(encoded);
   // Fall back to a stable constant: a fresh `[]` per render would change the
   // annotations prop's identity every time and defeat InteractiveDiff's
   // memoized row trees.
   const annotations = annotationsByFile[file.path] ?? EMPTY_ANNOTATIONS;
-
-  // If the underlying old/new content changes, drop stale annotations for this
-  // file — their offsets won't match the new text.
-  const contentSig =
-    (contents?.oldText.length ?? 0) + ":" + (contents?.newText.length ?? 0);
-  useEffect(() => {
-    clearFileAnnotations(file.path);
-  }, [contentSig, file.path, clearFileAnnotations]);
 
   const detected = useMemo(() => {
     const fromPath = languageFromPath(file.path);
@@ -282,6 +273,27 @@ function FileDiffViewerImpl({
     formatActive && formatted ? formatted.oldText : (contents?.oldText ?? "");
   const viewNewText =
     formatActive && formatted ? formatted.newText : (contents?.newText ?? "");
+
+  // Drop an annotation only once we can prove its anchor is stale: the text at
+  // its offsets is no longer the text it was made against. Compared against
+  // both the raw and the formatted view of its side, so toggling "Format"
+  // never deletes a comment. Nothing is pruned while `contents` is null —
+  // that's "not loaded yet", not "empty file".
+  useEffect(() => {
+    if (!contents) return;
+    for (const a of annotations) {
+      const sources =
+        a.side === "left"
+          ? [contents.oldText, formatted?.oldText]
+          : [contents.newText, formatted?.newText];
+      const anchored = sources.some(
+        (text) =>
+          text !== undefined &&
+          text.slice(a.startOffset, a.endOffset) === a.selectedText,
+      );
+      if (!anchored) removeFileAnnotation(file.path, a.id);
+    }
+  }, [contents, formatted, annotations, file.path, removeFileAnnotation]);
 
   /* ── Inline blame (click a row → trailing annotation + hover card) ── */
 
