@@ -144,6 +144,19 @@ function parseMessageLine(obj: RawLine): ConversationMessage | null {
     obj.promptSource === "system" || obj.promptSource === "typed"
       ? obj.promptSource
       : undefined;
+  // A failed request is still written as an assistant turn; `isApiErrorMessage`
+  // is what distinguishes it from a real reply. Carry Claude's own `error` /
+  // `apiErrorStatus` through so consumers classify from these fields instead of
+  // pattern-matching the printed text.
+  const apiError =
+    obj.isApiErrorMessage === true
+      ? {
+          kind: typeof obj.error === "string" ? obj.error : "unknown",
+          ...(typeof obj.apiErrorStatus === "number"
+            ? { status: obj.apiErrorStatus }
+            : {}),
+        }
+      : undefined;
   return {
     uuid: typeof obj.uuid === "string" ? obj.uuid : "",
     parentUuid: typeof obj.parentUuid === "string" ? obj.parentUuid : null,
@@ -152,6 +165,7 @@ function parseMessageLine(obj: RawLine): ConversationMessage | null {
     parts,
     ...(obj.isMeta === true ? { isMeta: true } : {}),
     ...(promptSource ? { promptSource } : {}),
+    ...(apiError ? { apiError } : {}),
   };
 }
 

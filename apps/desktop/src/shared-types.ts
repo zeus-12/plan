@@ -29,6 +29,10 @@ export interface ConversationMessage {
   /** "typed" = real user input; "system" = harness-injected (loop tick,
    *  task-notification re-injection). Absent on assistant turns. */
   promptSource?: "typed" | "system";
+  /** Present when this assistant turn is one Claude wrote for a failed request
+   *  (`isApiErrorMessage`) rather than a real reply — its own classification of
+   *  what went wrong. See api-errors for which of these are worth retrying. */
+  apiError?: { kind: string; status?: number };
 }
 
 export interface SessionMeta {

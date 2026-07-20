@@ -64,6 +64,13 @@ interface Props {
    *  the move: the composer strips the text it appended and calls this so the
    *  parent can restore the comments it cleared. */
   onAddToChatUndo?: () => void;
+  /** This session's last turn died on a recoverable API error and nothing has
+   *  been sent since — offer the one-click nudge. */
+  canContinue?: boolean;
+  /** The nudge was clicked while the session was cold: its `claude` is booting
+   *  and the message goes the moment the agent is actually live. */
+  continueStarting?: boolean;
+  onContinue?: () => void;
 }
 
 interface Attachment {
@@ -156,6 +163,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     onBlocked,
     onFocusChange,
     onAddToChatUndo,
+    canContinue,
+    continueStarting,
+    onContinue,
   },
   ref,
 ) {
@@ -416,6 +426,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
             <Kbd keys={["⌘", "J"]} />
           </span>
         </button>
+      )}
+      {/* The last turn died mid-response. One click sends the nudge; nothing
+          happens until it's clicked, so this shows regardless of the
+          auto-continue setting (which only governs the silent retry). */}
+      {canContinue && !blocked && (
+        <div className="mx-auto mb-2 flex w-full max-w-[820px]">
+          <button
+            onClick={onContinue}
+            disabled={continueStarting}
+            title="Claude's last response was cut off — send “Please continue”"
+            className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] disabled:cursor-default disabled:opacity-55 disabled:hover:bg-[var(--bg-surface)]"
+          >
+            {continueStarting ? "Starting session…" : "Please continue"}
+          </button>
+        </div>
       )}
       {/* Centered to match the message column's max width (see message-list). */}
       <div

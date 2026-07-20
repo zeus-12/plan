@@ -53,6 +53,11 @@ import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
 import { useWorkingTree, repoDisplayName } from "../lib/use-working-tree";
 import { useChatSession } from "../lib/use-chat-session";
+import { retryableApiErrorAtEnd } from "../../api-errors";
+import {
+  CONTINUE_TEXT,
+  useAutoContinueInFlight,
+} from "../lib/auto-continue-watcher";
 import {
   getProjectTabs,
   openProjectTab,
@@ -1333,6 +1338,61 @@ function ProjectWorkspaceImpl({
   const activeTerminalIdRef = useRef(activeTerminalId);
   activeTerminalIdRef.current = activeTerminalId;
 
+  // ── Continue-after-error pill ────────────────────────────────────────
+  // The transcript's last turn is a recoverable API error, so the session is
+  // parked mid-response. The global watcher already nudges LIVE sessions it
+  // saw stall (when auto-continue is on); the pill covers everything else —
+  // a session that died while the app was closed, or one whose single
+  // auto-retry is already spent. Suppressed while a retry is actually in
+  // flight so we never show a button for work already happening.
+  const stalledOnApiError = useMemo(
+    () => retryableApiErrorAtEnd(session) != null,
+    [session],
+  );
+  const continueInFlight = useAutoContinueInFlight(activeTerminalId);
+  const [continueStarting, setContinueStarting] = useState(false);
+
+  // Clicked while the chat was cold: boot `claude` first. A TUI that isn't up
+  // yet drops the trailing Enter, so the send waits for the agent-live fact
+  // rather than firing hopefully at the pty (see the composer's `notReady`).
+  const handleContinue = useCallback(() => {
+    if (!selectedSessionId) return;
+    if (chatTerminalReady && agentLive) {
+      sendChat(CONTINUE_TEXT);
+      return;
+    }
+    connectChat();
+    setContinueStarting(true);
+  }, [
+    selectedSessionId,
+    chatTerminalReady,
+    agentLive,
+    sendChat,
+    connectChat,
+  ]);
+
+  useEffect(() => {
+    if (!continueStarting) return;
+    if (!chatTerminalReady || !agentLive || chatWorking || awaitingSelection)
+      return;
+    setContinueStarting(false);
+    sendChat(CONTINUE_TEXT);
+  }, [
+    continueStarting,
+    chatTerminalReady,
+    agentLive,
+    chatWorking,
+    awaitingSelection,
+    sendChat,
+  ]);
+
+  // A pending nudge belongs to the session it was clicked in, and is moot once
+  // the session is no longer stalled (it recovered, or something else was sent).
+  useEffect(() => setContinueStarting(false), [selectedSessionId]);
+  useEffect(() => {
+    if (!stalledOnApiError) setContinueStarting(false);
+  }, [stalledOnApiError]);
+
   // New chat: pre-pick the session uuid and start `claude --session-id` in a
   // background terminal — the composer is immediately live; the transcript
   // appears with the first exchange.
@@ -2058,6 +2118,11 @@ function ProjectWorkspaceImpl({
                       autoFocus={isNewSession(selectedSessionId)}
                       onFocusChange={setChatInputFocused}
                       onAddToChatUndo={handleUndoAddToChat}
+                      canContinue={
+                        stalledOnApiError && !chatWorking && !continueInFlight
+                      }
+                      continueStarting={continueStarting}
+                      onContinue={handleContinue}
                     />
                   )}
                 </div>

@@ -15,6 +15,7 @@ import {
 } from "../lib/notification-settings";
 import { playSound } from "../lib/notification-sounds";
 import { useAutoModeEnabled } from "../lib/auto-mode-settings";
+import { useAutoContinueEnabled } from "../lib/auto-continue-settings";
 import {
   PROSE_BRIGHTNESS,
   PROSE_FONTS,
@@ -39,6 +40,7 @@ interface Props {
 export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [settings, update] = useNotificationSettings();
   const [autoMode, setAutoMode] = useAutoModeEnabled();
+  const [autoContinue, setAutoContinue] = useAutoContinueEnabled();
   const [prose, setProse] = useTranscriptPrefs();
 
   useEffect(() => {
@@ -198,6 +200,20 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                 </span>
               </div>
               <Switch checked={autoMode} onCheckedChange={setAutoMode} />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-[12px] text-[var(--text)]">
+                  Auto-continue on error
+                </span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  When a response dies mid-stream, send &ldquo;Please
+                  continue&rdquo; once. Rate limits and login errors are left
+                  alone.
+                </span>
+              </div>
+              <Switch checked={autoContinue} onCheckedChange={setAutoContinue} />
             </div>
           </section>
 

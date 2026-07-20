@@ -97,6 +97,7 @@ import {
 } from "./lib/transcript-prefs";
 import { startSessionDoneNotifier } from "./lib/session-done-notifier";
 import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
+import { startAutoContinueWatcher } from "./lib/auto-continue-watcher";
 import {
   setSessionLabelResolver,
   setSessionNavigator,
@@ -576,6 +577,10 @@ function Shell() {
   // that parks on a prompt raises a notification even when it's in a project or
   // worktree that isn't on screen. Sidebar badges read the same store.
   useEffect(() => startSessionApprovalNotifier(), []);
+  // And watch every live session for a turn that died on a transient API error,
+  // so one that drops mid-response gets nudged back instead of parking until
+  // it's noticed. Gated on the auto-continue setting, checked when it fires.
+  useEffect(() => startAutoContinueWatcher(), []);
   // Keep the notification body's project label in sync with the project list.
   // Deliberately just the project name — no chat title, no session id.
   useEffect(() => {
