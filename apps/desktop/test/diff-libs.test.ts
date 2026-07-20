@@ -10,6 +10,8 @@ import {
 import {
   buildDiffLines,
   buildSplitRows,
+  diffAnchorLines,
+  diffAnchorMatches,
   filterUnchangedLines,
   getDiffLineForOffset,
   type Separator,
@@ -395,5 +397,89 @@ describe("diff-merge", () => {
   it("handles a change at the very first line (no preceding context)", () => {
     const { lines, changes } = merge("x\na\n", "a\n");
     expect(applyChangeLeftToRight("a\n", changes[0], lines)).toBe("x\na\n");
+  });
+});
+
+// ── Comment anchors ──────────────────────────────────────────────────
+// Comment offsets index the flat diff text (all diff lines, both sides, in
+// render order) — NOT the old/new file text. Applying them to the file text
+// instead used to make every comment on a changed line look stale, so it was
+// deleted the instant it was created.
+
+describe("diff comment anchors", () => {
+  const oldText = "a\nb\nc\n";
+  const newText = "a\nB\nc\n";
+  const dLines = buildDiffLines(oldText, newText);
+  /** The flat offsets of `content` within the diff lines. */
+  function anchorOf(content: string, side: "left" | "right") {
+    const line = dLines.find((l) => l.content === content)!;
+    return {
+      startOffset: line.flatOffset,
+      endOffset: line.flatOffset + line.content.length,
+      side,
+    };
+  }
+
+  it("keeps a comment on a changed line anchored", () => {
+    const anchor = anchorOf("B", "right");
+    // Guards the regression directly: these offsets do NOT locate "B" in the
+    // new file text, only in the flat diff text.
+    expect(newText.slice(anchor.startOffset, anchor.endOffset)).not.toBe("B");
+    expect(diffAnchorMatches(dLines, anchor, "B")).toBe(true);
+  });
+
+  it("keeps a comment on a removed line anchored", () => {
+    expect(diffAnchorMatches(dLines, anchorOf("b", "left"), "b")).toBe(true);
+  });
+
+  it("keeps a multi-line split-view selection anchored (other side's rows fall between)", () => {
+    const start = dLines.find((l) => l.content === "B")!;
+    const end = dLines.find((l) => l.content === "c")!;
+    const anchor = {
+      startOffset: start.flatOffset,
+      endOffset: end.flatOffset + end.content.length,
+      side: "right" as const,
+    };
+    expect(diffAnchorMatches(dLines, anchor, "B\nc")).toBe(true);
+  });
+
+  it("drops a comment once the line it covers changed", () => {
+    const anchor = anchorOf("B", "right");
+    const moved = buildDiffLines(oldText, "a\nZZZ\nc\n");
+    expect(diffAnchorMatches(moved, anchor, "B")).toBe(false);
+  });
+
+  it("drops a comment whose offsets fall outside the diff", () => {
+    expect(
+      diffAnchorMatches(
+        dLines,
+        { startOffset: 900, endOffset: 999, side: "right" },
+        "B",
+      ),
+    ).toBe(false);
+  });
+
+  it("reports the file line numbers of the side the comment is on", () => {
+    expect(diffAnchorLines(dLines, anchorOf("B", "right"))).toEqual({
+      startLine: 2,
+      endLine: 2,
+    });
+    expect(diffAnchorLines(dLines, anchorOf("b", "left"))).toEqual({
+      startLine: 2,
+      endLine: 2,
+    });
+  });
+
+  it("narrows a range to the lines the side actually numbers", () => {
+    // Whole diff selected on the right: the removed "b" row has no new-file
+    // number, so the range reports the added/context lines around it.
+    const last = dLines.at(-1)!;
+    expect(
+      diffAnchorLines(dLines, {
+        startOffset: 0,
+        endOffset: last.flatOffset + last.content.length,
+        side: "right",
+      }),
+    ).toEqual({ startLine: 1, endLine: 3 });
   });
 });

@@ -18,6 +18,11 @@ import { isImagePath } from "../lib/image-paths";
 import { useWorktreeRevision } from "../lib/worktree-revision";
 import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
 import {
+  buildDiffLines,
+  diffAnchorMatches,
+  type DiffLine,
+} from "@plan/shared/lib/diff";
+import {
   canFormat,
   formatCode,
   type FormatResult,
@@ -274,26 +279,30 @@ function FileDiffViewerImpl({
   const viewNewText =
     formatActive && formatted ? formatted.newText : (contents?.newText ?? "");
 
-  // Drop an annotation only once we can prove its anchor is stale: the text at
-  // its offsets is no longer the text it was made against. Compared against
-  // both the raw and the formatted view of its side, so toggling "Format"
-  // never deletes a comment. Nothing is pruned while `contents` is null —
-  // that's "not loaded yet", not "empty file".
+  // Comment offsets index the diff's own flat line text, so staleness is checked
+  // against diff lines — one set per view the user can be looking at (raw and,
+  // once computed, formatted), so toggling "Format" never invalidates a comment.
+  const anchorViews = useMemo(() => {
+    const views: DiffLine[][] = [];
+    if (contents && !contents.binary)
+      views.push(buildDiffLines(contents.oldText, contents.newText));
+    if (formatted)
+      views.push(buildDiffLines(formatted.oldText, formatted.newText));
+    return views;
+  }, [contents, formatted]);
+
+  // Drop a comment only once we can prove its anchor is stale: the lines at its
+  // offsets are no longer the lines it was made against. Nothing is pruned while
+  // `contents` is null — that's "not loaded yet", not "empty file".
   useEffect(() => {
-    if (!contents) return;
+    if (anchorViews.length === 0) return;
     for (const a of annotations) {
-      const sources =
-        a.side === "left"
-          ? [contents.oldText, formatted?.oldText]
-          : [contents.newText, formatted?.newText];
-      const anchored = sources.some(
-        (text) =>
-          text !== undefined &&
-          text.slice(a.startOffset, a.endOffset) === a.selectedText,
+      const anchored = anchorViews.some((dLines) =>
+        diffAnchorMatches(dLines, a, a.selectedText),
       );
       if (!anchored) removeFileAnnotation(file.path, a.id);
     }
-  }, [contents, formatted, annotations, file.path, removeFileAnnotation]);
+  }, [anchorViews, annotations, file.path, removeFileAnnotation]);
 
   /* ── Inline blame (click a row → trailing annotation + hover card) ── */
 
@@ -327,15 +336,9 @@ function FileDiffViewerImpl({
       endOffset: number,
       comment: string,
       side: "left" | "right",
+      startLine: number | undefined,
+      endLine: number | undefined,
     ) => {
-      // Compute line range from the side's source text (matches what the diff
-      // viewer was actually rendering when the user made the selection).
-      const sourceText = side === "left" ? viewOldText : viewNewText;
-      const startLine = offsetToLine(sourceText, startOffset);
-      const endLine = offsetToLine(
-        sourceText,
-        Math.max(startOffset, endOffset - 1),
-      );
       addFileAnnotation(file.path, {
         selectedText,
         startOffset,
@@ -349,7 +352,7 @@ function FileDiffViewerImpl({
         },
       });
     },
-    [file.path, addFileAnnotation, viewOldText, viewNewText],
+    [file.path, addFileAnnotation],
   );
 
   const updateAnnotation = useCallback(
@@ -712,14 +715,4 @@ function ImageDiffView({
       )}
     </div>
   );
-}
-
-/** 1-based line number for a character offset in `text`. */
-function offsetToLine(text: string, offset: number): number {
-  let line = 1;
-  const end = Math.min(offset, text.length);
-  for (let i = 0; i < end; i++) {
-    if (text.charCodeAt(i) === 10) line++;
-  }
-  return line;
 }

@@ -128,8 +128,8 @@ export const PrView = memo(function PrView({
       endOffset: number,
       comment: string,
       side: "left" | "right",
-      startLine: number,
-      endLine: number,
+      startLine: number | undefined,
+      endLine: number | undefined,
     ) => {
       addPrAnnotation(fileKey(subPath, number, path), {
         selectedText,

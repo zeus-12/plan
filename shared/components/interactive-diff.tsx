@@ -22,6 +22,7 @@ import {
   filterUnchangedLines,
   buildSplitRows,
   getDiffLineForOffset,
+  diffAnchorLines,
 } from "../lib/diff";
 import {
   type Change,
@@ -129,12 +130,21 @@ interface Props {
   /** Language id (see LANGUAGES in shared/lib/highlight). "auto"/"plaintext" disables coloring. */
   language?: string;
   annotations?: Annotation[];
+  /**
+   * `start`/`end` index the flat diff text (see diffAnchorMatches) — they are
+   * NOT offsets into oldText/newText. `startLine`/`endLine` are the 1-based
+   * file line numbers the selection covers in the side's file, resolved here
+   * because this component owns that mapping; they're undefined when the side
+   * shows no numbered line in the range.
+   */
   onAddAnnotation?: (
     sel: string,
     start: number,
     end: number,
     comment: string,
     side: "left" | "right",
+    startLine: number | undefined,
+    endLine: number | undefined,
   ) => void;
   onUpdateAnnotation?: (id: string, comment: string) => void;
   onRemoveAnnotation?: (id: string) => void;
@@ -1271,14 +1281,18 @@ export function InteractiveDiff({
   const selection = useCommentSelection<DiffAnchor>({
     enabled: interactive,
     resolve: resolveSelection,
-    onCreate: (data, selectedText, comment) =>
+    onCreate: (data, selectedText, comment) => {
+      const { startLine, endLine } = diffAnchorLines(dLines, data);
       onAddAnnotation?.(
         selectedText,
         data.startOffset,
         data.endOffset,
         comment,
         data.side,
-      ),
+        startLine,
+        endLine,
+      );
+    },
   });
   const pending = selection.pending;
   // Span-painting fallback for engines without the Highlight API. Null on

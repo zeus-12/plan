@@ -23,8 +23,8 @@ interface Props {
     endOffset: number,
     comment: string,
     side: "left" | "right",
-    startLine: number,
-    endLine: number,
+    startLine: number | undefined,
+    endLine: number | undefined,
   ) => void;
   onUpdate: (id: string, comment: string) => void;
   onRemove: (id: string) => void;
@@ -200,18 +200,7 @@ export const PrFileDiff = memo(function PrFileDiff({
             isFirstVersion={!contents.oldText}
             language={effectiveLanguage}
             annotations={annotations}
-            onAddAnnotation={(text, start, end, comment, side) => {
-              const source = side === "left" ? viewOldText : viewNewText;
-              onAdd(
-                text,
-                start,
-                end,
-                comment,
-                side,
-                offsetToLine(source, start),
-                offsetToLine(source, Math.max(start, end - 1)),
-              );
-            }}
+            onAddAnnotation={onAdd}
             onUpdateAnnotation={onUpdate}
             onRemoveAnnotation={onRemove}
             blame={blame}
@@ -229,14 +218,4 @@ function Placeholder({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-/** 1-based line number for a character offset in `text`. */
-function offsetToLine(text: string, offset: number): number {
-  let line = 1;
-  const end = Math.min(offset, text.length);
-  for (let i = 0; i < end; i++) {
-    if (text.charCodeAt(i) === 10) line++;
-  }
-  return line;
 }

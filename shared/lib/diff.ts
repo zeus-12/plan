@@ -266,3 +266,113 @@ export function getDiffLineForOffset(
   }
   return dLines.length - 1;
 }
+
+/* ── Annotation anchors ───────────────────────────────────────────────────────
+ * Comment offsets index the FLAT DIFF TEXT — every diff line (removed, added
+ * and context, in render order) joined by newlines — not the old/new file text.
+ * That's the space `InteractiveDiff` resolves selections in, so both the file
+ * line numbers a comment reports and any "is this anchor still valid" check
+ * have to go back through the diff lines. These helpers are that seam.
+ */
+
+/** A comment's [startOffset, endOffset) on one side of the diff. */
+export interface DiffAnchorRange {
+  startOffset: number;
+  endOffset: number;
+  side: "left" | "right";
+}
+
+/** The diff lines a flat range touches, as [firstIdx, lastIdx]. */
+function coveredLines(
+  dLines: DiffLine[],
+  { startOffset, endOffset }: DiffAnchorRange,
+): [number, number] {
+  const first = getDiffLineForOffset(startOffset, dLines);
+  const last = getDiffLineForOffset(
+    Math.max(startOffset, endOffset - 1),
+    dLines,
+  );
+  return [first, Math.max(first, last)];
+}
+
+/** Does this diff line show on `side`? (An added line has no left-side row.) */
+function onSide(line: DiffLine, side: "left" | "right"): boolean {
+  return side === "left" ? line.type !== "add" : line.type !== "remove";
+}
+
+/**
+ * The 1-based file line numbers a comment covers, in the file the side shows
+ * (old file for "left", new for "right"). Rows belonging only to the other side
+ * carry no number here, so the range is narrowed to the outermost lines that do
+ * — undefined only if the selection touches no line of its own side at all.
+ */
+export function diffAnchorLines(
+  dLines: DiffLine[],
+  anchor: DiffAnchorRange,
+): { startLine?: number; endLine?: number } {
+  const [first, last] = coveredLines(dLines, anchor);
+  const numberOf = (l: DiffLine) =>
+    anchor.side === "left" ? l.oldNum : l.newNum;
+  let startLine: number | undefined;
+  let endLine: number | undefined;
+  for (let i = first; i <= last && startLine === undefined; i++) {
+    startLine = numberOf(dLines[i]);
+  }
+  for (let i = last; i >= first && endLine === undefined; i--) {
+    endLine = numberOf(dLines[i]);
+  }
+  return { startLine, endLine };
+}
+
+/**
+ * Is `selectedText` still the text sitting at this anchor in the given diff?
+ *
+ * The stored text is whatever the DOM selection produced, which varies by view
+ * mode (split yields only the commented side's rows; unified yields every row
+ * in between) and can omit rows hidden by a fold. So rather than one exact
+ * slice, this checks that the selection's lines still appear, in order, among
+ * the lines the range covers. Anything less would delete comments the user can
+ * plainly see anchored; anything more would keep comments pointing at text that
+ * has since changed on disk.
+ */
+export function diffAnchorMatches(
+  dLines: DiffLine[],
+  anchor: DiffAnchorRange,
+  selectedText: string,
+): boolean {
+  if (anchor.startOffset < 0 || anchor.endOffset > flatLength(dLines))
+    return false;
+  const [first, last] = coveredLines(dLines, anchor);
+
+  const covered: string[] = [];
+  for (let i = first; i <= last; i++) {
+    const line = dLines[i];
+    if (!onSide(line, anchor.side)) continue;
+    covered.push(
+      line.content.slice(
+        Math.max(0, anchor.startOffset - line.flatOffset),
+        Math.min(line.content.length, anchor.endOffset - line.flatOffset),
+      ),
+    );
+  }
+
+  const wanted = selectedText.split("\n");
+  let at = 0;
+  for (const line of wanted) {
+    while (
+      at < covered.length &&
+      covered[at] !== line &&
+      covered[at].trim() !== line.trim()
+    ) {
+      at++;
+    }
+    if (at === covered.length) return false;
+    at++;
+  }
+  return true;
+}
+
+function flatLength(dLines: DiffLine[]): number {
+  const last = dLines.at(-1);
+  return last ? last.flatOffset + last.content.length : 0;
+}
