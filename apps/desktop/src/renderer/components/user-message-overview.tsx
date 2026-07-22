@@ -8,6 +8,7 @@ import {
 } from "react";
 import { cn, sameJson } from "@plan/shared/lib/utils";
 import type { ConversationMessage, MessagePart } from "../../shared-types";
+import { isRealUserTurn } from "../lib/message-kind";
 
 /** How many px of a message must be on screen before it counts as "visible"
  *  for the position highlight — small, so a sliver peeking in at the leading
@@ -29,12 +30,6 @@ interface Props {
   messages: ConversationMessage[];
   /** Ref to the transcript's scrollable element (the one holding the rows). */
   scrollRef: React.RefObject<HTMLDivElement | null>;
-}
-
-function isUserTurn(m: ConversationMessage): boolean {
-  if (m.role !== "user") return false;
-  // A turn that's only tool_results isn't a real user message.
-  return m.parts.some((p) => p.kind !== "tool_result");
 }
 
 function previewText(m: ConversationMessage): string {
@@ -77,7 +72,7 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   const computedUserMessages = useMemo<UserMessage[]>(
     () =>
       messages
-        .filter(isUserTurn)
+        .filter(isRealUserTurn)
         .map((m) => ({ uuid: m.uuid, text: previewText(m) })),
     [messages],
   );
