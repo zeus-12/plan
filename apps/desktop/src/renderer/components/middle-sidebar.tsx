@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { NotebookPen } from "lucide-react";
 import {
   Sidebar,
@@ -163,6 +163,72 @@ function UploadIcon() {
       <polyline points="17 8 12 3 7 8" />
       <line x1="12" y1="3" x2="12" y2="15" />
     </svg>
+  );
+}
+
+/**
+ * The work-tab strip. The sidebar can be dragged narrower than the strip's
+ * intrinsic width, so it scrolls sideways; the fades are driven by the measured
+ * scroll position (never assumed), and the active tab is scrolled into view so
+ * a tab is never selected-but-hidden.
+ */
+function WorkTabStrip({ tab }: { tab: WorkTab }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const measure = () => {
+      // 1px slack: fractional widths leave sub-pixel remainders at the ends.
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      setEdges((prev) => {
+        const next = {
+          start: el.scrollLeft > 1,
+          end: el.scrollLeft < maxScroll - 1,
+        };
+        return prev.start === next.start && prev.end === next.end ? prev : next;
+      });
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const active = scrollerRef.current?.querySelector<HTMLElement>(
+      '[role="tab"][data-state="active"]',
+    );
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab]);
+
+  return (
+    <div className="relative min-w-0 flex-1">
+      <div
+        ref={scrollerRef}
+        className="overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <TabsList className="w-max">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="diffs">Diffs</TabsTrigger>
+          <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="search">Search</TabsTrigger>
+          <TabsTrigger value="pr">PR</TabsTrigger>
+        </TabsList>
+      </div>
+      {edges.start && (
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[var(--bg-surface)] to-transparent" />
+      )}
+      {edges.end && (
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[var(--bg-surface)] to-transparent" />
+      )}
+    </div>
   );
 }
 
@@ -332,22 +398,16 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         onValueChange={(v) => onTabChange(v as WorkTab)}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <SidebarHeader className="h-[44px] justify-center px-3 pt-2 pb-2 [-webkit-app-region:drag]">
-          <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
-            <TabsList>
-              <TabsTrigger value="chat">Chat</TabsTrigger>
-              <TabsTrigger value="diffs">Diffs</TabsTrigger>
-              <TabsTrigger value="files">Files</TabsTrigger>
-              <TabsTrigger value="search">Search</TabsTrigger>
-              <TabsTrigger value="pr">PR</TabsTrigger>
-            </TabsList>
+        <SidebarHeader className="h-[44px] px-3 pt-2 pb-2 [-webkit-app-region:drag]">
+          <div className="flex w-full min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
+            <WorkTabStrip tab={tab} />
             {/* Detached from the tab group: opens the scratchpad as a center-pane
                 tab rather than switching this sidebar's view. */}
             <button
               onClick={onOpenScratch}
               title="Open scratchpad"
               aria-label="Open scratchpad"
-              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
             >
               <NotebookPen size={15} />
             </button>
