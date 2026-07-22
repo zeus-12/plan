@@ -2004,8 +2004,13 @@ export const MessageList = memo(function MessageList({
               );
             })}
             {working && (
-              <div className="mx-auto w-full max-w-[820px]">
-                <TypingIndicator />
+              // Mirror a message row's layout (px-4 band + centered 820 column)
+              // so the pill's left edge lands on the same column edge as the
+              // prose and "Ran …" rows above it, at every viewport width.
+              <div className="flex w-full justify-center px-4">
+                <div className="w-full max-w-[820px]">
+                  <TypingIndicator />
+                </div>
               </div>
             )}
           </div>
@@ -2078,7 +2083,7 @@ export const MessageList = memo(function MessageList({
  */
 function TypingIndicator() {
   return (
-    <div className="px-4 pt-1 pb-2" aria-label="Claude is working">
+    <div className="pt-1 pb-2" aria-label="Claude is working">
       <div className="inline-flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
         {[0, 1, 2].map((i) => (
           <span
