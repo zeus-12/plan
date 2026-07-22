@@ -15,10 +15,10 @@ const AMBER = "#f59e0b";
  *   - amber and/or green → the "needs you" dot(s): a single dot, or, when both
  *     apply, a stacked pair (amber in front with a notch cut out of it so the
  *     green reads behind — amber wins, but green isn't lost).
- *   - working, with nothing waiting on you → the working spinner. It sits below
- *     the dots because it isn't actionable: if a sibling already needs you,
- *     that's what the row should show. In the common single-session flow the
- *     spinner naturally gives way to the green dot the moment the turn ends.
+ *   - working → the working spinner, shown alongside the dots (to their left,
+ *     so the actionable dots keep their rightmost position). All three states
+ *     are independent facts about different sessions, so each one that holds is
+ *     rendered; none suppresses another.
  */
 export function StatusDots({
   approval,
@@ -31,19 +31,23 @@ export function StatusDots({
   working?: boolean;
   className?: string;
 }) {
-  if (approval && unread) return <StackedDots className={className} />;
-  if (approval) return <ApprovalDot className={className} />;
-  if (unread) return <RepliedDot className={className} />;
-  if (working)
-    return (
-      <WorkingIcon
-        className={cn(
-          "h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]",
-          className,
-        )}
-      />
-    );
-  return null;
+  const dots =
+    approval && unread ? (
+      <StackedDots />
+    ) : approval ? (
+      <ApprovalDot />
+    ) : unread ? (
+      <RepliedDot />
+    ) : null;
+  if (!dots && !working) return null;
+  return (
+    <span className={cn("flex shrink-0 items-center gap-1.5", className)}>
+      {working && (
+        <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+      )}
+      {dots}
+    </span>
+  );
 }
 
 /**
