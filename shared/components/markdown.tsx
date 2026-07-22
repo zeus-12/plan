@@ -1,16 +1,30 @@
-import { isValidElement, memo, useMemo, useRef, useState } from "react";
+import {
+  isValidElement,
+  memo,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rehypeBionic } from "./bionic";
 import {
-  highlightToHtml,
+  highlightToHtmlLines,
   stripComments,
   SYNC_HIGHLIGHT_MAX_CHARS,
   useActiveShikiTheme,
   useShikiReady,
 } from "../lib/highlight";
+import { useDiffSettings } from "../lib/settings";
 import { cn } from "../lib/utils";
 import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
+
+// Code renders at this fixed size/line-height so a non-wrapped line is exactly
+// CODE_LINE_HEIGHT tall — the gutter can then place unwrapped numbers by simple
+// arithmetic and only measure when wrapping actually stacks a line into rows.
+const CODE_FONT_SIZE = 12;
+const CODE_LINE_HEIGHT = 20;
 
 /** Pull the raw code text out of react-markdown's <code> child node. */
 function codeText(node: ReactNode): string {
@@ -20,23 +34,30 @@ function codeText(node: ReactNode): string {
 }
 
 /**
- * A fenced code block: a header strip showing the language (left) and a
- * hover-revealed copy button (right), over syntax-highlighted code.
+ * A fenced code block: a header strip (language label + wrap/copy buttons) over
+ * syntax-highlighted code with a left-hand line-number gutter.
  *
- * Two deliberate constraints keep this safe inside chat/plan surfaces, which
+ * Several deliberate constraints keep this safe inside chat/plan surfaces, which
  * compute annotation + find offsets over the block's `textContent`:
  *  - The language label is a CSS `::before` pseudo-element (see `data-lang`),
  *    not a real text node, so it never shifts those offsets.
- *  - The copy button is icon-only (no text node) for the same reason.
- * Syntax highlighting only wraps existing characters in <span>s, so the code's
- * `textContent` is byte-identical to the plain text — offsets are unaffected.
+ *  - The header buttons are icon-only (no text node) for the same reason.
+ *  - The line-number gutter carries the annotation/find *skip* markers, so its
+ *    number text contributes nothing to either offset space (and `copy` reads
+ *    only the <pre>, which the gutter is a sibling of).
+ *  - The code lines are split one-<span>-per-line but joined by real "\n" text
+ *    nodes (see `highlightToHtmlLines`), so the <pre>'s `textContent` stays
+ *    byte-identical to the plain source — offsets are unaffected.
  */
 function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
-  const ref = useRef<HTMLPreElement>(null);
+  const preRef = useRef<HTMLPreElement>(null);
+  const lineRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const [copied, setCopied] = useState(false);
   const [copiedLine, setCopiedLine] = useState(false);
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
+  const [settings, updateSettings] = useDiffSettings();
+  const wrap = settings.lineWrap;
 
   // react-markdown nests the fenced text in a <code class="language-xxx">.
   const codeEl = isValidElement(children) ? children : null;
@@ -48,13 +69,13 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     /language-(\S+)/.exec(codeProps.className ?? "")?.[1]?.toLowerCase() ?? "";
   const code = codeText(codeProps.children);
 
-  const html = useMemo(
+  const lineHtmls = useMemo(
     // Oversized blocks (a pasted file dump — or one still streaming in, which
     // re-runs this on every growth tick) skip tokenization and render as
     // escaped plain text: same size budget as the file/diff/scratch surfaces.
     // Within budget, tokenization is a sub-frame cost.
     () =>
-      highlightToHtml(
+      highlightToHtmlLines(
         code,
         code.length > SYNC_HIGHLIGHT_MAX_CHARS ? "plaintext" : lang,
       ),
@@ -63,8 +84,50 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     [code, lang, shikiReady, shikiTheme],
   );
 
+  // A trailing newline in the source (the usual case for a fenced block) splits
+  // into a final empty line: keep its <span> so `textContent` stays exact, but
+  // don't number it — it isn't a real line of code.
+  const numberedCount =
+    lineHtmls.length > 1 && lineHtmls[lineHtmls.length - 1] === ""
+      ? lineHtmls.length - 1
+      : lineHtmls.length;
+
+  // Per-line pixel heights, needed only when wrapping stacks a long line into
+  // several visual rows so the gutter number stays aligned to the line's top.
+  // Unwrapped lines are exactly CODE_LINE_HEIGHT (fixed line-height above), so
+  // there is nothing to measure — `null` means "use the uniform height".
+  const [heights, setHeights] = useState<number[] | null>(null);
+  useLayoutEffect(() => {
+    if (!wrap) {
+      setHeights(null);
+      return;
+    }
+    const measure = () => {
+      const next = lineHtmls.map((_, i) => {
+        // An empty line's inline span has no box (height 0); its rendered row is
+        // still one line tall. Every real line is at least CODE_LINE_HEIGHT, and
+        // a wrapped one is a larger multiple, so clamping up is always correct.
+        const h = lineRefs.current[i]?.getBoundingClientRect().height ?? 0;
+        return Math.max(h, CODE_LINE_HEIGHT);
+      });
+      setHeights((prev) =>
+        prev &&
+        prev.length === next.length &&
+        prev.every((h, i) => h === next[i])
+          ? prev
+          : next,
+      );
+    };
+    measure();
+    const pre = preRef.current;
+    if (!pre || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(pre);
+    return () => ro.disconnect();
+  }, [wrap, lineHtmls, shikiReady, shikiTheme]);
+
   const copy = () => {
-    const text = ref.current?.textContent ?? "";
+    const text = preRef.current?.textContent ?? "";
     if (!text) return;
     void navigator.clipboard.writeText(text);
     setCopied(true);
@@ -77,7 +140,7 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   // URL is preserved; it falls back to the raw text when shiki can't tokenize
   // the language, so we never fake having stripped comments.
   const copyOneLine = () => {
-    const text = ref.current?.textContent ?? "";
+    const text = preRef.current?.textContent ?? "";
     if (!text) return;
     const oneLine = (stripComments(text, lang) ?? text)
       .split("\n")
@@ -90,6 +153,15 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     setTimeout(() => setCopiedLine(false), 1500);
   };
 
+  // Gutter is border-box, so its width must cover the digits (`${digits}ch`,
+  // tabular so each is exactly 1ch) PLUS its own padding — otherwise the number
+  // overflows its content area and wraps (a two-line "1"/"0"). Keep the padding
+  // tight; `digits` (min 2) guarantees room for two- and three-digit numbers.
+  const digits = Math.max(2, String(numberedCount).length);
+  const GUTTER_PAD_LEFT = 8;
+  const GUTTER_PAD_RIGHT = 6;
+  const gutterWidth = `calc(${digits}ch + ${GUTTER_PAD_LEFT + GUTTER_PAD_RIGHT}px)`;
+
   return (
     <div className="group my-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-surface)] py-1 pl-3 pr-1.5">
@@ -99,6 +171,24 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
           className="code-lang-label select-none font-[family-name:var(--font-mono)] text-[11px] tracking-wide text-[var(--text-tertiary)]"
         />
         <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => updateSettings({ lineWrap: !wrap })}
+            aria-label={wrap ? "Disable line wrap" : "Wrap long lines"}
+            aria-pressed={wrap}
+            title={wrap ? "Wrapping on — click to scroll instead" : "Wrap long lines"}
+            className={cn(
+              // Hover-only in both states, exactly like the copy buttons. When
+              // it does show, the on-state is a monochrome pill (outlined,
+              // filled) rather than a loud accent color.
+              "flex h-6 w-6 items-center justify-center rounded-md opacity-0 transition-all focus-visible:opacity-100 group-hover:opacity-100",
+              wrap
+                ? "bg-[var(--bg)] text-[var(--text)] ring-1 ring-inset ring-[var(--border)]"
+                : "text-[var(--text-tertiary)] hover:bg-[var(--bg)] hover:text-[var(--text)]",
+            )}
+          >
+            <WrapIcon />
+          </button>
           <button
             type="button"
             onClick={copyOneLine}
@@ -127,16 +217,93 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
           </button>
         </div>
       </div>
-      <pre
-        ref={ref}
-        className="overflow-x-auto px-3 py-2.5 font-[family-name:var(--font-mono)] text-[12px] leading-relaxed"
-      >
-        <code dangerouslySetInnerHTML={{ __html: html }} />
-      </pre>
+      {/* The scroller owns horizontal overflow so the sticky gutter can pin to
+          the left while long unwrapped lines scroll under it. */}
+      <div className={wrap ? "overflow-x-clip" : "overflow-x-auto"}>
+        <div
+          className={cn("flex", wrap ? "" : "w-max min-w-full")}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: CODE_FONT_SIZE,
+            lineHeight: `${CODE_LINE_HEIGHT}px`,
+          }}
+        >
+          {/* Vertical padding lives on the gutter/code (not the flex row) so the
+              gutter's own background fills right up to the header — no dark band. */}
+          <div
+            aria-hidden
+            data-anno-skip=""
+            data-find-skip=""
+            className="sticky left-0 z-[1] box-border shrink-0 select-none whitespace-nowrap text-right tabular-nums text-[var(--text-tertiary)]"
+            style={{
+              width: gutterWidth,
+              paddingLeft: GUTTER_PAD_LEFT,
+              paddingRight: GUTTER_PAD_RIGHT,
+              paddingTop: 10,
+              paddingBottom: 10,
+              background: "var(--bg-surface)",
+            }}
+          >
+            {lineHtmls.map((_, i) =>
+              i >= numberedCount ? null : (
+                <div
+                  key={i}
+                  style={{
+                    height: wrap && heights ? heights[i] : CODE_LINE_HEIGHT,
+                  }}
+                >
+                  {i + 1}
+                </div>
+              ),
+            )}
+          </div>
+          <pre
+            ref={preRef}
+            className={cn(
+              "m-0 min-w-0 py-2.5 pl-3 pr-4",
+              wrap ? "flex-1 whitespace-pre-wrap break-words" : "whitespace-pre",
+            )}
+          >
+            <code>
+              {lineHtmls.map((h, i) => (
+                <span key={i}>
+                  <span
+                    ref={(el) => {
+                      lineRefs.current[i] = el;
+                    }}
+                    dangerouslySetInnerHTML={{ __html: h }}
+                  />
+                  {i < lineHtmls.length - 1 ? "\n" : null}
+                </span>
+              ))}
+            </code>
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }
 
+function WrapIcon() {
+  // An arrow turning back on itself over stacked lines — "wrap to next line".
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <path d="M3 12h15a3 3 0 0 1 0 6h-4" />
+      <polyline points="16 16 14 18 16 20" />
+      <line x1="3" y1="18" x2="10" y2="18" />
+    </svg>
+  );
+}
 function CopyIcon() {
   return (
     <svg

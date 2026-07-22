@@ -555,15 +555,15 @@ function escapeAttr(s: string): string {
  * Returns escaped plain text when shiki isn't ready or the language is
  * unsupported.
  */
-export function highlightToHtml(value: string, language: string): string {
-  if (!value) return "";
-  const tokens = highlightTokens(value, language);
-  if (tokens.length === 0) return escapeHtml(value);
+/** Wrap `text` in colored <span>s from `tokens` (offsets relative to `text`).
+ *  The concatenated text content equals `text` exactly. */
+function spansToHtml(text: string, tokens: SyntaxToken[]): string {
+  if (tokens.length === 0) return escapeHtml(text);
 
   const parts: string[] = [];
   let cur = 0;
   for (const t of tokens) {
-    if (t.start > cur) parts.push(escapeHtml(value.slice(cur, t.start)));
+    if (t.start > cur) parts.push(escapeHtml(text.slice(cur, t.start)));
 
     const classes: string[] = [];
     if (t.className) classes.push(t.className);
@@ -581,12 +581,33 @@ export function highlightToHtml(value: string, language: string): string {
       ? ` style="${escapeAttr(styleBits.join(";"))}"`
       : "";
     parts.push(
-      `<span${classAttr}${styleAttr}>${escapeHtml(value.slice(t.start, t.end))}</span>`,
+      `<span${classAttr}${styleAttr}>${escapeHtml(text.slice(t.start, t.end))}</span>`,
     );
     cur = t.end;
   }
-  if (cur < value.length) parts.push(escapeHtml(value.slice(cur)));
+  if (cur < text.length) parts.push(escapeHtml(text.slice(cur)));
   return parts.join("");
+}
+
+export function highlightToHtml(value: string, language: string): string {
+  if (!value) return "";
+  return spansToHtml(value, highlightTokens(value, language));
+}
+
+/**
+ * Like {@link highlightToHtml}, but returns one HTML string per source line
+ * (the input split on "\n"). Joining the results back with "\n" yields text
+ * content byte-identical to `value` — so a caller can render each line as its
+ * own element (e.g. for a line-number gutter) without changing the character
+ * offsets that annotation/find features compute over the block's textContent.
+ */
+export function highlightToHtmlLines(
+  value: string,
+  language: string,
+): string[] {
+  const lines = value.split("\n");
+  const perLine = highlightPerLine(value, language);
+  return lines.map((line, i) => spansToHtml(line, perLine[i] ?? []));
 }
 
 /**

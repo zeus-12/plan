@@ -6,6 +6,7 @@ export {
   highlightTokens,
   highlightPerLine,
   highlightToHtml,
+  highlightToHtmlLines,
   stripComments,
   codeBracketPositions,
   ensureHighlighter,
