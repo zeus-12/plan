@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
+import { Kbd } from "@plan/shared/components/ui/kbd";
 import type {
   WorktreeRecord,
   AddReposToWorktreeInput,
@@ -202,7 +203,7 @@ export function AddReposModal({
 
         <div className="mt-4 flex items-center justify-between">
           <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-            {missing.length > 0 ? `Adds ${selected.length} repo(s) · ⌘↵` : ""}
+            {missing.length > 0 ? `Adds ${selected.length} repo(s)` : ""}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={onClose}>
@@ -214,7 +215,14 @@ export function AddReposModal({
                 onClick={() => void submit()}
                 disabled={!canSubmit}
               >
-                {busy ? "Adding…" : "Add repos"}
+                {busy ? (
+                  "Adding…"
+                ) : (
+                  <>
+                    Add repos
+                    <Kbd keys={["⌘", "↵"]} />
+                  </>
+                )}
               </Button>
             )}
           </div>
