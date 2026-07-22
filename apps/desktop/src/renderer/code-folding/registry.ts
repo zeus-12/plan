@@ -26,7 +26,13 @@ export const FOLD_REGISTRY: Record<string, GrammarEntry> = {
   csharp: { grammar: "c_sharp", query: "c_sharp" },
   ruby: { grammar: "ruby", query: "ruby" },
   php: { grammar: "php", query: "php" },
-  swift: { grammar: "swift", query: "swift" },
+  // Swift is intentionally absent. `tree-sitter-swift.wasm` crashes V8's
+  // background WebAssembly optimizing compiler ("V8 process OOM (Zone)" — a
+  // fatal, uncatchable process abort) the moment it's compiled, taking the whole
+  // renderer down. It is grammar-specific, NOT a size issue: cpp.wasm (4.6MB) and
+  // typescript.wasm both compile fine; swift.wasm (3.1MB) does not. Until a
+  // grammar build that doesn't trip the compiler is vendored, `.swift` files fall
+  // back to indentation folding (highlighting via Shiki is unaffected).
   kotlin: { grammar: "kotlin", query: "kotlin" },
   scala: { grammar: "scala", query: "scala" },
   bash: { grammar: "bash", query: "bash" },
