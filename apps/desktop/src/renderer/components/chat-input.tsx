@@ -67,6 +67,13 @@ interface Props {
   /** This session's last turn died on a recoverable API error and nothing has
    *  been sent since — offer the one-click nudge. */
   canContinue?: boolean;
+  /** This session's last turn hit the session limit (a rate_limit turn). Unlike
+   *  {@link canContinue} this is never auto-retried — it only ever offers the
+   *  manual nudge, which resumes the work once the limit resets. */
+  atSessionLimit?: boolean;
+  /** Reset clause Claude printed ("resets 3:10pm (Asia/Calcutta)"), shown in the
+   *  session-limit pill. Null when the line wasn't in a shape we could read. */
+  sessionLimitReset?: string | null;
   /** The nudge was clicked while the session was cold: its `claude` is booting
    *  and the message goes the moment the agent is actually live. */
   continueStarting?: boolean;
@@ -164,6 +171,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     onFocusChange,
     onAddToChatUndo,
     canContinue,
+    atSessionLimit,
+    sessionLimitReset,
     continueStarting,
     onContinue,
   },
@@ -439,6 +448,28 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
             className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] disabled:cursor-default disabled:opacity-55 disabled:hover:bg-[var(--bg-surface)]"
           >
             {continueStarting ? "Starting session…" : "Please continue"}
+          </button>
+        </div>
+      )}
+      {/* Session limit hit. Never auto-retried (it would just re-hit the limit
+          until it resets), so it lives only here — a manual nudge that resumes
+          the turn once the window lifts. Amber matches the app's existing
+          "needs your attention in this session" language (the blocked pill /
+          approval dot). */}
+      {atSessionLimit && !canContinue && !blocked && (
+        <div className="mx-auto mb-2 flex w-full max-w-[820px] items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/[0.07] px-2.5 py-1.5 font-[family-name:var(--font-mono)] text-[11px] text-amber-600 dark:text-amber-400">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+          <span className="min-w-0 truncate">
+            You&apos;ve hit your session limit
+            {sessionLimitReset ? ` · ${sessionLimitReset}` : ""}
+          </span>
+          <button
+            onClick={onContinue}
+            disabled={continueStarting}
+            title="Once the limit resets, this sends “Please continue” to resume the turn"
+            className="ml-auto shrink-0 rounded-full border border-amber-500/50 px-2.5 py-0.5 text-[11px] transition-colors hover:bg-amber-500/15 disabled:cursor-default disabled:opacity-55 disabled:hover:bg-transparent"
+          >
+            {continueStarting ? "Starting…" : "Continue"}
           </button>
         </div>
       )}

@@ -53,7 +53,11 @@ import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
 import { useWorkingTree, repoDisplayName } from "../lib/use-working-tree";
 import { useChatSession } from "../lib/use-chat-session";
-import { retryableApiErrorAtEnd } from "../../api-errors";
+import {
+  retryableApiErrorAtEnd,
+  sessionLimitAtEnd,
+  sessionLimitResetText,
+} from "../../api-errors";
 import {
   CONTINUE_TEXT,
   useAutoContinueInFlight,
@@ -1349,6 +1353,14 @@ function ProjectWorkspaceImpl({
     () => retryableApiErrorAtEnd(session) != null,
     [session],
   );
+  // A session limit is the one stuck-point the watcher never auto-retries (it
+  // would just re-hit the limit until it resets), so it only ever surfaces as a
+  // manual pill. The reset clause is display-only — the same "Please continue"
+  // resumes the work once the window lifts.
+  const sessionLimitReset = useMemo(() => {
+    const at = sessionLimitAtEnd(session);
+    return at ? { text: sessionLimitResetText(at) } : null;
+  }, [session]);
   const continueInFlight = useAutoContinueInFlight(activeTerminalId);
   const [continueStarting, setContinueStarting] = useState(false);
 
@@ -1390,8 +1402,8 @@ function ProjectWorkspaceImpl({
   // the session is no longer stalled (it recovered, or something else was sent).
   useEffect(() => setContinueStarting(false), [selectedSessionId]);
   useEffect(() => {
-    if (!stalledOnApiError) setContinueStarting(false);
-  }, [stalledOnApiError]);
+    if (!stalledOnApiError && !sessionLimitReset) setContinueStarting(false);
+  }, [stalledOnApiError, sessionLimitReset]);
 
   // New chat: pre-pick the session uuid and start `claude --session-id` in a
   // background terminal — the composer is immediately live; the transcript
@@ -2121,6 +2133,8 @@ function ProjectWorkspaceImpl({
                       canContinue={
                         stalledOnApiError && !chatWorking && !continueInFlight
                       }
+                      atSessionLimit={!!sessionLimitReset && !chatWorking}
+                      sessionLimitReset={sessionLimitReset?.text ?? null}
                       continueStarting={continueStarting}
                       onContinue={handleContinue}
                     />

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { parseSessionJsonl } from "../src/main/jsonl-parser";
 import {
   isRetryableApiError,
+  isSessionLimitError,
   recoveredAfter,
   retryableApiErrorAtEnd,
+  sessionLimitAtEnd,
+  sessionLimitResetText,
 } from "../src/api-errors";
 import type { ConversationMessage, ParsedSession } from "../src/shared-types";
 
@@ -164,6 +167,58 @@ describe("is the session stuck right now", () => {
 
   it("handles an empty transcript", () => {
     expect(retryableApiErrorAtEnd(null)).toBeNull();
+  });
+});
+
+describe("session limit — manual pill only, never auto-retried", () => {
+  const limit = (i: number, text: string) =>
+    errorLine(i, text, "rate_limit", 429);
+
+  it("recognises a rate_limit turn as a session limit", () => {
+    const s = parse(limit(1, "You've hit your session limit · resets 4:30pm"));
+    expect(isSessionLimitError(only(s.messages))).toBe(true);
+  });
+
+  it("does not treat a transient failure as a session limit", () => {
+    const s = parse(errorLine(1, "Request timed out", "server_error"));
+    expect(isSessionLimitError(only(s.messages))).toBe(false);
+  });
+
+  it("flags a transcript parked on a session limit", () => {
+    const s = parse(
+      userLine(1, "hi") +
+        limit(2, "You've hit your session limit · resets 3:10pm (Asia/Calcutta)"),
+    );
+    expect(sessionLimitAtEnd(s)).not.toBeNull();
+  });
+
+  it("stops flagging once the user replies past it", () => {
+    const s = parse(
+      userLine(1, "hi") + limit(2, "session limit") + userLine(3, "continue"),
+    );
+    expect(sessionLimitAtEnd(s)).toBeNull();
+  });
+
+  it("never confuses a session limit with a retryable error", () => {
+    // The two pills are mutually exclusive: the watcher's retry path must skip
+    // this, and the manual path must own it.
+    const s = parse(limit(1, "You've hit your session limit · resets 8:40pm"));
+    expect(retryableApiErrorAtEnd(s)).toBeNull();
+    expect(sessionLimitAtEnd(s)).not.toBeNull();
+  });
+
+  it("extracts the reset clause for display", () => {
+    const s = parse(
+      limit(1, "You've hit your session limit · resets 3:10pm (Asia/Calcutta)"),
+    );
+    expect(sessionLimitResetText(only(s.messages))).toBe(
+      "resets 3:10pm (Asia/Calcutta)",
+    );
+  });
+
+  it("returns null when the line has no reset clause to read", () => {
+    const s = parse(limit(1, "You've hit your session limit"));
+    expect(sessionLimitResetText(only(s.messages))).toBeNull();
   });
 });
 

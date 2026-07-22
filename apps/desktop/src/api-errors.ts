@@ -78,6 +78,18 @@ export function isRetryableApiError(msg: ConversationMessage): boolean {
   return false;
 }
 
+/** The transcript's final turn if it's an assistant turn, else null — the shared
+ *  "is the session parked on its own last turn right now?" check. Anything the
+ *  user or a later real reply added past it means there's nothing to act on. */
+function endAssistantTurn(
+  session: ParsedSession | null | undefined,
+): ConversationMessage | null {
+  const messages = session?.messages;
+  if (!messages || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  return last.role === "assistant" ? last : null;
+}
+
 /**
  * The transcript's final turn, if it's a retryable failure — i.e. the session
  * is sitting stuck right now. Anything after the error (Claude recovered on its
@@ -86,11 +98,41 @@ export function isRetryableApiError(msg: ConversationMessage): boolean {
 export function retryableApiErrorAtEnd(
   session: ParsedSession | null | undefined,
 ): ConversationMessage | null {
-  const messages = session?.messages;
-  if (!messages || messages.length === 0) return null;
-  const last = messages[messages.length - 1];
-  if (last.role !== "assistant") return null;
-  return isRetryableApiError(last) ? last : null;
+  const last = endAssistantTurn(session);
+  return last && isRetryableApiError(last) ? last : null;
+}
+
+/**
+ * A session limit ("You've hit your session limit · resets …") — Claude writes
+ * it as a real rate_limit API-error turn (status 429). It's deliberately absent
+ * from {@link isRetryableApiError}: retrying can't clear it until the window
+ * resets, so the silent watcher must never auto-burn requests against it. But
+ * once the reset lands a plain "Please continue" resumes the work, so the
+ * composer offers a manual, click-to-send nudge instead (see sessionLimitAtEnd).
+ */
+export function isSessionLimitError(msg: ConversationMessage): boolean {
+  return msg.apiError?.kind === "rate_limit";
+}
+
+/** The final turn if the session is parked on a session limit right now, else
+ *  null — the manual-pill counterpart to {@link retryableApiErrorAtEnd}. */
+export function sessionLimitAtEnd(
+  session: ParsedSession | null | undefined,
+): ConversationMessage | null {
+  const last = endAssistantTurn(session);
+  return last && isSessionLimitError(last) ? last : null;
+}
+
+/**
+ * The reset clause Claude printed ("resets 3:10pm (Asia/Calcutta)"), pulled from
+ * the visible text for DISPLAY ONLY — it never gates behaviour. If the line
+ * isn't in the shape we know, we return null and show nothing rather than parse
+ * a wall-clock time out of it (timezone-fragile, and the button works regardless
+ * — clicking before the reset just re-hits the limit and the pill returns).
+ */
+export function sessionLimitResetText(msg: ConversationMessage): string | null {
+  const m = /resets\s+\S.*$/i.exec(messageText(msg).trim());
+  return m ? m[0].replace(/\s+/g, " ").trim() : null;
 }
 
 /**
