@@ -127,6 +127,47 @@ export async function discoverRepos(
   );
 }
 
+/**
+ * Remote branch names per repo (subPath → sorted names), for base-branch
+ * autocomplete in the worktree modals. Reads local remote-tracking refs
+ * (`refs/remotes/*`), strips the `<remote>/` prefix, dedupes across remotes,
+ * and drops the symbolic `HEAD`. These are hints only: the create/add flow
+ * still fetches whatever base the user commits to, so a branch that isn't
+ * listed here (e.g. not fetched yet) is perfectly fine to type by hand.
+ */
+export async function remoteBranchesByRepo(
+  encoded: string,
+): Promise<Record<string, string[]>> {
+  const layout = await repoLayout(encoded);
+  const entries = await Promise.all(
+    layout.map(
+      async (r) => [r.subPath, await remoteBranchesAt(r.path)] as const,
+    ),
+  );
+  return Object.fromEntries(entries);
+}
+
+async function remoteBranchesAt(cwd: string): Promise<string[]> {
+  const r = await run(cwd, [
+    "for-each-ref",
+    "--format=%(refname:short)",
+    "refs/remotes",
+  ]);
+  if (r.code !== 0) return [];
+  const names = new Set<string>();
+  for (const line of r.stdout.split("\n")) {
+    const ref = line.trim();
+    if (!ref) continue;
+    // "<remote>/<branch>" → "<branch>"; skip the symbolic "origin/HEAD".
+    const slash = ref.indexOf("/");
+    if (slash < 0) continue;
+    const name = ref.slice(slash + 1);
+    if (!name || name === "HEAD") continue;
+    names.add(name);
+  }
+  return [...names].sort();
+}
+
 /** Absolute cwd for the repo at `subPath` within a project (first repo when
  *  `subPath` doesn't match), or null with no repos. Cached — zero spawns in
  *  steady state, unlike discoverRepos which re-reads branches. */

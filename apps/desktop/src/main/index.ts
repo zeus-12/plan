@@ -107,6 +107,7 @@ import {
   discardAll,
   discardFile,
   discoverRepos,
+  remoteBranchesByRepo,
   getBranch,
   getStatus,
   getWorkingTreeDiff,
@@ -501,6 +502,7 @@ const invokeHandlers: {
   "claudeConfig:write": (_e, path, text) => writeClaudeConfig(path, text),
 
   "repos:list": (_e, encoded) => discoverRepos(encoded),
+  "repos:branches": (_e, encoded) => remoteBranchesByRepo(encoded),
 
   // Worktrees
   "worktrees:list": (_e, encoded) => listWorktrees(encoded),

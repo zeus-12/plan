@@ -189,6 +189,11 @@ export interface IpcInvokeContract {
 
   // Repos & worktrees
   "repos:list": { args: [encoded: string]; result: DiscoveredRepo[] };
+  "repos:branches": {
+    args: [encoded: string];
+    /** subPath → that repo's remote branch names (for base autocomplete). */
+    result: Record<string, string[]>;
+  };
   "worktrees:list": { args: [encoded: string]; result: WorktreeRecord[] };
   "worktrees:listAll": { args: []; result: WorktreeRecord[] };
   "worktrees:create": {
@@ -408,6 +413,7 @@ export const API_INVOKE = {
   writeClaudeConfig: "claudeConfig:write",
 
   listRepos: "repos:list",
+  listRepoBranches: "repos:branches",
   listWorktrees: "worktrees:list",
   listAllWorktrees: "worktrees:listAll",
   createWorktree: "worktrees:create",
