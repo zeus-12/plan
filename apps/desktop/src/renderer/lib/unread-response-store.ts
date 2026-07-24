@@ -147,6 +147,23 @@ export function useSessionHasUnread(id: string | null): boolean {
 }
 
 /**
+ * Read-only accessors mirroring session-approval-store, so an external consumer
+ * (the attention switcher) can enumerate replied-but-unseen session ids and the
+ * currently-viewed session without reaching into module internals. Kept minimal
+ * and side-effect-free so the feature that uses them stays easy to remove.
+ */
+export function currentUnreadIds(): string[] {
+  return [...unread];
+}
+export function subscribeUnread(listener: () => void): () => void {
+  return subscribe(listener);
+}
+/** The chat id whose transcript is the on-screen pane, or null. */
+export function getViewedId(): string | null {
+  return viewedId;
+}
+
+/**
  * The set of target `encoded` cwds with at least one replied-but-unseen session.
  * The sidebar rolls its own encoded plus its worktrees' into one badge.
  */

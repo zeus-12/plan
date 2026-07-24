@@ -84,6 +84,8 @@ import {
 import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
+import { AttentionSwitcher } from "./attention-switcher";
+import type { AttentionTarget } from "./attention-switcher";
 import { pushToast } from "./lib/toast-store";
 import {
   getMruScopeVersion,
@@ -785,6 +787,20 @@ function Shell() {
         : selectProject(t.projectEncoded),
   });
 
+  // ── Global attention switcher (double-tap Ctrl) ─────────────────────
+  // Self-contained in ./attention-switcher; App only supplies the data it
+  // already has and the landing action. Deleting the feature = remove that
+  // file, this callback, and the <AttentionSwitcher/> mount below.
+  const handleAttentionNavigate = useCallback(
+    (t: AttentionTarget) => {
+      openProjectTab(t.encoded, makeChatTab(t.sessionId));
+      if (t.worktreeId) selectWorktree(t.projectEncoded, t.worktreeId);
+      else selectProject(t.encoded);
+      setDashboardOpen(false);
+    },
+    [selectWorktree, selectProject],
+  );
+
   return (
     <div className="flex h-screen w-full flex-row overflow-hidden bg-[var(--bg-surface)] text-[var(--text)]">
       {/* App-root toast host — always mounted, so notifications show regardless
@@ -956,6 +972,11 @@ function Shell() {
           }))}
         />
       )}
+      <AttentionSwitcher
+        projects={activeProjects}
+        worktreesByProject={allWorktrees.byProject}
+        onNavigate={handleAttentionNavigate}
+      />
       {confirmDialog}
     </div>
   );
