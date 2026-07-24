@@ -1,5 +1,7 @@
 # plan
 
+![plan](assets/plan.png)
+
 Review & iterate on code and messages w.o copy pasting your life away :)
 
 Two pieces live here:
