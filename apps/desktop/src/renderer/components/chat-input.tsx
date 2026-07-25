@@ -475,7 +475,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       )}
       {/* Centered to match the message column's max width (see message-list). */}
       <div
-        className={`mx-auto flex w-full max-w-[820px] flex-col rounded-lg border bg-[var(--bg)] transition-colors ${
+        className={`mx-auto flex w-full max-w-[820px] flex-col rounded-2xl border bg-[var(--bg-surface)] transition-colors ${
           bashMode
             ? "border-[var(--accent)]"
             : "border-[var(--border)] focus-within:border-[var(--border-strong)]"
@@ -497,13 +497,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                 <ContentEditable
                   aria-placeholder={placeholder}
                   placeholder={
-                    <div className="pointer-events-none absolute left-3 top-2.5 select-none text-[13px] leading-relaxed text-[var(--text-tertiary)]">
+                    <div className="pointer-events-none absolute left-4 top-3 select-none text-[13px] leading-relaxed text-[var(--text-tertiary)]">
                       {placeholder}
                     </div>
                   }
                   spellCheck={false}
                   style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
-                  className={`w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-3 pb-1 pt-2.5 text-[13px] leading-relaxed text-[var(--text)] outline-none ${
+                  className={`w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-1 pt-3 text-[13px] leading-relaxed text-[var(--text)] outline-none ${
                     inactive ? "cursor-pointer" : ""
                   }`}
                 />
@@ -544,7 +544,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         </div>
 
         {/* Bottom row: attachment chips (left) · ⌘L hint + send (right). */}
-        <div className="flex items-end justify-between gap-2 px-2 pb-1.5">
+        <div className="flex items-end justify-between gap-2 px-2.5 pb-2">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             {bashMode && (
               <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
@@ -598,7 +598,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                     ? "Saving image…"
                     : "Send (Enter)"
               }
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--bg)] transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--bg)] transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <SendIcon />
             </button>
@@ -886,8 +886,8 @@ function FocusPlugin({
 function SendIcon() {
   return (
     <svg
-      width="15"
-      height="15"
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
