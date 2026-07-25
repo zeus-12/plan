@@ -206,58 +206,56 @@ function applyEdit(
 }
 
 /**
- * Disclosure block whose body animates open/closed via a grid-rows transition —
- * smooth, with no layout shift and no max-height guessing.
+ * A thinking block, shaped like {@link ToolCallBlock} — a borderless one-line
+ * summary ("Thought" + the first words of the reasoning + a chevron) that
+ * expands into a bordered panel. Same row height, same muted verb, so a turn's
+ * thinking and its tool calls read as one column of activity lines.
  */
-function CollapsibleBlock({
-  label,
-  preview,
-  children,
-  /** Exclude the preview + body from ⌘F find (bulky tool args/output); the
-   *  label (e.g. the tool name) stays searchable. */
-  skipFindContent = false,
-}: {
-  label: string;
-  preview: string;
-  children: React.ReactNode;
-  skipFindContent?: boolean;
-}) {
+function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
+  // Newlines collapsed: the summary is one line, and raw breaks would leave
+  // gaps mid-row before CSS truncation kicks in.
+  const preview = useMemo(
+    () => truncate(text.replace(/\s+/g, " ").trim(), 200),
+    [text],
+  );
   return (
-    <div className="rounded-md border border-[var(--border)] bg-[var(--bg)]">
+    <div>
       <button
         onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]"
+        className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
       >
-        <span
-          className={cn(
-            "inline-block text-[9px] transition-transform duration-200",
-            open && "rotate-90",
-          )}
-        >
-          ▶
-        </span>
-        <span className="shrink-0 whitespace-nowrap text-[var(--text-secondary)]">
-          {label}
-        </span>
-        {!open && preview && (
+        <span className="shrink-0 text-[var(--text-tertiary)]">Thought</span>
+        {preview && (
           <span
-            className="min-w-0 truncate text-[var(--text-tertiary)]"
-            data-find-skip={skipFindContent ? "" : undefined}
+            className="min-w-0 truncate text-[var(--text-secondary)]"
+            data-find-skip=""
           >
+            {" "}
             {preview}
           </span>
         )}
+        <Chevron
+          open={open}
+          size={12}
+          className="text-[var(--text-tertiary)] duration-200"
+        />
       </button>
-      {/* The raw body is excluded from comment text (data-anno-skip): a comment
-          spanning this block captures its summary line, not the dump inside. */}
+      {/* The body is excluded from comment text (data-anno-skip): a comment
+          spanning this block captures its summary line, not the reasoning. */}
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
-        data-find-skip={skipFindContent ? "" : undefined}
+        data-find-skip=""
         data-anno-skip=""
       >
-        <div className="overflow-hidden">{children}</div>
+        <div className="overflow-hidden">
+          <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+            <div className="max-h-[400px] select-text overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-[var(--text-tertiary)] [cursor:text]">
+              {text}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -513,14 +511,9 @@ function ToolCallBlock({
 }
 
 /** Monospace, scrollable code body used inside disclosure blocks. */
-function CodeBody({ text, className }: { text: string; className?: string }) {
+function CodeBody({ text }: { text: string }) {
   return (
-    <pre
-      className={cn(
-        "max-h-[400px] select-text overflow-auto whitespace-pre-wrap break-all font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--text-secondary)] [cursor:text]",
-        className,
-      )}
-    >
+    <pre className="max-h-[400px] select-text overflow-auto whitespace-pre-wrap break-all font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--text-secondary)] [cursor:text]">
       {text}
     </pre>
   );
@@ -964,14 +957,7 @@ function renderPartContent({
       return <MarkdownText text={part.text} />;
     }
     case "thinking":
-      return (
-        <CollapsibleBlock
-          label="💭 Thinking"
-          preview={truncate(part.text, 120)}
-        >
-          <CodeBody text={part.text} className="px-3 pb-3" />
-        </CollapsibleBlock>
-      );
+      return <ThinkingBlock text={part.text} />;
     case "tool_use": {
       // AskUserQuestion gets a rich card: question + options, clickable while
       // pending (drives the TUI selector via keystrokes).
