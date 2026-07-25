@@ -132,6 +132,25 @@ export function CommandPalette({
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [items]);
 
+  // Escape closes the palette from anywhere, not just when focus happens to sit
+  // in its input — an overlay this modal owns the key while it's up. Capture
+  // phase + stopPropagation so the listeners underneath (the workspace's
+  // Escape-closes-the-terminal-dock handler, xterm) don't also react to the same
+  // press.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      onCloseRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -155,12 +174,6 @@ export function CommandPalette({
               prev?.id === id && prev.query === query ? prev : { query, id },
             )
           }
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onClose();
-            }
-          }}
         >
           <Command.Input
             ref={inputRef}
