@@ -276,7 +276,11 @@ export interface ProjectDefaults {
    * in the type so existing `worktrees.json` data round-trips.
    */
   branchPrefix?: string;
-  /** subPath → setup command (run once on worktree creation). */
+  /**
+   * Legacy per-repo setup map (subPath → command). Never executed — no longer
+   * surfaced in the UI; kept in the type so existing `worktrees.json` data
+   * round-trips.
+   */
   setup?: Record<string, string>;
   /**
    * Legacy per-repo run map (subPath → dev-server command). Superseded by the
