@@ -827,33 +827,31 @@ export function ProjectSidebar({
         <Button
           variant="outline"
           size="sm"
-          className="h-10 w-full justify-center"
+          className="h-9 flex-1 justify-center"
           onClick={onAddProject}
         >
           + Add project
         </Button>
         {archived.length > 0 && (
-          <div className="mt-2 flex justify-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="Archived projects"
-                  onClick={() => setArchivedView((v) => !v)}
-                  className={cn(
-                    archivedView &&
-                      "border-[var(--accent)] text-[var(--accent)]",
-                  )}
-                >
-                  <TrashIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {archivedView ? "Back to projects" : "Archived projects"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Archived projects"
+                onClick={() => setArchivedView((v) => !v)}
+                className={cn(
+                  "size-9 shrink-0",
+                  archivedView && "border-[var(--accent)] text-[var(--accent)]",
+                )}
+              >
+                <TrashIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {archivedView ? "Back to projects" : "Archived projects"}
+            </TooltipContent>
+          </Tooltip>
         )}
       </SidebarFooter>
 

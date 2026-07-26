@@ -170,6 +170,7 @@ export function SessionList({
                 aria-label="Archived chats"
                 onClick={() => setArchivedView((v) => !v)}
                 className={cn(
+                  "size-9 shrink-0",
                   archivedView && "border-[var(--accent)] text-[var(--accent)]",
                 )}
               >
