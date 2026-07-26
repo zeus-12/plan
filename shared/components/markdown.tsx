@@ -501,10 +501,19 @@ const COMPONENTS = {
     );
   },
   table: ({ className, ...p }: Props<"table">) => (
-    <div className="my-2 overflow-x-auto">
+    <div className="my-3 overflow-x-auto">
       <table
         className={cn(
-          "w-full border-collapse text-[12px] [&_td]:border [&_td]:border-[var(--border)] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[var(--border)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold",
+          "w-max max-w-full border-collapse text-[0.9em]",
+          // The root's [word-break:break-word] (= overflow-wrap: anywhere) drops
+          // every cell's min-content to one character, so auto layout crushes
+          // short columns ("Severity" as "Se ve rit y"). Cells opt out; code
+          // spans keep breaking so identifier columns still compress.
+          "[&_td]:[word-break:normal] [&_td]:[overflow-wrap:break-word]",
+          "[&_th]:[word-break:normal] [&_th]:[overflow-wrap:break-word]",
+          "[&_code]:[overflow-wrap:anywhere]",
+          "[&_td]:border [&_td]:border-[var(--border)] [&_td]:px-3 [&_td]:py-1.5 [&_td]:align-top",
+          "[&_th]:border [&_th]:border-[var(--border)] [&_th]:px-3 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold",
           className,
         )}
         {...p}
