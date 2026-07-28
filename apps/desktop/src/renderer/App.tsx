@@ -101,6 +101,7 @@ import { startSessionDoneNotifier } from "./lib/session-done-notifier";
 import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
 import { startAutoContinueWatcher } from "./lib/auto-continue-watcher";
 import { preloadChatEngines } from "./lib/chat-engine-settings";
+import { preloadExternalApps } from "./lib/external-apps-store";
 import {
   setSessionLabelResolver,
   setSessionNavigator,
@@ -576,6 +577,9 @@ function Shell() {
   // fact by the time a session's UI depends on it rather than something the
   // first chat has to wait on.
   useEffect(() => preloadChatEngines(), []);
+  // Detecting installed apps shells out once per candidate bundle id; do it at
+  // startup so the "Open in" control resolves before it's first rendered.
+  useEffect(() => preloadExternalApps(), []);
   // Watch every live Claude session for completion and notify globally. Started
   // once here at the app root so it covers background sessions too, not just the
   // one on screen.

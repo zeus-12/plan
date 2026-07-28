@@ -34,6 +34,7 @@ import type {
   CreatePrResult,
   CreateWorktreeInput,
   DiscoveredRepo,
+  ExternalApp,
   FileContents,
   FileImageDiff,
   FileView,
@@ -368,6 +369,26 @@ export interface IpcInvokeContract {
   /** Opens the release download page in the user's browser. */
   "updates:openDownload": { args: [url: string]; result: void };
 
+  // "Open in…" — external macOS apps. Targets are addressed the same way as
+  // every other workspace path (encoded + optional subPath + optional relPath),
+  // so main resolves the absolute path and the renderer never holds one.
+  /** Apps confirmed installed. Empty off macOS. */
+  "apps:list": { args: []; result: ExternalApp[] };
+  "apps:open": {
+    args: [
+      appId: string,
+      encoded: string,
+      relPath: string | null,
+      subPath?: string,
+    ];
+    result: { ok: boolean; error?: string };
+  };
+  /** Absolute path for a target — backs the menu's "Copy path". */
+  "apps:resolvePath": {
+    args: [encoded: string, relPath: string | null, subPath?: string];
+    result: string;
+  };
+
   // Per-worktree scratchpad
   "scratch:read": { args: [encoded: string]; result: ScratchData | null };
   "scratch:write": { args: [encoded: string, data: ScratchData]; result: void };
@@ -482,6 +503,10 @@ export const API_INVOKE = {
 
   checkForUpdate: "updates:check",
   openUpdateDownload: "updates:openDownload",
+
+  listExternalApps: "apps:list",
+  openInExternalApp: "apps:open",
+  resolveTargetPath: "apps:resolvePath",
 
   readScratch: "scratch:read",
   writeScratch: "scratch:write",

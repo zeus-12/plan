@@ -6,6 +6,7 @@ import { useProjectAnnotations } from "../lib/annotation-store";
 import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
 import { useDiffBlame } from "../lib/use-diff-blame";
+import { OpenInMenu } from "./open-in-menu";
 import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
 import {
@@ -508,6 +509,7 @@ function FileDiffViewerImpl({
             </TooltipTrigger>
             <TooltipContent side="bottom">{formatTooltip}</TooltipContent>
           </Tooltip>
+          <OpenInMenu encoded={encoded} relPath={file.path} subPath={subPath} />
           {/* InteractiveDiff portals its settings gear here. */}
           <div ref={setSettingsSlot} className="flex items-center" />
         </div>

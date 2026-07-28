@@ -40,6 +40,11 @@ import {
   writeClaudeConfig,
 } from "./providers/claude-code/instructions";
 import { readScratch, writeScratch } from "./scratch-store";
+import {
+  listExternalApps,
+  openInExternalApp,
+  resolveTargetPath,
+} from "./external-apps";
 import type {
   ProjectEntry,
   SessionEvent,
@@ -618,6 +623,14 @@ const invokeHandlers: {
   "updates:openDownload": (_e, url) => {
     if (/^https:\/\/github\.com\//.test(url)) void shell.openExternal(url);
   },
+
+  // "Open in…": which apps are actually installed, and launching one on a
+  // workspace path. See main/external-apps.ts — nothing here is guessed.
+  "apps:list": () => listExternalApps(),
+  "apps:open": (_e, appId, encoded, relPath, subPath) =>
+    openInExternalApp(appId, encoded, relPath, subPath),
+  "apps:resolvePath": (_e, encoded, relPath, subPath) =>
+    resolveTargetPath(encoded, relPath, subPath),
 
   // Per-worktree scratchpad: durable notepad content persisted to ~/.plan.
   "scratch:read": (_e, encoded) => readScratch(encoded),

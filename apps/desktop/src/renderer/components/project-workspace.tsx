@@ -83,6 +83,7 @@ import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { CommandsConfigModal } from "./commands-config-modal";
 import { ThemeMenu } from "./theme-menu";
+import { OpenInMenu } from "./open-in-menu";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
 import { mergeSession } from "../lib/merge-session";
@@ -192,6 +193,7 @@ function WorkspaceHeader({
         )}
       </div>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
+        <OpenInMenu encoded={project.encoded} />
         <ThemeMenu />
         <Tooltip>
           <TooltipTrigger asChild>

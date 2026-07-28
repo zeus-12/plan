@@ -561,6 +561,22 @@ export interface ScratchData {
   language: string;
 }
 
+/**
+ * What kind of target an "Open in…" app expects: a terminal takes a working
+ * directory (never a file), a file manager reveals rather than opens, an
+ * editor takes the path as given.
+ */
+export type ExternalAppKind = "editor" | "terminal" | "file-manager";
+
+/** An app confirmed installed, offered in the "Open in…" menu. */
+export interface ExternalApp {
+  id: string;
+  label: string;
+  kind: ExternalAppKind;
+  /** file:// URL of the bundle's real icon; null when it couldn't be read. */
+  icon: string | null;
+}
+
 /** One project file read for the viewer. */
 export interface ProjectFile {
   text: string;
