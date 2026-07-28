@@ -47,7 +47,10 @@ import {
   type ProjectFileAnnotationInput,
 } from "../lib/annotation-store";
 import { chatTerminalId, chatTerminalPrefix } from "../../terminal-ids";
-import { setViewedSession } from "../lib/unread-response-store";
+import {
+  markSessionUnread,
+  setViewedSession,
+} from "../lib/unread-response-store";
 import { useTerminalHeight } from "../lib/terminal-store";
 import { useTerminalRegistry } from "../lib/use-terminal-registry";
 import { useWorkspaceTabs } from "../lib/use-workspace-tabs";
@@ -750,6 +753,27 @@ function ProjectWorkspaceImpl({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [handleToggleArchiveCurrentChat, openKind, selectedSessionId]);
+
+  // ⌘⇧U: flag the open chat unread and close its tab — the "I'll come back to
+  // this" move, same state the row's "Mark as unread" sets.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "u"
+      ) {
+        if (openKind !== "chat" || !selectedSessionId) return;
+        e.preventDefault();
+        markSessionUnread(chatTerminalId(project.encoded, selectedSessionId));
+        closeTab(chatTabId(selectedSessionId));
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openKind, selectedSessionId, project.encoded, closeTab]);
 
   const refreshTranscript = useCallback(
     async (sid: string) => {

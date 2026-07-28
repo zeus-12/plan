@@ -190,6 +190,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         when: "chat selected",
       },
       {
+        id: "markChatUnread",
+        label: "Mark chat unread & close tab",
+        chords: [{ mods: ["meta", "shift"], key: "U" }],
+        when: "chat selected",
+      },
+      {
         id: "renameChat",
         label: "Rename chat",
         chords: [{ mods: ["meta", "shift"], key: "R" }],
