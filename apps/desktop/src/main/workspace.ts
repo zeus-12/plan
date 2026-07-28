@@ -1,5 +1,5 @@
 import { join } from "path";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveProjectCwd } from "./providers/claude-code/projects";
 
 /**
  * Resolve a workspace address — an `encoded` project key plus optional

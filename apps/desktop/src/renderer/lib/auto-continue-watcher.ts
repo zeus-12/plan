@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { currentBusyIds, subscribeActivity } from "./terminal-activity-store";
-import { isChatTerminalId, parseChatTerminalId } from "../../terminal-ids";
+import { currentBusyIds, subscribeActivity } from "./session-activity-store";
+import { parseChatTerminalId } from "../../terminal-ids";
 import { isRetryableApiError, recoveredAfter } from "../../api-errors";
 import { getAutoContinueEnabled } from "./auto-continue-settings";
 
@@ -37,12 +37,12 @@ const SETTLE_MS = 350;
 /** The nudge itself. Deliberately plain: it has to read as a normal turn. */
 export const CONTINUE_TEXT = "Please continue";
 
-// Per chat pty: the uuid of the API error we already auto-continued. Memory
+// Per chat: the uuid of the API error we already auto-continued. Memory
 // only — after a restart the flip that would have fired is long past, so the
 // worst case is a pill where there'd have been a silent retry.
 const spentOn = new Map<string, string>();
 
-// Chat ptys we're in the middle of auto-continuing. The composer hides its pill
+// Chats we're in the middle of auto-continuing. The composer hides its pill
 // for these so a retry we're already making doesn't flash a button at the user.
 const inFlight = new Set<string>();
 const listeners = new Set<() => void>();
@@ -59,7 +59,7 @@ function subscribeInFlight(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-/** Whether an auto-continue is being sent for this chat pty right now. */
+/** Whether an auto-continue is being sent for this chat right now. */
 export function useAutoContinueInFlight(terminalId: string | null): boolean {
   return useSyncExternalStore(
     subscribeInFlight,
@@ -86,10 +86,10 @@ async function onTurnEnded(id: string) {
 
     // Re-check the live facts rather than trusting the snapshot that woke us.
     // A failure to confirm is a reason to stay quiet, not to proceed.
-    if ((await window.electronAPI.terminalBusyIds()).includes(id)) return;
-    const { state } = await window.electronAPI.terminalInputState(id);
-    // A menu is up: "Please continue" would be typed AT the menu and answer it.
-    if (state === "selection") return;
+    if ((await window.electronAPI.busyChatIds()).includes(id)) return;
+    // Waiting on the user: "Please continue" would land ON the prompt and
+    // answer it.
+    if (await window.electronAPI.probeChatApproval(id)) return;
 
     // No cursor — we want the whole transcript, and passing one would disturb
     // the cursor the open chat tab keeps for this session.
@@ -112,9 +112,9 @@ async function onTurnEnded(id: string) {
     }
 
     spentOn.set(id, last.uuid);
-    // Main pastes the body and sends Enter as a separate keystroke a beat
-    // later; the transcript is what confirms it landed, so we claim nothing here.
-    window.electronAPI.terminalSubmit(id, CONTINUE_TEXT, []);
+    // The engine owns delivery; the transcript is what confirms it landed, so
+    // we claim nothing here.
+    window.electronAPI.sendToChat(id, CONTINUE_TEXT, []);
   } catch {
     // Couldn't read the session or confirm its state — send nothing.
   } finally {
@@ -123,8 +123,7 @@ async function onTurnEnded(id: string) {
 }
 
 function tick() {
-  // Only chat ptys are Claude sessions; a scratch shell must never be typed into.
-  const now = new Set(currentBusyIds().filter(isChatTerminalId));
+  const now = new Set(currentBusyIds());
   for (const id of prevBusy) {
     if (!now.has(id)) void onTurnEnded(id);
   }
@@ -134,9 +133,9 @@ function tick() {
 /** Start the watcher. Idempotent; returns a stop function. */
 export function startAutoContinueWatcher(): () => void {
   if (unsub) return stopAutoContinueWatcher;
-  // A killed pty drops out of the busy set the same way a finished turn does —
-  // forget it on the exit event so we never nudge a session the user just ended.
-  unsubExit = window.electronAPI.onTerminalExit((id) => {
+  // An ended session drops out of the busy set the same way a finished turn
+  // does — forget it on exit so we never nudge a session the user just ended.
+  unsubExit = window.electronAPI.onChatExit((id) => {
     prevBusy.delete(id);
     spentOn.delete(id);
     setInFlight(id, false);

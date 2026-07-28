@@ -1,13 +1,13 @@
 import { readFile, writeFile, readdir, mkdir } from "fs/promises";
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
-import { resolveProjectCwd } from "./claude-projects";
-import { CLAUDE_PROJECTS_DIR } from "./claude-sessions";
+import { resolveProjectCwd } from "./projects";
+import { CLAUDE_PROJECTS_DIR } from "./sessions";
 import type {
   ClaudeConfigBundle,
   ClaudeConfigFile,
   ClaudeConfigScope,
-} from "../shared-types";
+} from "../../../shared-types";
 
 /**
  * Resolves and edits the files that shape Claude's behaviour, the same way

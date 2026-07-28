@@ -1,28 +1,28 @@
 import { useSyncExternalStore } from "react";
-import { isChatTerminalId, parseChatTerminalId } from "../../terminal-ids";
+import { parseChatTerminalId } from "../../terminal-ids";
 
 /**
- * Live "which chat sessions are parked on an approval/selection menu" signal.
+ * Live "which chat sessions are parked waiting on the user" signal.
  *
- * The truth is Claude's rendered screen: an approval or plan/question menu draws
- * a numbered selector (or a footer like "Esc to cancel"), which main detects off
- * the headless emulator it keeps current for EVERY session — backgrounded ones
- * included — and gates on a live agent process (see tui-screen.ts /
- * terminal.ts). Event-fed, not polled: main evaluates after each output burst
- * and pushes only CHANGES over `terminal:activity`; one snapshot fetch seeds
- * the set on first subscribe. Fans out to:
+ * The fact comes from whichever engine drives the session and arrives on
+ * `chat:activity` as `awaitingApproval`. For the terminal engine that's
+ * Claude's rendered screen: an approval or plan/question menu draws a numbered
+ * selector (or a footer like "Esc to cancel"), detected off the headless
+ * emulator main keeps current for EVERY session — backgrounded ones included —
+ * and gated on a live agent process (see tui-screen.ts / terminal.ts). Another
+ * engine may know it from a structured request instead. Event-fed, not polled:
+ * engines push only CHANGES, and one snapshot fetch seeds the set on first
+ * subscribe. Fans out to:
  *   - the notifier (toast + OS banner when a session newly parks), and
  *   - sidebar badges (which project / worktree / session is waiting on you).
  *
- * This mirrors terminal-activity-store (the "working" signal); the two are kept
- * separate because a session that's waiting on a menu still repaints its prompt,
- * so it reads as "working" the whole time the menu is up — the two states
- * coexist and must be tracked independently.
+ * This mirrors session-activity-store (the "working" signal); the two are kept
+ * separate because a session waiting on a menu is still mid-turn, so it reads
+ * as "working" the whole time the menu is up — the two states coexist and must
+ * be tracked independently.
  */
 
-// Chat ids currently parked on a menu. Only `chat:` ptys are Claude sessions;
-// main can't emit a non-chat menu here, but we filter anyway so a stray
-// scratch-shell TUI never raises an approval badge.
+// Chat ids currently waiting on the user.
 let awaiting = new Set<string>();
 // The same set projected to target `encoded` cwds — rebuilt only when `awaiting`
 // changes, so `useApprovalEncodedSet` gets a stable reference between events
@@ -48,7 +48,6 @@ function rebuildEncoded() {
 }
 
 function setAwaiting(id: string, waiting: boolean) {
-  if (!isChatTerminalId(id)) return;
   if (waiting === awaiting.has(id)) return;
   awaiting = new Set(awaiting);
   if (waiting) awaiting.add(id);
@@ -61,24 +60,24 @@ function start() {
   if (offs) return;
   touchedDuringSeed = new Set();
   offs = [
-    window.electronAPI.onTerminalActivity((id, activity) => {
+    window.electronAPI.onChatActivity((id, activity) => {
       touchedDuringSeed?.add(id);
-      setAwaiting(id, activity.awaitingSelection);
+      setAwaiting(id, activity.awaitingApproval);
     }),
-    // A killed pty's menu isn't actionable; drop it. Deferred a tick so every
-    // terminal:exit listener (the approval notifier prunes its notified set)
+    // An ended session's menu isn't actionable; drop it. Deferred a tick so
+    // every chat:exit listener (the approval notifier prunes its notified set)
     // runs first.
-    window.electronAPI.onTerminalExit((id) => {
+    window.electronAPI.onChatExit((id) => {
       setTimeout(() => setAwaiting(id, false), 0);
     }),
   ];
   // Seed with the current fleet state; events arriving meanwhile win.
   void window.electronAPI
-    .terminalSelectionIds()
+    .approvalChatIds()
     .then((ids) => {
       if (!offs) return; // stopped while the snapshot was in flight
       const seeded = new Set(awaiting);
-      for (const id of ids.filter(isChatTerminalId)) {
+      for (const id of ids) {
         if (!touchedDuringSeed?.has(id)) seeded.add(id);
       }
       touchedDuringSeed = null;

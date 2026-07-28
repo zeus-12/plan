@@ -137,15 +137,19 @@ textarea {
  *      scrollable content (the screen is absolutely positioned to fill it), so
  *      it paints a full-height thumb that never moves — the dead bar; and
  *   2. the real VS Code overlay scrollbar (`.xterm-scrollable-element .slider`),
- *      which actually drives scrolling but fades to opacity 0 when idle AND is
- *      themed at just 0.2 opacity of the foreground, so it's all but invisible.
- * Kill the legacy track, then make the real slider an honest, visible scrollbar
- * styled like the app's other scrollbars (the tab strip): a rounded thumb in
- * `--border-strong`, brightening to `--text-tertiary` on hover. We keep it
- * shown whenever the buffer is scrollable — xterm marks the slider
- * `.invisible.fade` when scrollable-but-idle and plain `.invisible` when there
- * is nothing to scroll (see scrollbarVisibilityController), so un-hiding only
- * the `.fade` case leaves no phantom bar when the output fits on screen.
+ *      which actually drives scrolling.
+ * Kill the legacy track, and style the real slider like the app's other
+ * scrollbars (the tab strip): a rounded thumb in `--border-strong`, brightening
+ * to `--text-tertiary` on hover.
+ *
+ * Its VISIBILITY is left entirely to xterm: the slider fades in while you're
+ * scrolling and back out when idle, the way an overlay scrollbar is meant to.
+ * We previously forced the idle-but-scrollable state (`.invisible.fade`) to
+ * stay on screen, which left a permanently parked bar in Claude chats that did
+ * nothing — xterm's `.invisible` also sets `pointer-events: none`, so it was
+ * unclickable by construction. Restoring opacity/pointer-events/z-index to
+ * match `.visible` did not bring it back either, so the override is gone
+ * rather than kept in a state nobody has explained.
  */
 .xterm .xterm-viewport {
   overflow-y: hidden !important;
@@ -166,10 +170,6 @@ textarea {
 .xterm .xterm-scrollable-element > .scrollbar > .slider:hover,
 .xterm .xterm-scrollable-element > .scrollbar > .slider.active {
   background-color: var(--text-tertiary) !important;
-}
-.xterm .xterm-scrollable-element > .invisible.fade {
-  opacity: 1 !important;
-  transition: none !important;
 }
 
 /*

@@ -1,6 +1,6 @@
 import { createJsonStore } from "./json-store";
-import { primeProjectCwd } from "./claude-projects";
-import { encodeCwd } from "./claude-encoding";
+import { primeProjectCwd } from "./providers/claude-code/projects";
+import { encodeCwd } from "./providers/claude-code/encoding";
 
 interface Stored {
   manualCwds: string[];

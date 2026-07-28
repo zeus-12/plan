@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSessionJsonl } from "../src/main/jsonl-parser";
+import { parseSessionJsonl } from "../src/main/providers/claude-code/transcript";
 import {
   isRetryableApiError,
   isSessionLimitError,

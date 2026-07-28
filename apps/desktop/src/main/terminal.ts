@@ -1,15 +1,8 @@
 import type { IPty } from "node-pty";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
-import { agentProcessFor } from "./agent-probe";
 import { defaultShell, shellEnv } from "./shell-env";
 import { resolveWorkspaceCwd } from "./workspace";
-import { classifyInputState, screenIsBusy } from "./tui-screen";
-import type {
-  TerminalActivity,
-  TerminalChunk,
-  TerminalInfo,
-  TerminalInputState,
-} from "../shared-types";
+import type { TerminalChunk, TerminalInfo } from "../shared-types";
 
 interface Session {
   /** The pty's CURRENT terminal id — the key it's stored under in `sessions`.
@@ -26,12 +19,6 @@ interface Session {
    *  whether the renderer's xterm is visible — so we can read the rendered
    *  screen (the input box vs. an approval menu) even from the diffs tab. */
   screen: HeadlessTerminal;
-  /** Trailing debounce for the activity evaluation after output. */
-  evalTimer: ReturnType<typeof setTimeout> | null;
-  /** Supersede marker: only the newest in-flight evaluation may emit. */
-  evalGen: number;
-  /** Last activity pushed to the renderer — emit only on change. */
-  lastActivity: TerminalActivity;
 }
 
 /**
@@ -40,19 +27,32 @@ interface Session {
  * session the user has continued (see the renderer's id scheme).
  */
 const sessions = new Map<string, Session>();
-let onData: ((chunk: TerminalChunk) => void) | null = null;
-let onExit: ((id: string) => void) | null = null;
-let onActivity: ((id: string, activity: TerminalActivity) => void) | null =
-  null;
 
-export function setTerminalCallbacks(cbs: {
-  onData: (chunk: TerminalChunk) => void;
-  onExit: (id: string) => void;
-  onActivity: (id: string, activity: TerminalActivity) => void;
-}) {
-  onData = cbs.onData;
-  onExit = cbs.onExit;
-  onActivity = cbs.onActivity;
+export interface TerminalListener {
+  onData?: (chunk: TerminalChunk) => void;
+  onExit?: (id: string) => void;
+}
+
+/**
+ * Several parts of main watch the same ptys: the renderer bridge forwards every
+ * event over IPC, and the CLI chat engine translates the chat ptys' events into
+ * engine-level ones. A list (rather than one settable callback) is what lets
+ * both attach without either owning the channel.
+ */
+const listeners = new Set<TerminalListener>();
+
+export function addTerminalListener(l: TerminalListener): () => void {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+}
+
+function emitData(chunk: TerminalChunk) {
+  for (const l of listeners) l.onData?.(chunk);
+}
+function emitExit(id: string) {
+  for (const l of listeners) l.onExit?.(id);
 }
 
 // Lazy-loaded so a native-module load failure is caught and reported to the
@@ -78,7 +78,19 @@ function loadPty(): typeof import("node-pty") | null {
  * any long-running process survive ⌘J toggles and project switches.
  *
  * `initialCommand`, if given, is run ONCE when the pty is first created (e.g.
- * `claude --resume <id>` for a chat-resume terminal). On reuse it's ignored.
+ * `claude --resume <id>` for a chat terminal). On reuse it's ignored.
+ *
+ * `cols`/`rows` size the pty. Omit them when the caller has no view to size it
+ * to — starting a chat's Claude before any pane is mounted, say. A fresh pty
+ * then gets the conventional 80×24 (what the pane's xterm reports before its
+ * first fit anyway), and an EXISTING one is left at whatever size its pane
+ * already fitted it to rather than being squeezed back down.
+ *
+ * `attachOnly` binds to a running pty and refuses to create one. Chat ptys are
+ * owned by their engine, so a chat's PANE must attach and never spawn: a pane
+ * that spawned its own would get a bare shell with no Claude in it, and — worse
+ * — the engine would then see a live pty under that id, conclude the chat was
+ * already being driven, and reattach to the empty shell forever.
  *
  * `subPath`, if given, resolves the cwd to that repo inside the project (used by
  * the Run/Build terminals in a multi-repo project, where each command targets
@@ -87,42 +99,53 @@ function loadPty(): typeof import("node-pty") | null {
 export async function openTerminal(
   id: string,
   encoded: string,
-  cols = 80,
-  rows = 24,
+  cols?: number,
+  rows?: number,
   initialCommand?: string,
   subPath = "",
+  opts: { attachOnly?: boolean } = {},
 ): Promise<{ cwd: string; error?: string }> {
   const existing = sessions.get(id);
   if (existing) {
-    try {
-      existing.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
-      existing.screen.resize(Math.max(cols, 1), Math.max(rows, 1));
-    } catch {
-      /* resize on a dead pty */
+    if (cols != null && rows != null) {
+      try {
+        existing.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
+        existing.screen.resize(Math.max(cols, 1), Math.max(rows, 1));
+      } catch {
+        /* resize on a dead pty */
+      }
     }
     return { cwd: existing.cwd };
   }
+  if (opts.attachOnly) {
+    return {
+      cwd: await resolveWorkspaceCwd(encoded, subPath),
+      error: `No terminal is running for ${id}.`,
+    };
+  }
+  const spawnCols = Math.max(cols ?? 80, 1);
+  const spawnRows = Math.max(rows ?? 24, 1);
 
   const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const mod = loadPty();
   if (!mod) {
     const msg = `\r\n\x1b[31mTerminal unavailable: failed to load node-pty.\x1b[0m\r\n${ptyLoadError ?? ""}\r\nTry: pnpm --filter @plan/desktop rebuild\r\n`;
     // Defer so the renderer has subscribed before we emit.
-    setTimeout(() => onData?.({ id, data: msg }), 0);
+    setTimeout(() => emitData({ id, data: msg }), 0);
     return { cwd, error: ptyLoadError ?? "node-pty failed to load" };
   }
 
   try {
     const pty = mod.spawn(defaultShell(), [], {
       name: "xterm-color",
-      cols: Math.max(cols, 1),
-      rows: Math.max(rows, 1),
+      cols: spawnCols,
+      rows: spawnRows,
       cwd,
       env: shellEnv(),
     });
     const screen = new HeadlessTerminal({
-      cols: Math.max(cols, 1),
-      rows: Math.max(rows, 1),
+      cols: spawnCols,
+      rows: spawnRows,
       // No DOM here — writing to a headless emulator is cheap, so we feed it
       // every byte immediately (uncoalesced) to keep its grid frame-accurate.
       allowProposedApi: true,
@@ -135,34 +158,29 @@ export async function openTerminal(
       pendingOut: "",
       flushTimer: null,
       screen,
-      evalTimer: null,
-      evalGen: 0,
-      // A fresh shell is idle with no menu; only transitions are pushed.
-      lastActivity: { busy: false, awaitingSelection: false },
     };
     pty.onData((data) => {
       session.screen.write(data);
-      scheduleActivityEval(session);
       session.pendingOut += data;
       if (session.flushTimer) return;
       session.flushTimer = setTimeout(() => {
         session.flushTimer = null;
         const out = session.pendingOut;
         session.pendingOut = "";
-        if (out) onData?.({ id: session.id, data: out });
+        if (out) emitData({ id: session.id, data: out });
       }, 16);
     });
     pty.onExit(() => {
       if (session.flushTimer) clearTimeout(session.flushTimer);
-      if (session.evalTimer) clearTimeout(session.evalTimer);
-      if (session.pendingOut) onData?.({ id: session.id, data: session.pendingOut });
+      if (session.pendingOut)
+        emitData({ id: session.id, data: session.pendingOut });
       try {
         session.screen.dispose();
       } catch {
         /* already disposed */
       }
       sessions.delete(session.id);
-      onExit?.(session.id);
+      emitExit(session.id);
     });
     sessions.set(id, session);
     if (initialCommand) {
@@ -175,7 +193,7 @@ export async function openTerminal(
     const msg = err instanceof Error ? err.message : String(err);
     setTimeout(
       () =>
-        onData?.({
+        emitData({
           id,
           data: `\r\n\x1b[31mFailed to start shell: ${msg}\x1b[0m\r\n`,
         }),
@@ -189,27 +207,14 @@ export function writeTerminal(id: string, data: string) {
   sessions.get(id)?.pty.write(data);
 }
 
-/**
- * Live status of a terminal. `process` is the name of an agent process
- * (claude / node) found among the shell's descendants — see agent-probe.ts.
- * Falls back to node-pty's (less reliable) report if `ps` fails.
- */
-export async function terminalStatus(
-  id: string,
-): Promise<{ running: boolean; process: string | null }> {
-  const s = sessions.get(id);
-  if (!s) return { running: false, process: null };
-  try {
-    return { running: true, process: await agentProcessFor(s.pty.pid) };
-  } catch {
-    let fallback: string | null = null;
-    try {
-      fallback = s.pty.process;
-    } catch {
-      /* dead pty */
-    }
-    return { running: true, process: fallback };
-  }
+/** Whether a pty is alive under this id. */
+export function isTerminalRunning(id: string): boolean {
+  return sessions.has(id);
+}
+
+/** A live pty's process id, for callers that need to inspect its descendants. */
+export function terminalPid(id: string): number | null {
+  return sessions.get(id)?.pty.pid ?? null;
 }
 
 /**
@@ -221,41 +226,6 @@ export function sendKeys(id: string, keys: string[]) {
   keys.forEach((key, i) => {
     setTimeout(() => sessions.get(id)?.pty.write(key), i * 60);
   });
-}
-
-/**
- * Send a message to the program in terminal `id` and submit it: the body goes
- * out as one bracketed paste, then Enter (CR) follows as a SEPARATE keystroke
- * shortly after. Claude's TUI ignores an Enter bundled into the same input
- * batch as a paste (anti-accidental-submit), so the separation is required —
- * the same approach tmux-based Claude drivers use.
- */
-export function submitToTerminal(
-  id: string,
-  text: string,
-  imagePaths: string[] = [],
-) {
-  const s = sessions.get(id);
-  if (!s) return;
-  let body = text.replace(/\r\n/g, "\n").replace(/\r/g, "");
-  // Image paths go on their OWN line after the text, inside the bracketed paste.
-  // That's the shape Claude's TUI recognises as an attached image (recording it
-  // as "[Image: source: <path>]", which the transcript renders) — typing the
-  // path inline as plain text instead just leaves it as literal path text.
-  if (imagePaths.length > 0) {
-    body = [body, imagePaths.join(" ")].filter(Boolean).join("\n\n");
-  }
-  if (body) s.pty.write(`\x1b[200~${body}\x1b[201~`);
-  // Enter follows as a SEPARATE keystroke (Claude ignores an Enter bundled into
-  // the same batch as a paste). With an image, give Claude time to read + attach
-  // the file first — an Enter arriving mid-attach is dropped, which left the
-  // message sitting unsent in the input.
-  setTimeout(
-    () => {
-      sessions.get(id)?.pty.write("\r");
-    },
-    imagePaths.length > 0 ? 650 : 150,
-  );
 }
 
 export function resizeTerminal(id: string, cols: number, rows: number) {
@@ -324,8 +294,12 @@ export function killAllTerminals() {
   for (const enc of [...sessions.keys()]) killTerminal(enc);
 }
 
-/** The visible screen of terminal `id` as plain text rows (trailing ws trimmed). */
-function readScreen(id: string): string[] {
+/** The visible screen of terminal `id` as plain text rows (trailing ws trimmed).
+ *  Read off a headless emulator fed the same bytes as the renderer's xterm and
+ *  kept current whether or not a pane is mounted, so a backgrounded pty's screen
+ *  is as readable as the one on screen. What the rows MEAN is the caller's
+ *  business — see the Claude provider for the TUI it knows how to read. */
+export function terminalScreen(id: string): string[] {
   const s = sessions.get(id);
   if (!s) return [];
   const buf = s.screen.buffer.active;
@@ -338,75 +312,9 @@ function readScreen(id: string): string[] {
   return out;
 }
 
-/**
- * EXPERIMENTAL, heuristic. Classify the bottom of terminal `id`'s screen as a
- * free-text input box, a selection menu, or unknown (see tui-screen.ts for the
- * signatures). Returns the matched lines too, for debugging/validation.
- */
-export function detectInputState(id: string): {
-  state: TerminalInputState;
-  lines: string[];
-} {
-  return classifyInputState(readScreen(id));
-}
-
-/** Whether terminal `id`'s rendered screen currently shows Claude's working
- *  hint ("esc to interrupt" in the footer — see tui-screen.ts). Reads the real
- *  rendered screen (a headless emulator fed the same bytes, kept current for
- *  every session incl. backgrounded ones), not an inference off a user action. */
-export function isTerminalBusy(id: string): boolean {
-  return screenIsBusy(readScreen(id));
-}
-
-// ── Event-driven activity ──────────────────────────────────────────
-// The renderer used to poll busy/selection state on fixed intervals — a full
-// screen scan of every pty several times a second, even at idle. Instead, a
-// state change can only follow OUTPUT (the working hint appearing/disappearing
-// and a menu being drawn/cleared are repaints), so each output burst schedules
-// one trailing evaluation of THAT session, and only a changed result is pushed
-// (terminal:activity). Idle sessions cost nothing.
-
-// Trailing delay after an output burst. Output flows continuously while Claude
-// works (spinner repaints re-arm the timer every 16ms flush... no — the timer
-// is only set when none is pending, so a steady stream evaluates every 250ms),
-// and the final repaint after the stream stops gets its own evaluation. Also
-// comfortably after the headless emulator has parsed the burst.
-const EVAL_DELAY_MS = 250;
-
-function scheduleActivityEval(session: Session) {
-  if (session.evalTimer) return;
-  session.evalTimer = setTimeout(() => {
-    session.evalTimer = null;
-    void evaluateActivity(session);
-  }, EVAL_DELAY_MS);
-}
-
-async function evaluateActivity(session: Session) {
-  // Read the id off the session each time — a rekey may have renamed it since
-  // this eval was scheduled, and every lookup/emit below must use the live key.
-  const id = session.id;
-  if (sessions.get(id) !== session) return; // exited/rekeyed while pending
-  const gen = ++session.evalGen;
-  const rows = readScreen(id);
-  const busy = screenIsBusy(rows);
-  let awaitingSelection = false;
-  if (classifyInputState(rows).state === "selection") {
-    // Gate on a live agent process (TTL-cached ps): a menu detected in a dead
-    // shell's scrollback isn't actionable and must not raise the flag.
-    try {
-      const st = await terminalStatus(id);
-      awaitingSelection = st.running && /claude|node/i.test(st.process ?? "");
-    } catch {
-      awaitingSelection = false;
-    }
-    // A newer evaluation started while we awaited ps — let it do the emitting.
-    if (session.evalGen !== gen || sessions.get(session.id) !== session) return;
-  }
-  const prev = session.lastActivity;
-  if (prev.busy === busy && prev.awaitingSelection === awaitingSelection)
-    return;
-  session.lastActivity = { busy, awaitingSelection };
-  onActivity?.(session.id, session.lastActivity);
+/** Every live pty id. */
+export function terminalIds(): string[] {
+  return [...sessions.keys()];
 }
 
 /**
@@ -428,44 +336,6 @@ export function rekeyTerminal(oldId: string, newId: string): boolean {
   s.id = newId;
   sessions.set(newId, s);
   return true;
-}
-
-/** Ids of every live pty currently showing the "working" hint. */
-export function busyTerminalIds(): string[] {
-  const out: string[] = [];
-  for (const id of sessions.keys()) {
-    if (isTerminalBusy(id)) out.push(id);
-  }
-  return out;
-}
-
-/**
- * Ids of every live pty parked on a selection/approval menu with a live agent
- * process behind it — i.e. Claude is waiting on the user, not just showing
- * leftover menu text in a shell that has since dropped back to a prompt.
- *
- * This is the batched, cross-session form of the renderer's per-workspace
- * `awaitingSelection` check (`agentLive && state === "selection"`). Scanning
- * every session here — including backgrounded projects and worktrees — is what
- * lets the sidebar and notifier surface "needs approval" for sessions that
- * aren't the one on screen. The agent-liveness gate matters: a menu detected in
- * a dead shell (stale scrollback) isn't actionable and must not raise the flag.
- */
-export async function awaitingSelectionIds(): Promise<string[]> {
-  const candidates: string[] = [];
-  for (const id of sessions.keys()) {
-    if (detectInputState(id).state === "selection") candidates.push(id);
-  }
-  // No menu anywhere — skip the (cached, but not free) process-tree scan.
-  if (candidates.length === 0) return [];
-  const out: string[] = [];
-  for (const id of candidates) {
-    const st = await terminalStatus(id);
-    // `terminalStatus` reports the agent among the pty's descendants (claude or
-    // its node host); anything else means no live agent is driving the menu.
-    if (st.running && /claude|node/i.test(st.process ?? "")) out.push(id);
-  }
-  return out;
 }
 
 /** Snapshot of every live pty — the source of truth for "what's running". */

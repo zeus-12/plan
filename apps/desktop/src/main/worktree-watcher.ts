@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { relative, sep, isAbsolute, join } from "path";
 import ignore, { type Ignore } from "ignore";
 import { git } from "./git-exec";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveProjectCwd } from "./providers/claude-code/projects";
 import { IGNORED_DIRS } from "./ignored-dirs";
 
 /**

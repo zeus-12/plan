@@ -4,7 +4,7 @@ import { cn } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
 import { FileIcon } from "./file-icon";
 import { WorkingIcon } from "./working-icon";
-import { useTerminalWorking } from "../lib/terminal-activity-store";
+import { useChatWorking } from "../lib/session-activity-store";
 import type { Tab } from "../lib/tabs-store";
 
 function ChatIcon() {
@@ -113,7 +113,7 @@ const TabItem = forwardRef<
     onClose: (id: string) => void;
   }
 >(function TabItem({ tab, active, title, termId, onActivate, onClose }, ref) {
-  const working = useTerminalWorking(termId);
+  const working = useChatWorking(termId);
   return (
     <div
       ref={ref}

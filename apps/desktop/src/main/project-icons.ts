@@ -4,7 +4,7 @@ import { pathToFileURL } from "url";
 import { net } from "electron";
 import { PLAN_DIR } from "./plan-config";
 import { gitSafe } from "./git-exec";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveProjectCwd } from "./providers/claude-code/projects";
 import { discoverRepos } from "./git";
 import { pathExists } from "./fs-util";
 

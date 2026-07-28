@@ -1,5 +1,5 @@
 import { unlink } from "fs/promises";
-import { readSessionFile } from "./jsonl-parser";
+import { readSessionFile } from "./transcript";
 
 /**
  * Reap the ghost transcript left behind when a chat is moved out of a project.

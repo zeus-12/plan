@@ -1224,8 +1224,6 @@ function ProjectWorkspaceImpl({
     setActiveShellId,
     ensureOpened,
     rekeyChatTerminal,
-    handleTerminalReady,
-    sendToTerminal,
     shellNumber,
     newShell,
     selectShell,
@@ -1315,14 +1313,16 @@ function ProjectWorkspaceImpl({
   );
   followBranchRef.current = followBranch;
 
-  // The selected chat's lifecycle: terminal binding (the dock ⌘J mirrors
-  // activeTerminalId — never a plain shell), sending + the stuck-message
-  // watchdog, and the observed activity signals. See useChatSession.
+  // The selected chat's lifecycle: which engine drives it and what that engine
+  // supports (the dock ⌘J mirrors activeTerminalId — never a plain shell),
+  // sending + the stuck-message watchdog, and the observed activity signals.
+  // See useChatSession.
   const {
     chatTerminalReady,
     activeTerminalId,
-    initialCommandFor,
+    capabilities: chatCapabilities,
     connectChat,
+    startChatFor,
     sendChat,
     sendKeysToChat,
     agentLive,
@@ -1333,9 +1333,7 @@ function ProjectWorkspaceImpl({
     encoded: project.encoded,
     selectedSessionId,
     session,
-    openedIds,
     ensureOpened,
-    sendToTerminal,
     revealChatTerminal,
     onBranchCommand: handleBranchCommand,
   });
@@ -1373,15 +1371,9 @@ function ProjectWorkspaceImpl({
       sendChat(CONTINUE_TEXT);
       return;
     }
-    connectChat();
+    void connectChat();
     setContinueStarting(true);
-  }, [
-    selectedSessionId,
-    chatTerminalReady,
-    agentLive,
-    sendChat,
-    connectChat,
-  ]);
+  }, [selectedSessionId, chatTerminalReady, agentLive, sendChat, connectChat]);
 
   useEffect(() => {
     if (!continueStarting) return;
@@ -1405,17 +1397,18 @@ function ProjectWorkspaceImpl({
     if (!stalledOnApiError && !sessionLimitReset) setContinueStarting(false);
   }, [stalledOnApiError, sessionLimitReset]);
 
-  // New chat: pre-pick the session uuid and start `claude --session-id` in a
-  // background terminal — the composer is immediately live; the transcript
-  // appears with the first exchange.
+  // New chat: pre-pick the session uuid and start its engine in the background
+  // — the composer goes live as soon as the driver is up; the transcript
+  // appears with the first exchange. The start has to name the session
+  // explicitly: it's brand new, so it isn't the selected one yet.
   const handleNewChat = useCallback(() => {
     const sid = crypto.randomUUID();
     markNewSession(sid);
     openChatTab(sid);
-    ensureOpened(`${chatPrefix}${sid}`);
+    void startChatFor(sid);
     setTab("chat");
     requestAnimationFrame(() => chatInputRef.current?.focus());
-  }, [chatPrefix, ensureOpened, openChatTab]);
+  }, [startChatFor, openChatTab]);
 
   // Comments cleared by the last "Add to chat", kept so ⌘Z in the composer can
   // put them back exactly where they were (see handleUndoAddToChat).
@@ -1467,11 +1460,14 @@ function ProjectWorkspaceImpl({
   }, [confirm, clearAll]);
 
   // ⌘J's connect path: hook the selected chat up to Claude if it isn't already
-  // (runs `claude --resume` in the background) AND reveal the dock — one action,
-  // no separate "Connect" step.
+  // AND reveal the dock — one action, no separate "Connect" step. The dock
+  // opens only once the engine reports a terminal to put in it, so ⌘J never
+  // flashes an empty pane (and does nothing at all for an engine that has no
+  // terminal to show).
   const connectAndShowChat = useCallback(() => {
-    connectChat();
-    setTerminalOpen(true);
+    void connectChat().then((shown) => {
+      if (shown) setTerminalOpen(true);
+    });
   }, [connectChat, setTerminalOpen]);
 
   const [runConfigOpen, setRunConfigOpen] = useState(false);
@@ -1566,7 +1562,7 @@ function ProjectWorkspaceImpl({
       ) {
         e.preventDefault();
         setTab("chat");
-        if (!chatTerminalReady) connectChat();
+        if (!chatTerminalReady) void connectChat();
         requestAnimationFrame(() => chatInputRef.current?.focus());
       }
     };
@@ -2195,14 +2191,15 @@ function ProjectWorkspaceImpl({
                           label={
                             tid.startsWith(chatPrefix) ? "Claude" : "Terminal"
                           }
-                          initialCommand={initialCommandFor(tid)}
+                          // No initial command: a chat pane attaches to a pty
+                          // its engine already started (and already ran Claude
+                          // in). See main/agents/cli-engine.
                           // Also gated on the workspace being visible so a
                           // background (keep-alive) terminal buffers its pty
                           // output instead of parsing it on the main thread.
                           visible={active && terminalOpen && termActive}
                           fitSignal={terminalHeight}
                           onClose={() => setTerminalOpen(false)}
-                          onReady={() => handleTerminalReady(tid)}
                         />
                       </div>
                     );

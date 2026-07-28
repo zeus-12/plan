@@ -2,7 +2,7 @@ import { createReadStream } from "fs";
 import { readFile, readdir, stat } from "fs/promises";
 import { StringDecoder } from "string_decoder";
 import { join, relative } from "path";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveProjectCwd } from "./providers/claude-code/projects";
 import { IGNORED_DIRS, IGNORED_FILES } from "./ignored-dirs";
 import { extOf, looksBinary } from "./fs-util";
 import type {

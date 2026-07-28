@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedSession } from "../../shared-types";
-import { chatTerminalId, chatTerminalPrefix } from "../../terminal-ids";
-import { useTerminalWorking } from "./terminal-activity-store";
+import type { ChatEngineId } from "../../chat-engines";
+import { chatTerminalId } from "../../terminal-ids";
+import { useChatWorking } from "./session-activity-store";
 import { useSessionNeedsApproval } from "./session-approval-store";
 import { useAutoModeEnabled } from "./auto-mode-settings";
+import {
+  capabilitiesFor,
+  useChatEngineCapabilities,
+} from "./chat-engine-settings";
+import {
+  startChat,
+  useChatEngineFor,
+  useChatStarted,
+} from "./chat-driver-store";
 import { isNewSession } from "./new-session-ids";
 import { osNotify, pushToast } from "./toast-store";
 
@@ -11,16 +21,18 @@ import { osNotify, pushToast } from "./toast-store";
  * The selected chat session's lifecycle — everything between "there is a
  * selected session id" and the facts the workspace renders about it. Owns:
  *
- *  - the terminal binding: whether the chat's Claude pty is live, its id
- *    (the dock mirrors it), and the `claude --resume` / `--session-id`
- *    startup command;
- *  - sending: composer submits and TUI keystrokes, plus the send watchdog —
+ *  - the driver binding: whether the chat has a live engine behind it, which
+ *    engine that is, and what that engine can do (see chat-engines.ts);
+ *  - sending: composer submits and selector keystrokes, plus the send watchdog —
  *    the transcript is the delivery truth, so if no user message lands within
  *    12s of a send we say so instead of leaving the user lost;
- *  - activity signals, all observed facts (nothing invented): the agent
- *    process name polled from the pty, "actively emitting output" from the
- *    screen hint, and the input-vs-selection-menu read of the rendered TUI —
- *    with the auto-reveal of this workspace's own tab when a menu appears.
+ *  - activity signals, all observed facts (nothing invented): whether the agent
+ *    is live, whether a turn is in flight, and whether it's waiting on you —
+ *    with the auto-reveal of this workspace's own tab when it parks.
+ *
+ * Nothing here knows how any engine works. Starting Claude, delivering a
+ * message, and deciding what "working" means all live behind the engine seam in
+ * main; this hook consumes the normalized result.
  *
  * Cross-cutting UI moves (switch tab, open the dock) stay with the caller and
  * cross the seam as `revealChatTerminal`.
@@ -30,68 +42,88 @@ export function useChatSession(opts: {
   selectedSessionId: string | null;
   /** The selected chat's parsed transcript — the watchdog's delivery truth. */
   session: ParsedSession | null;
-  /** Terminal registry bits (see useTerminalRegistry). */
-  openedIds: string[];
+  /** Mount the pane for a chat whose engine has a terminal to show. */
   ensureOpened: (tid: string) => void;
-  sendToTerminal: (
-    tid: string,
-    text: string,
-    imagePaths: string[],
-    submit: boolean,
-  ) => void;
   /** Surface THIS workspace's chat terminal (tab + dock) — used by the
-   *  stuck-message toast and the selection-menu auto-reveal. */
+   *  stuck-message toast and the waiting-on-you auto-reveal. */
   revealChatTerminal: (sid: string) => void;
   /** The composer just submitted `/branch` for `fromSid`: its `claude` is about
    *  to fork into a new session id. `rootUuid` fingerprints the conversation
    *  (the branch copies it) so the caller can confirm which new transcript is
-   *  the fork and follow the pty to it. Null root = can't fingerprint. */
+   *  the fork and follow the driver to it. Null root = can't fingerprint. */
   onBranchCommand?: (fromSid: string, rootUuid: string | null) => void;
 }) {
   const {
     encoded,
     selectedSessionId,
     session,
-    openedIds,
     ensureOpened,
-    sendToTerminal,
     revealChatTerminal,
     onBranchCommand,
   } = opts;
-  const chatPrefix = chatTerminalPrefix(encoded);
   const [globalAutoMode] = useAutoModeEnabled();
 
-  // The selected chat's pty id, when its terminal has been opened. The dock
-  // (⌘J) mirrors exactly this — it is never a plain shell.
-  const sessionResumed =
-    selectedSessionId != null &&
-    openedIds.includes(chatTerminalId(encoded, selectedSessionId));
-  const activeTerminalId = sessionResumed
-    ? chatTerminalId(encoded, selectedSessionId!)
+  // The selected chat's id, and whether anything is driving it. The dock (⌘J)
+  // mirrors exactly this — it is never a plain shell.
+  const chatId = selectedSessionId
+    ? chatTerminalId(encoded, selectedSessionId)
     : null;
-  /** Whether the selected chat has a live (resumed) terminal to send into. */
-  const chatTerminalReady = sessionResumed;
+  const chatStarted = useChatStarted(chatId);
+  const activeTerminalId = chatStarted ? chatId : null;
+  /** Whether the selected chat has a live driver to send into. */
+  const chatTerminalReady = chatStarted;
 
-  /** Startup command for a chat pty: brand-new chats start claude with a
-   *  pre-chosen session id (nothing to resume yet); existing ones resume. */
-  const initialCommandFor = useCallback(
-    (tid: string): string | undefined => {
-      if (!tid.startsWith(chatPrefix)) return undefined;
-      const sid = tid.slice(chatPrefix.length);
-      const flags = globalAutoMode ? " --permission-mode auto" : "";
-      return isNewSession(sid)
-        ? `claude --session-id ${sid}${flags}`
-        : `claude --resume ${sid}${flags}`;
+  // What the engine behind THIS chat supports. Null until the chat is started
+  // (nothing is driving it, so there's nothing to describe) — callers gate on
+  // an explicit capability rather than assuming a shape.
+  const engineId: ChatEngineId | null = useChatEngineFor(chatId);
+  const capabilities = useChatEngineCapabilities(engineId);
+
+  /**
+   * Start (or reattach to) the driver for ANY session in this project, in the
+   * background — this does NOT reveal the dock. Enables the composer once main
+   * confirms.
+   *
+   * Takes an explicit session id because the caller that needs it most — "new
+   * chat" — mints an id and starts it in the same breath, before that session
+   * is the selected one. This is the ONLY way a chat gets a driver: mounting a
+   * pane doesn't start anything.
+   *
+   * Resolves true only when the chat ended up with a terminal pane mounted, so
+   * a caller that wants to SHOW the dock can wait for something to actually be
+   * there rather than opening it over nothing.
+   */
+  const startChatFor = useCallback(
+    async (sid: string): Promise<boolean> => {
+      const tid = chatTerminalId(encoded, sid);
+      const res = await startChat(tid, {
+        encoded,
+        sessionId: sid,
+        // A brand-new chat has no transcript yet, so it's started rather than
+        // resumed; see new-session-ids.
+        isNew: isNewSession(sid),
+        autoMode: globalAutoMode,
+      });
+      if (res.error) {
+        pushToast({
+          title: "Couldn't start the session",
+          description: res.error,
+        });
+        return false;
+      }
+      // Only an engine that actually has a terminal gets a pane.
+      if (capabilitiesFor(res.engine)?.terminalPane !== true) return false;
+      ensureOpened(tid);
+      return true;
     },
-    [chatPrefix, globalAutoMode],
+    [encoded, globalAutoMode, ensureOpened],
   );
 
-  /** Start `claude --resume` for the selected session in the background
-   *  (does NOT reveal the dock). Enables the composer. */
-  const connectChat = useCallback(() => {
-    if (!selectedSessionId) return;
-    ensureOpened(chatTerminalId(encoded, selectedSessionId));
-  }, [selectedSessionId, encoded, ensureOpened]);
+  /** `startChatFor` the currently selected session. */
+  const connectChat = useCallback((): Promise<boolean> => {
+    if (!selectedSessionId) return Promise.resolve(false);
+    return startChatFor(selectedSessionId);
+  }, [selectedSessionId, startChatFor]);
 
   // ── Send + watchdog ──────────────────────────────────────────
   // session in a ref so callbacks can read the latest without re-creating.
@@ -99,7 +131,7 @@ export function useChatSession(opts: {
   sessionRef.current = session;
 
   // Send watchdog: if no user message lands in the transcript within 12s of a
-  // UI send, the message may be stuck behind a TUI prompt — say so.
+  // UI send, the message may be stuck — say so.
   const sendWatchdogRef = useRef<{
     baseLen: number;
     timer: ReturnType<typeof setTimeout>;
@@ -126,53 +158,58 @@ export function useChatSession(opts: {
     [revealChatTerminal],
   );
 
-  // Chat composer: send a message into the selected chat's `claude` (submits).
+  // Chat composer: send a message into the selected chat's agent (submits).
   // No optimistic echo / "working" indicator — the transcript (JSONL watcher)
   // is the source of truth; the message appears when it actually lands.
   const sendChat = useCallback(
     (text: string, imagePaths: string[] = []) => {
-      if (!selectedSessionId) return;
-      const tid = chatTerminalId(encoded, selectedSessionId);
-      if (!openedIds.includes(tid)) return;
+      if (!selectedSessionId || !chatId || !chatStarted) return;
 
-      // `/branch` forks this session's `claude` into a NEW session id in the
-      // same pty. Arm the follow BEFORE sending so the caller can rebind the tab
+      // `/branch` forks this session into a NEW session id under the same
+      // driver. Arm the follow BEFORE sending so the caller can rebind the tab
       // to the fork when its transcript appears. A branch lands no user message
       // in THIS transcript, so we must not arm the delivery watchdog (it would
       // cry "stuck") — we return right after sending.
       if (text.trim() === "/branch") {
+        if (!capabilities?.branch) {
+          pushToast({
+            title: "Branching isn't available here",
+            description:
+              "The engine driving this session can't fork it into a new one.",
+          });
+          return;
+        }
         const rootUuid =
           sessionRef.current?.messages.find((m) => m.uuid)?.uuid ?? null;
         onBranchCommand?.(selectedSessionId, rootUuid);
-        sendToTerminal(tid, text, imagePaths, true);
+        window.electronAPI.sendToChat(chatId, text, imagePaths);
         return;
       }
 
-      sendToTerminal(tid, text, imagePaths, true);
+      window.electronAPI.sendToChat(chatId, text, imagePaths);
       // The transcript will confirm delivery; if it doesn't within 12s, the
       // watchdog says so (toast + notification) instead of leaving you lost.
       armSendWatchdog(selectedSessionId);
     },
     [
       selectedSessionId,
-      encoded,
-      openedIds,
-      sendToTerminal,
+      chatId,
+      chatStarted,
+      capabilities,
       armSendWatchdog,
       onBranchCommand,
     ],
   );
 
-  // Drive the chat terminal's TUI selectors (e.g. AskUserQuestion options)
-  // with discrete keystrokes.
+  // Answer an on-screen TUI selector (e.g. AskUserQuestion options) with
+  // discrete keystrokes. Only engines driving a real TUI have one to type at;
+  // for the rest there is nothing to send keys to, so we don't.
   const sendKeysToChat = useCallback(
     (keys: string[]) => {
-      if (!selectedSessionId) return;
-      const tid = chatTerminalId(encoded, selectedSessionId);
-      if (!openedIds.includes(tid)) return;
-      window.electronAPI.terminalSendKeys(tid, keys);
+      if (!chatId || !chatStarted || !capabilities?.keystrokes) return;
+      window.electronAPI.sendKeysToChat(chatId, keys);
     },
-    [selectedSessionId, encoded, openedIds],
+    [chatId, chatStarted, capabilities],
   );
 
   // The transcript is the truth: a user message arriving clears the watchdog.
@@ -198,34 +235,32 @@ export function useChatSession(opts: {
     }
   }, [selectedSessionId]);
 
-  // ── Activity signals (all transcript/OS facts — nothing invented) ──
+  // ── Activity signals (all observed facts — nothing invented) ──
 
-  // Agent status: poll the pty's foreground process name (an OS fact) so the
-  // header can say whether Claude itself is running in the chat terminal.
-  const [agentProcess, setAgentProcess] = useState<string | null>(null);
+  // Whether the agent itself is live and able to take a message. The engine
+  // decides what that means for its own driver (a live `claude` among a pty's
+  // descendants, an open protocol session); we only poll for the answer.
+  const [agentLive, setAgentLive] = useState(false);
   useEffect(() => {
-    if (!chatTerminalReady || !selectedSessionId) {
-      setAgentProcess(null);
+    if (!chatTerminalReady || !chatId) {
+      setAgentLive(false);
       return;
     }
-    const tid = chatTerminalId(encoded, selectedSessionId);
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
-      let proc: string | null = null;
+      let live = false;
       try {
-        const st = await window.electronAPI.terminalStatus(tid);
-        proc = st.running ? st.process : null;
-        if (alive) setAgentProcess(proc);
+        live = (await window.electronAPI.chatStatus(chatId)).agentLive;
       } catch {
         // Status unavailable — show the neutral state, not a wrong one.
-        if (alive) setAgentProcess(null);
+        live = false;
       }
       if (!alive) return;
-      // Poll quickly until Claude is detected so the composer (which holds send
-      // until the agent is live) unlocks right as the session finishes booting;
-      // ease off to a slow heartbeat once it's up.
-      const live = /claude|node/i.test(proc ?? "");
+      setAgentLive(live);
+      // Poll quickly until the agent is detected so the composer (which holds
+      // send until then) unlocks right as the session finishes booting; ease
+      // off to a slow heartbeat once it's up.
       timer = setTimeout(poll, live ? 5_000 : 1_000);
     };
     void poll();
@@ -233,40 +268,35 @@ export function useChatSession(opts: {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [chatTerminalReady, selectedSessionId, encoded]);
-  // Claude's CLI runs under node; either name means the agent process is live.
-  const agentLive = /claude|node/i.test(agentProcess ?? "");
+  }, [chatTerminalReady, chatId]);
 
-  // Live "is Claude actively emitting output right now" — an observed fact from
-  // the pty stream, not a guess. The spinner redraws while it works, so output
-  // flowing = working; output stopped = idle (done or blocked on approval).
-  const chatWorking = useTerminalWorking(
-    selectedSessionId ? chatTerminalId(encoded, selectedSessionId) : null,
-  );
+  // Live "is a turn in flight right now" — an observed fact reported by the
+  // engine, not a guess (see session-activity-store).
+  const chatWorking = useChatWorking(activeTerminalId);
 
-  // ── Selection-menu detection ─────────────────────────────────────────
-  // "Waiting on a menu" comes from the approval store — the same fleet-wide
-  // scan (Claude's rendered screen, gated on a live agent process in main)
-  // that drives the sidebar badges and the approval notifier. One signal, one
-  // poll, instead of a per-workspace terminalInputState interval. A rendered
-  // menu wins over the "working" heuristic: Claude keeps repainting the prompt
-  // while it waits, so `chatWorking` stays true the whole time the menu is up.
+  // ── Waiting on you ───────────────────────────────────────────────────
+  // From the approval store — the same fleet-wide signal that drives the
+  // sidebar badges and the approval notifier. One signal, one source, instead
+  // of a per-workspace poll. It wins over the "working" read: a session parked
+  // on a prompt is still mid-turn, so `chatWorking` stays true the whole time
+  // it waits.
   const awaitingSelection = useSessionNeedsApproval(activeTerminalId);
 
-  // Auto-reveal the terminal when a menu appears so the user can respond —
-  // only once per transition into the selection state (not on every poll). The
+  // Auto-reveal the terminal when the session parks so the user can respond —
+  // only once per transition into that state (not on every event). The
   // toast/OS banner is owned globally by the session-approval notifier (it
   // covers every session, including ones in projects/worktrees not on screen);
-  // here we only do the local convenience of surfacing this workspace's own tab.
+  // here we only do the local convenience of surfacing this workspace's own
+  // tab, and only for an engine that has a terminal to surface.
   const autoRevealedRef = useRef(false);
   useEffect(() => {
     if (awaitingSelection && !autoRevealedRef.current) {
       autoRevealedRef.current = true;
-      revealChatTerminal(selectedSessionId!);
+      if (capabilities?.terminalPane) revealChatTerminal(selectedSessionId!);
     } else if (!awaitingSelection) {
       autoRevealedRef.current = false;
     }
-  }, [awaitingSelection, selectedSessionId, revealChatTerminal]);
+  }, [awaitingSelection, selectedSessionId, capabilities, revealChatTerminal]);
 
   // Conversation turns (user messages that aren't tool results) — far more
   // meaningful than raw transcript entry count, and free to compute.
@@ -285,8 +315,10 @@ export function useChatSession(opts: {
   return {
     chatTerminalReady,
     activeTerminalId,
-    initialCommandFor,
+    /** What the engine behind this chat supports; null when nothing drives it. */
+    capabilities,
     connectChat,
+    startChatFor,
     sendChat,
     sendKeysToChat,
     agentLive,

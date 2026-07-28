@@ -15,6 +15,8 @@ import {
 } from "../lib/notification-settings";
 import { playSound } from "../lib/notification-sounds";
 import { useAutoModeEnabled } from "../lib/auto-mode-settings";
+import { useChatEngineId, useChatEngines } from "../lib/chat-engine-settings";
+import type { ChatEngineId } from "../../chat-engines";
 import { useAutoContinueEnabled } from "../lib/auto-continue-settings";
 import {
   PROSE_BRIGHTNESS,
@@ -39,6 +41,8 @@ interface Props {
  */
 export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [settings, update] = useNotificationSettings();
+  const engines = useChatEngines();
+  const [chatEngine, setChatEngine] = useChatEngineId();
   const [autoMode, setAutoMode] = useAutoModeEnabled();
   const [autoContinue, setAutoContinue] = useAutoContinueEnabled();
   const [prose, setProse] = useTranscriptPrefs();
@@ -96,7 +100,9 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               </span>
               <Select
                 value={prose.fontFamily}
-                onValueChange={(v) => setProse({ fontFamily: v as ProseFontId })}
+                onValueChange={(v) =>
+                  setProse({ fontFamily: v as ProseFontId })
+                }
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
@@ -181,6 +187,39 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
             <div className="mt-2 h-px bg-[var(--border)]" />
           </section>
 
+          {/* Which engine drives new chats. Rendered only once there's an
+              actual choice to make — with a single engine registered there's
+              nothing to pick, and a one-option select would just be noise. */}
+          {engines.length > 1 && (
+            <section className="mb-6 flex flex-col gap-3">
+              <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+                Engine
+              </h3>
+              <p className="-mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+                What runs Claude behind a chat. Applies to sessions you start
+                from now on — a session already running keeps its own.
+              </p>
+              <Select
+                value={chatEngine}
+                onValueChange={(v) => setChatEngine(v as ChatEngineId)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {engines.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                {engines.find((e) => e.id === chatEngine)?.description}
+              </span>
+            </section>
+          )}
+
           <section className="mb-6 flex flex-col gap-3">
             <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
               Auto mode
@@ -213,7 +252,10 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                   alone.
                 </span>
               </div>
-              <Switch checked={autoContinue} onCheckedChange={setAutoContinue} />
+              <Switch
+                checked={autoContinue}
+                onCheckedChange={setAutoContinue}
+              />
             </div>
           </section>
 

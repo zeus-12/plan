@@ -2,7 +2,7 @@ import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { git as run } from "./git-exec";
 import { pathExists } from "./fs-util";
-import { resolveProjectCwd } from "./claude-projects";
+import { resolveProjectCwd } from "./providers/claude-code/projects";
 import { resolveWorkspaceCwd } from "./workspace";
 import { GIT_SCAN_DEPTH } from "./config";
 import type {

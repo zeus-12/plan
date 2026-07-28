@@ -547,29 +547,6 @@ export interface TerminalChunk {
   data: string;
 }
 
-/**
- * What the bottom of the terminal screen looks like right now. EXPERIMENTAL and
- * heuristic — derived by scanning the rendered grid for Claude Code's TUI
- * signatures, not from any real protocol. Worded as a guess everywhere it's used.
- *
- *   "input"     — a free-text input box is present and ready (safe to type/send)
- *   "selection" — a numbered menu is up (tool approval / plan accept / question);
- *                 sending free text + Enter here would mis-navigate the menu
- *   "unknown"   — couldn't classify (plain shell, Claude mid-render, etc.)
- */
-export type TerminalInputState = "input" | "selection" | "unknown";
-
-/**
- * A terminal's live activity, evaluated in main when its pty emits output and
- * pushed on change (terminal:activity). `busy` = Claude's working hint is on
- * screen; `awaitingSelection` = a selection/approval menu is rendered AND a
- * live agent process is behind it.
- */
-export interface TerminalActivity {
-  busy: boolean;
-  awaitingSelection: boolean;
-}
-
 /** One live pty as reported to the sessions dashboard. */
 export interface TerminalInfo {
   id: string;

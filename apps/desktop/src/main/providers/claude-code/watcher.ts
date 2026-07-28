@@ -1,8 +1,8 @@
 import { watch, stat } from "fs/promises";
 import { join } from "path";
-import { CLAUDE_PROJECTS_DIR, listSessionFiles } from "./claude-sessions";
-import { clearRelocationGuards, reapRelocatedStub } from "./session-reaper";
-import type { SessionEvent } from "../shared-types";
+import { CLAUDE_PROJECTS_DIR, listSessionFiles } from "./sessions";
+import { clearRelocationGuards, reapRelocatedStub } from "./reaper";
+import type { SessionEvent } from "../../../shared-types";
 
 const DEBOUNCE_MS = 300;
 

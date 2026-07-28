@@ -62,9 +62,9 @@ function tick() {
 /** Start the notifier. Idempotent; returns a stop function. */
 export function startSessionApprovalNotifier(): () => void {
   if (unsub) return stopSessionApprovalNotifier;
-  // A killed pty simply disappears from the approval set; nothing to notify.
-  // Drop it from `notified` on the exit event so the id doesn't linger.
-  unsubExit = window.electronAPI.onTerminalExit((id) => {
+  // An ended session simply disappears from the approval set; nothing to
+  // notify. Drop it from `notified` on the exit event so the id doesn't linger.
+  unsubExit = window.electronAPI.onChatExit((id) => {
     notified.delete(id);
   });
   unsub = subscribeApproval(tick);

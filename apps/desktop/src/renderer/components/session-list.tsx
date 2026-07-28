@@ -2,7 +2,7 @@ import { memo } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { chatTerminalId } from "../../terminal-ids";
 import { relativeTime } from "../lib/time";
-import { useTerminalWorking } from "../lib/terminal-activity-store";
+import { useChatWorking } from "../lib/session-activity-store";
 import { useSessionNeedsApproval } from "../lib/session-approval-store";
 import {
   useSessionHasUnread,
@@ -214,7 +214,7 @@ const SessionRow = memo(function SessionRow({
   onSetArchived: (sessionId: string, archived: boolean) => void;
   onMoveSession?: (sessionId: string, title: string) => void;
 }) {
-  const working = useTerminalWorking(termId);
+  const working = useChatWorking(termId);
   // A parked menu wins over the working spinner: the session keeps repainting
   // its prompt while it waits, so both read true — but "waiting on you" is the
   // actionable state, so it's the one to show.

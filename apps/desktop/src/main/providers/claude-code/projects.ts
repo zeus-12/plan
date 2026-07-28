@@ -4,8 +4,8 @@ import {
   CLAUDE_PROJECTS_DIR,
   newestSessionFile,
   sessionFilePath,
-} from "./claude-sessions";
-import { decodeProjectDir } from "./claude-encoding";
+} from "./sessions";
+import { decodeProjectDir } from "./encoding";
 
 /**
  * Physically relocate a session's transcript from one project dir to another —

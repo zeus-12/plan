@@ -2,8 +2,8 @@ import { readFile, readdir } from "fs/promises";
 import type { Dirent } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { resolveProjectCwd } from "./claude-projects";
-import type { SkillInfo } from "../shared-types";
+import { resolveProjectCwd } from "./projects";
+import type { SkillInfo } from "../../../shared-types";
 
 const MAX_DESC = 240;
 

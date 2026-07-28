@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyInputState, screenIsBusy } from "../src/main/tui-screen";
+import { classifyInputState, screenIsBusy } from "../src/main/providers/claude-code/tui-screen";
 
 // Frames are plain screen rows, bottom of the frame last — the same shape
 // terminal.ts reads off the headless emulator.

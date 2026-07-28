@@ -16,15 +16,15 @@ import {
   resolveProjectCwd,
   primeProjectCwd,
   moveSessionTranscript,
-} from "./claude-projects";
+} from "./providers/claude-code/projects";
 import {
   latestActivity,
   listSessions,
   sessionFilePath,
-} from "./claude-sessions";
+} from "./providers/claude-code/sessions";
 import { pathExists } from "./fs-util";
 import { resolveWorkspaceCwd } from "./workspace";
-import { encodeCwd } from "./claude-encoding";
+import { encodeCwd } from "./providers/claude-code/encoding";
 import {
   getManualCwds,
   addManualCwd,
@@ -35,7 +35,10 @@ import {
   getSessionNames,
   setSessionName,
 } from "./manual-projects";
-import { readClaudeConfig, writeClaudeConfig } from "./claude-config";
+import {
+  readClaudeConfig,
+  writeClaudeConfig,
+} from "./providers/claude-code/instructions";
 import { readScratch, writeScratch } from "./scratch-store";
 import type {
   ProjectEntry,
@@ -48,21 +51,21 @@ import type {
   IpcInvokeContract,
   IpcSendContract,
 } from "../ipc-contract";
-import { chatTerminalId } from "../terminal-ids";
+import { chatTerminalId, isChatTerminalId } from "../terminal-ids";
 import {
   setCallbacks,
   startWatching,
   startRootWatch,
   stopAll,
-} from "./session-watcher";
+} from "./providers/claude-code/watcher";
 import {
   setWorktreeCallbacks,
   startWorktreeWatch,
   stopWorktreeWatch,
   stopAllWorktreeWatches,
 } from "./worktree-watcher";
-import { readSessionDelta } from "./jsonl-parser";
-import { markSessionMovedAway } from "./session-reaper";
+import { readSessionDelta } from "./providers/claude-code/transcript";
+import { markSessionMovedAway } from "./providers/claude-code/reaper";
 import { getFileContents, getFileView } from "./file-contents";
 import {
   listPrs,
@@ -80,27 +83,35 @@ import {
   resolveProjectFilePath,
   searchProjectFiles,
 } from "./project-files";
-import { listSkills } from "./skills";
+import { listSkills } from "./providers/claude-code/skills";
 import { getProjectIcons } from "./project-icons";
 import { checkForUpdate } from "./updates";
 import { loginShellPath } from "./shell-env";
 import {
-  setTerminalCallbacks,
+  addTerminalListener,
   openTerminal,
   writeTerminal,
-  submitToTerminal,
-  sendKeys,
-  terminalStatus,
-  detectInputState,
-  busyTerminalIds,
-  awaitingSelectionIds,
+  isTerminalRunning,
   resizeTerminal,
   killTerminal,
-  killTerminalAndWait,
   killAllTerminals,
   listTerminals,
-  rekeyTerminal,
 } from "./terminal";
+import {
+  approvalChatIds,
+  busyChatIds,
+  chatEngineDescriptors,
+  chatStatus,
+  listenToChats,
+  probeChatApproval,
+  rekeyChat,
+  sendKeysToChat,
+  sendToChat,
+  startChat,
+  stopAllChats,
+  stopChat,
+  stopChatAndWait,
+} from "./providers/registry";
 import {
   applyPatch,
   commit as gitCommit,
@@ -354,7 +365,7 @@ async function archiveWorktreeChatsToProject(
   if (worktreeEncoded === projectEncoded) return;
   const sessions = await listSessions(worktreeEncoded);
   for (const s of sessions) {
-    await killTerminalAndWait(chatTerminalId(worktreeEncoded, s.sessionId));
+    await stopChatAndWait(chatTerminalId(worktreeEncoded, s.sessionId));
     await moveSessionTranscript(s.sessionId, worktreeEncoded, projectEncoded);
     markSessionMovedAway(worktreeEncoded, s.sessionId);
     await setSessionArchived(s.sessionId, true);
@@ -442,7 +453,7 @@ const invokeHandlers: {
     // reap it) and may flush one last state snapshot after the rename, leaving
     // a message-less stub at the old path. markSessionMovedAway arms the
     // deterministic reaper that neutralizes that ghost (see session-reaper).
-    await killTerminalAndWait(chatTerminalId(fromEncoded, sessionId));
+    await stopChatAndWait(chatTerminalId(fromEncoded, sessionId));
     await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
     if (fromEncoded !== toEncoded) markSessionMovedAway(fromEncoded, sessionId);
   },
@@ -513,7 +524,8 @@ const invokeHandlers: {
     // checkout is torn down — a deleted worktree should lose its code, not its
     // conversations.
     const rec = await getWorktreeRecord(id);
-    if (rec) await archiveWorktreeChatsToProject(rec.encoded, rec.projectEncoded);
+    if (rec)
+      await archiveWorktreeChatsToProject(rec.encoded, rec.projectEncoded);
     await removeWorktree(id);
   },
   "worktrees:addRepos": (_e, id, input) => addReposToWorktree(id, input),
@@ -556,6 +568,15 @@ const invokeHandlers: {
   "git:commitDetails": (_e, encoded, path, hash) =>
     getCommitDetails(encoded, path, hash),
 
+  // Chat engines (keyed by chat id) — see main/agents/engine-registry.
+  "chat:engines": () => chatEngineDescriptors(),
+  "chat:start": (_e, chatId, opts) => startChat(chatId, opts),
+  "chat:status": (_e, chatId) => chatStatus(chatId),
+  "chat:probeApproval": (_e, chatId) => probeChatApproval(chatId),
+  "chat:busyIds": () => busyChatIds(),
+  "chat:approvalIds": () => approvalChatIds(),
+  "chat:rekey": (_e, oldChatId, newChatId) => rekeyChat(oldChatId, newChatId),
+
   // Terminal ptys (keyed by terminal id; cwd resolved from encoded)
   "terminal:open": (
     _e,
@@ -565,13 +586,14 @@ const invokeHandlers: {
     rows,
     initialCommand,
     subPath = "",
-  ) => openTerminal(id, encoded, cols, rows, initialCommand, subPath),
-  "terminal:status": (_e, id) => terminalStatus(id),
-  "terminal:inputState": (_e, id) => detectInputState(id),
-  "terminal:busyIds": () => busyTerminalIds(),
-  "terminal:selectionIds": () => awaitingSelectionIds(),
+  ) =>
+    openTerminal(id, encoded, cols, rows, initialCommand, subPath, {
+      // A chat's pty belongs to its engine — a pane may only attach to one.
+      // See the attachOnly note in terminal.ts for what spawning here would do.
+      attachOnly: isChatTerminalId(id),
+    }),
+  "terminal:status": (_e, id) => ({ running: isTerminalRunning(id) }),
   "terminal:list": () => listTerminals(),
-  "terminal:rekey": (_e, oldId, newId) => rekeyTerminal(oldId, newId),
 
   // Write a pasted image to a temp file; the renderer types the path into the
   // terminal (Claude Code reads image paths as attachments).
@@ -609,10 +631,12 @@ const sendHandlers: {
     ...args: IpcSendContract[K]
   ) => void;
 } = {
+  "chat:send": (_e, chatId, text, imagePaths = []) =>
+    sendToChat(chatId, text, imagePaths),
+  "chat:sendKeys": (_e, chatId, keys) => sendKeysToChat(chatId, keys),
+  "chat:stop": (_e, chatId) => stopChat(chatId),
+
   "terminal:input": (_e, id, data) => writeTerminal(id, data),
-  "terminal:submit": (_e, id, text, imagePaths = []) =>
-    submitToTerminal(id, text, imagePaths),
-  "terminal:sendKeys": (_e, id, keys) => sendKeys(id, keys),
   "terminal:resize": (_e, id, cols, rows) => resizeTerminal(id, cols, rows),
   "terminal:kill": (_e, id) => killTerminal(id),
 };
@@ -649,11 +673,17 @@ function bridgeWatcher() {
 }
 
 function bridgeTerminal() {
-  setTerminalCallbacks({
+  // Pty-level: the terminal panes' byte stream, and the exit that keeps the
+  // sidebar's shell list and the sessions dashboard honest.
+  addTerminalListener({
     onData: (chunk) => sendToRenderer("terminal:data", chunk),
     onExit: (id) => sendToRenderer("terminal:exit", id),
-    onActivity: (id, activity) =>
-      sendToRenderer("terminal:activity", id, activity),
+  });
+  // Chat-level: whichever engine drives a chat reports the same two facts.
+  listenToChats({
+    onActivity: (chatId, activity) =>
+      sendToRenderer("chat:activity", chatId, activity),
+    onExit: (chatId) => sendToRenderer("chat:exit", chatId),
   });
 }
 
@@ -704,5 +734,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   stopAll();
   stopAllWorktreeWatches();
+  // Chats first: an engine may hold more than a pty (a protocol connection, a
+  // child process of its own), and only it knows how to end its own sessions.
+  stopAllChats();
   killAllTerminals();
 });

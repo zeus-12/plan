@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { lastSegment } from "@plan/shared/lib/path";
-import { parseTerminalId, type ParsedTerminalId } from "../../terminal-ids";
-import { useTerminalWorking } from "../lib/terminal-activity-store";
+import {
+  isChatTerminalId,
+  parseTerminalId,
+  type ParsedTerminalId,
+} from "../../terminal-ids";
+import { useChatWorking } from "../lib/session-activity-store";
+import { stopChat } from "../lib/chat-driver-store";
 
 interface TerminalInfo {
   id: string;
@@ -65,8 +70,11 @@ export function SessionsDashboard({ open, onClose, onNavigate }: Props) {
   }, [open, onClose]);
 
   const kill = useCallback((id: string) => {
-    window.electronAPI.terminalKill(id);
-    // No optimistic removal — the terminal:exit refresh confirms it's gone.
+    // A chat is ended through its engine, which knows what it holds beyond a
+    // pty; anything else is just a terminal. No optimistic removal either way
+    // — the exit refresh is what confirms it's gone.
+    if (isChatTerminalId(id)) stopChat(id);
+    else window.electronAPI.terminalKill(id);
   }, []);
 
   const rows = useMemo(
@@ -152,7 +160,7 @@ function SessionRow({
   /** Present for chat rows — clicking the row opens that session. */
   onOpen?: () => void;
 }) {
-  const working = useTerminalWorking(id);
+  const working = useChatWorking(id);
   const label =
     parsed.kind === "chat"
       ? `${parsed.sessionId.slice(0, 8)}`

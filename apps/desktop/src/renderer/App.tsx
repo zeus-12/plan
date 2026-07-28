@@ -100,6 +100,7 @@ import {
 import { startSessionDoneNotifier } from "./lib/session-done-notifier";
 import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
 import { startAutoContinueWatcher } from "./lib/auto-continue-watcher";
+import { preloadChatEngines } from "./lib/chat-engine-settings";
 import {
   setSessionLabelResolver,
   setSessionNavigator,
@@ -571,6 +572,10 @@ function Shell() {
   const [claudeConfigScope, setClaudeConfigScope] =
     useState<ClaudeConfigScope | null>(null);
 
+  // Pull the chat-engine table up front, so what an engine can do is a known
+  // fact by the time a session's UI depends on it rather than something the
+  // first chat has to wait on.
+  useEffect(() => preloadChatEngines(), []);
   // Watch every live Claude session for completion and notify globally. Started
   // once here at the app root so it covers background sessions too, not just the
   // one on screen.

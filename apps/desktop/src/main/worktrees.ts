@@ -2,8 +2,11 @@ import { rm } from "fs/promises";
 import { join, basename } from "path";
 import { createHash } from "crypto";
 import { gitOrThrow as git, gitSafe, gh } from "./git-exec";
-import { resolveProjectCwd, primeProjectCwd } from "./claude-projects";
-import { encodeCwd, safeSegment } from "./claude-encoding";
+import {
+  resolveProjectCwd,
+  primeProjectCwd,
+} from "./providers/claude-code/projects";
+import { encodeCwd, safeSegment } from "./providers/claude-code/encoding";
 import { PLAN_DIR } from "./plan-config";
 import { discoverRepos, invalidateRepoLayout } from "./git";
 import { deleteScratch } from "./scratch-store";

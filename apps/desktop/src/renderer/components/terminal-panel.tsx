@@ -28,8 +28,6 @@ interface Props {
   onClose?: () => void;
   /** ⌘W while this terminal is focused asks to close it (scratch shells). */
   onRequestClose?: () => void;
-  /** Fired once the pty is open and ready to receive input. */
-  onReady?: () => void;
   /** Changing this value forces a refit (e.g. the dock height during a drag). */
   fitSignal?: number;
 }
@@ -151,7 +149,6 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       visible,
       onClose,
       onRequestClose,
-      onReady,
       fitSignal,
     },
     ref,
@@ -164,10 +161,6 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     // Held in a ref so changing the callback doesn't tear down the pty.
     const onRequestCloseRef = useRef(onRequestClose);
     onRequestCloseRef.current = onRequestClose;
-
-    // Held in a ref so changing the callback's identity doesn't tear down the pty.
-    const onReadyRef = useRef(onReady);
-    onReadyRef.current = onReady;
 
     // While hidden, output is buffered (capped) instead of parsed/rendered —
     // a hidden xterm processing a streaming TUI burns the main thread for
@@ -321,16 +314,16 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       };
 
       scheduleFit();
-      window.electronAPI
-        .terminalOpen(
-          id,
-          encoded,
-          term.cols,
-          term.rows,
-          initialCommand,
-          subPath,
-        )
-        .then(() => onReadyRef.current?.());
+      // Attaches to the pty, creating it only if nothing has yet — a chat pane
+      // finds one its engine already started.
+      void window.electronAPI.terminalOpen(
+        id,
+        encoded,
+        term.cols,
+        term.rows,
+        initialCommand,
+        subPath,
+      );
 
       const offData = window.electronAPI.onTerminalData((chunk) => {
         if (chunk.id !== id) return;

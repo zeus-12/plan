@@ -52,7 +52,7 @@ import {
 } from "../lib/project-tree";
 import { useApprovalEncodedSet } from "../lib/session-approval-store";
 import { useUnreadEncodedSet } from "../lib/unread-response-store";
-import { useWorkingEncodedSet } from "../lib/terminal-activity-store";
+import { useWorkingEncodedSet } from "../lib/session-activity-store";
 import { StatusDots } from "./status-dots";
 import { ChevronLeft } from "./chevron";
 

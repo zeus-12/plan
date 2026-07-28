@@ -19,6 +19,13 @@
  */
 
 import type {
+  ChatActivity,
+  ChatEngineDescriptor,
+  ChatStatus,
+  StartChatOptions,
+  StartChatResult,
+} from "./chat-engines";
+import type {
   AddReposToWorktreeInput,
   BlameResult,
   ClaudeConfigBundle,
@@ -50,10 +57,8 @@ import type {
   SessionEvent,
   SessionListEntry,
   SkillInfo,
-  TerminalActivity,
   TerminalChunk,
   TerminalInfo,
-  TerminalInputState,
   UpdateInfo,
   WorktreeRecord,
 } from "./shared-types";
@@ -298,7 +303,39 @@ export interface IpcInvokeContract {
     result: CommitDetails | null;
   };
 
-  // Terminal ptys (keyed by terminal id; cwd resolved from encoded in main)
+  // Chat engines (keyed by chat id — see chat-engines.ts / terminal-ids.ts).
+  // These are the driver-level operations: which engines exist, and how to
+  // start, feed, inspect, and end a Claude session. Which engine is behind a
+  // given chat is main's business; every channel here is engine-agnostic.
+  /** Every registered engine, with its capabilities (drives the UI's gating). */
+  "chat:engines": { args: []; result: ChatEngineDescriptor[] };
+  /** Start driving a chat, or reattach if it's already live. */
+  "chat:start": {
+    args: [chatId: string, opts: StartChatOptions];
+    result: StartChatResult;
+  };
+  "chat:status": { args: [chatId: string]; result: ChatStatus };
+  /** Re-read right now whether this chat is parked waiting on the user. */
+  "chat:probeApproval": { args: [chatId: string]; result: boolean };
+  /** Chat ids mid-turn across every engine. */
+  "chat:busyIds": { args: []; result: string[] };
+  /** Chat ids parked waiting on the user across every engine. */
+  "chat:approvalIds": { args: []; result: string[] };
+  /**
+   * Follow a chat whose session id changed under it — a `/branch` fork keeps
+   * the same driver but starts writing a new transcript, so the driver
+   * registered under `chat:enc:A` is really on B now. Returns false when the
+   * engine can't do it or there was nothing to move, in which case the caller
+   * must not repoint the UI.
+   */
+  "chat:rekey": {
+    args: [oldChatId: string, newChatId: string];
+    result: boolean;
+  };
+
+  // Terminal ptys (keyed by terminal id; cwd resolved from encoded in main).
+  // Scratch shells, Run/Build commands, and — for engines that have one — the
+  // pane attached to a chat's pty. Pure terminal surface: no chat semantics.
   "terminal:open": {
     args: [
       id: string,
@@ -310,31 +347,13 @@ export interface IpcInvokeContract {
     ];
     result: { cwd: string; error?: string };
   };
+  /** Whether a pty is alive. Whether an AGENT is live inside one is a chat
+   *  question — see `chat:status`, which the owning engine answers. */
   "terminal:status": {
     args: [id: string];
-    result: { running: boolean; process: string | null };
+    result: { running: boolean };
   };
-  "terminal:inputState": {
-    args: [id: string];
-    result: { state: TerminalInputState; lines: string[] };
-  };
-  /** Ids of every live pty currently showing Claude's "esc to interrupt" hint. */
-  "terminal:busyIds": { args: []; result: string[] };
-  /** Ids of every live pty parked on a selection/approval menu (agent live). */
-  "terminal:selectionIds": { args: []; result: string[] };
   "terminal:list": { args: []; result: TerminalInfo[] };
-  /**
-   * Re-key a live pty from `oldId` to `newId` in place (same process, same
-   * scrollback). Used when a chat's `claude` migrates to a different session id
-   * (e.g. `/branch` forks A into B): the pty that was `chat:enc:A` is really
-   * driving B now, so we rename it to `chat:enc:B` instead of leaving the UI
-   * bound to a session the process left. Returns false if no pty exists under
-   * `oldId` or one already exists under `newId`.
-   */
-  "terminal:rekey": {
-    args: [oldId: string, newId: string];
-    result: boolean;
-  };
   /** Write a pasted image to a temp file; null when the write fails. */
   "terminal:saveTempImage": {
     args: [data: Uint8Array, ext: string];
@@ -356,9 +375,13 @@ export interface IpcInvokeContract {
 
 /** Fire-and-forget renderer→main channels: `ipcRenderer.send` ↔ `ipcMain.on`. */
 export interface IpcSendContract {
+  /** Deliver a user message to a chat's agent and submit it. */
+  "chat:send": [chatId: string, text: string, imagePaths?: string[]];
+  /** Answer an on-screen TUI selector (engines with `keystrokes` only). */
+  "chat:sendKeys": [chatId: string, keys: string[]];
+  "chat:stop": [chatId: string];
+
   "terminal:input": [id: string, data: string];
-  "terminal:submit": [id: string, text: string, imagePaths?: string[]];
-  "terminal:sendKeys": [id: string, keys: string[]];
   "terminal:resize": [id: string, cols: number, rows: number];
   "terminal:kill": [id: string];
 }
@@ -372,8 +395,10 @@ export interface IpcEventContract {
   "app:reload-request": [];
   "terminal:data": [chunk: TerminalChunk];
   "terminal:exit": [id: string];
-  /** Pushed when a pty's busy/menu state changes (evaluated on output). */
-  "terminal:activity": [id: string, activity: TerminalActivity];
+  /** Pushed when a chat's busy / waiting-on-you pair changes. */
+  "chat:activity": [chatId: string, activity: ChatActivity];
+  /** A chat's driver ended (quit, killed, or died). */
+  "chat:exit": [chatId: string];
 }
 
 // ── window.electronAPI surface ───────────────────────────────────────
@@ -441,13 +466,17 @@ export const API_INVOKE = {
   blameRev: "git:blameRev",
   commitDetails: "git:commitDetails",
 
+  listChatEngines: "chat:engines",
+  startChat: "chat:start",
+  chatStatus: "chat:status",
+  probeChatApproval: "chat:probeApproval",
+  busyChatIds: "chat:busyIds",
+  approvalChatIds: "chat:approvalIds",
+  rekeyChat: "chat:rekey",
+
   terminalOpen: "terminal:open",
   terminalStatus: "terminal:status",
-  terminalInputState: "terminal:inputState",
-  terminalBusyIds: "terminal:busyIds",
-  terminalSelectionIds: "terminal:selectionIds",
   terminalList: "terminal:list",
-  terminalRekey: "terminal:rekey",
   saveTempImage: "terminal:saveTempImage",
   fileExists: "terminal:fileExists",
 
@@ -459,9 +488,11 @@ export const API_INVOKE = {
 } as const satisfies Record<string, keyof IpcInvokeContract>;
 
 export const API_SEND = {
+  sendToChat: "chat:send",
+  sendKeysToChat: "chat:sendKeys",
+  stopChat: "chat:stop",
+
   terminalInput: "terminal:input",
-  terminalSubmit: "terminal:submit",
-  terminalSendKeys: "terminal:sendKeys",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",
 } as const satisfies Record<string, keyof IpcSendContract>;
@@ -472,7 +503,8 @@ export const API_EVENTS = {
   onReloadRequest: "app:reload-request",
   onTerminalData: "terminal:data",
   onTerminalExit: "terminal:exit",
-  onTerminalActivity: "terminal:activity",
+  onChatActivity: "chat:activity",
+  onChatExit: "chat:exit",
 } as const satisfies Record<string, keyof IpcEventContract>;
 
 /** The renderer-facing API, derived method-by-method from the maps above.

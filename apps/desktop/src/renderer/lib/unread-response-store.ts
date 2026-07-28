@@ -35,8 +35,7 @@ const listeners = new Set<() => void>();
 // mean "the user is looking at this session" — the only thing that clears an
 // unread badge.
 let viewedId: string | null = null;
-let focused =
-  typeof document !== "undefined" ? document.hasFocus() : true;
+let focused = typeof document !== "undefined" ? document.hasFocus() : true;
 
 function emit() {
   listeners.forEach((l) => l());
@@ -120,12 +119,12 @@ if (typeof window !== "undefined") {
   // A resumed turn supersedes "replied — waiting on you": if it's working
   // again, it's no longer done. The session row already hides the green dot
   // while working, but clearing keeps the sidebar rollup honest too.
-  window.electronAPI?.onTerminalActivity?.((id, activity) => {
+  window.electronAPI?.onChatActivity?.((id, activity) => {
     if (activity.busy) clear(id);
   });
-  // A killed session isn't actionable. Deferred a tick so other exit listeners
+  // An ended session isn't actionable. Deferred a tick so other exit listeners
   // (which prune their own sets) run first.
-  window.electronAPI?.onTerminalExit?.((id) => {
+  window.electronAPI?.onChatExit?.((id) => {
     setTimeout(() => clear(id), 0);
   });
 }

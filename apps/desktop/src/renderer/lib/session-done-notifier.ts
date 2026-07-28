@@ -1,5 +1,4 @@
-import { currentBusyIds, subscribeActivity } from "./terminal-activity-store";
-import { isChatTerminalId } from "../../terminal-ids";
+import { currentBusyIds, subscribeActivity } from "./session-activity-store";
 import { getNotificationSettings } from "./notification-settings";
 import { playSound } from "./notification-sounds";
 import { sessionLabel, sessionNavigator } from "./session-notify";
@@ -12,7 +11,7 @@ import { osNotify, pushToast } from "./toast-store";
  * It runs at module scope (started once from the app root) so it watches EVERY
  * live chat session, not just the one on screen. The signal is the real one the
  * status dot uses: Claude's TUI shows an `esc to interrupt` hint while a turn is
- * in flight and drops it when the turn ends (see terminal-activity-store). When
+ * in flight and drops it when the turn ends (see session-activity-store). When
  * a chat session leaves the working set, it just finished — so we fire once.
  *
  * This replaces the old output-timing signal, which mistook a scroll (Claude
@@ -20,8 +19,8 @@ import { osNotify, pushToast } from "./toast-store";
  * time you scrolled. The screen hint can't be faked that way.
  *
  * Two non-completions are deliberately NOT treated as "done":
- *   - the pty exited (session killed) — we drop it on the exit event so the
- *     disappearance isn't read as a finished turn;
+ *   - the session ended (killed, or its driver died) — we drop it on the exit
+ *     event so the disappearance isn't read as a finished turn;
  *   - an approval / selection menu is now on screen — Claude is waiting on the
  *     user, not done; the menu-detection path handles that case.
  */
@@ -66,9 +65,9 @@ function fire(id: string) {
 async function onFinished(id: string) {
   await new Promise((r) => setTimeout(r, SETTLE_MS));
   try {
-    if ((await window.electronAPI.terminalBusyIds()).includes(id)) return; // blip / resumed
-    const { state } = await window.electronAPI.terminalInputState(id);
-    if (state === "selection") return; // approval/menu up — not done
+    if ((await window.electronAPI.busyChatIds()).includes(id)) return; // blip / resumed
+    // Waiting on the user, not done — the approval notifier owns that case.
+    if (await window.electronAPI.probeChatApproval(id)) return;
   } catch {
     // Best effort — if the confirm calls fail, still notify rather than swallow.
   }
@@ -80,9 +79,7 @@ async function onFinished(id: string) {
 }
 
 function tick() {
-  // Only chat ptys are Claude sessions — a scratch shell's TUI must never
-  // trigger a "Claude is done".
-  const now = new Set(currentBusyIds().filter(isChatTerminalId));
+  const now = new Set(currentBusyIds());
   for (const id of prevBusy) {
     if (!now.has(id)) void onFinished(id);
   }
@@ -104,9 +101,9 @@ export function startSessionDoneNotifier(): () => void {
   } catch {
     // No Notification API — toasts still cover it.
   }
-  // A killed pty disappears from the busy set; drop it from prevBusy on the exit
-  // event so that disappearance isn't mistaken for a finished turn.
-  unsubExit = window.electronAPI.onTerminalExit((id) => {
+  // An ended session disappears from the busy set; drop it from prevBusy on the
+  // exit event so that disappearance isn't mistaken for a finished turn.
+  unsubExit = window.electronAPI.onChatExit((id) => {
     prevBusy.delete(id);
   });
   unsub = subscribeActivity(tick);
