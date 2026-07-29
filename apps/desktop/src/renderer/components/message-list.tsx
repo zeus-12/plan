@@ -30,6 +30,12 @@ import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
 import { useTranscriptPrefs } from "../lib/transcript-prefs";
 import {
+  chatScrollKey,
+  getChatScroll,
+  setChatScroll,
+  type ChatScrollPos,
+} from "../lib/chat-scroll-store";
+import {
   classifyMessage,
   imageOnlyPaths,
   isRealUserTurn,
@@ -59,8 +65,50 @@ import { Chevron } from "./chevron";
  *  latest" button appears. */
 const SCROLL_DOWN_THRESHOLD_PX = 400;
 
+/** Within this of the bottom counts as "following the newest message". */
+const BOTTOM_EPSILON_PX = 20;
+
+/** How long a restore keeps re-applying its target while the transcript's
+ *  heights settle (async markdown/shiki/images, content-visibility). */
+const RESTORE_SETTLE_MS = 900;
+
+/** Idle time after scrolling before the anchor row is re-sampled. */
+const ANCHOR_SAMPLE_MS = 120;
+
+/**
+ * The message row under the pane's top edge, and how far below that edge it
+ * starts. `elementFromPoint` is O(1); the row walk is the fallback for a point
+ * that lands on an overlay or in the gap between rows.
+ */
+function topRowAnchor(
+  el: HTMLElement,
+): { uuid: string; offset: number } | null {
+  const pane = el.getBoundingClientRect();
+  const hit = document.elementFromPoint(
+    pane.left + pane.width / 2,
+    pane.top + 1,
+  );
+  const row =
+    hit && el.contains(hit) ? ancestorWithAttr(hit, "data-msg-row") : null;
+  if (row?.dataset.msgRow) {
+    return {
+      uuid: row.dataset.msgRow,
+      offset: row.getBoundingClientRect().top - pane.top,
+    };
+  }
+  for (const candidate of el.querySelectorAll<HTMLElement>("[data-msg-row]")) {
+    const rect = candidate.getBoundingClientRect();
+    if (rect.bottom <= pane.top + 1) continue;
+    const uuid = candidate.dataset.msgRow;
+    return uuid ? { uuid, offset: rect.top - pane.top } : null;
+  }
+  return null;
+}
+
 interface Props {
   messages: ConversationMessage[];
+  /** Chat this transcript belongs to — keys its saved scroll position. */
+  sessionId?: string;
   /** Project key — lets plan cards reach the shared annotation store for
    *  diff comments (keyed there by the plan file path). */
   encoded: string;
@@ -1170,6 +1218,7 @@ const EMPTY_PLAN_VERSIONS: PlanVersionInfo[] = [];
  */
 export const MessageList = memo(function MessageList({
   messages,
+  sessionId,
   encoded,
   annotations,
   onAddAnnotation,
@@ -1388,51 +1437,170 @@ export const MessageList = memo(function MessageList({
   // dynamic (markdown) heights re-measures rows above the viewport, which
   // shifts the scroll position — the "jumps as you scroll up" glitch. Natural
   // flow keeps the scroll perfectly stable.
-  const sessionAnchorKey = items[0]?.uuid ?? `len-${items.length}`;
-  const sessionKeyRef = useRef<string | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scrollKey = sessionId ? chatScrollKey(encoded, sessionId) : null;
+  const scrollKeyRef = useRef<string | null>(null);
+  // Anchor to restore to (null = never scrolled this session, or it was left at
+  // the bottom). Seeded from the module store, which outlives both this pane's
+  // hidden state and a workspace remount.
+  const savedRef = useRef<ChatScrollPos | null>(null);
   const followingBottomRef = useRef(true);
+  if (scrollKeyRef.current !== scrollKey) {
+    scrollKeyRef.current = scrollKey;
+    savedRef.current = scrollKey ? getChatScroll(scrollKey) : null;
+    followingBottomRef.current = savedRef.current?.atBottom ?? true;
+  }
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
-  useLayoutEffect(() => {
-    const el = parentRef.current;
-    if (!el) return;
-    // Reset to "following" on session change so a freshly-opened chat anchors
-    // to the latest message.
-    if (sessionKeyRef.current !== sessionAnchorKey) {
-      sessionKeyRef.current = sessionAnchorKey;
-      followingBottomRef.current = true;
-    }
-    if (followingBottomRef.current) el.scrollTop = el.scrollHeight;
-    // `working` is a dep so the typing indicator appearing/disappearing keeps us
-    // anchored to the bottom when following.
-  }, [sessionAnchorKey, items.length, deferredMessages, working]);
-
-  // Becoming visible again (pane was display:none): layout was skipped while
-  // hidden, so re-anchor to the bottom if we were following it.
-  useLayoutEffect(() => {
-    if (!visible) return;
-    const el = parentRef.current;
-    if (el && followingBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [visible]);
-
-  // Show a "jump to latest" button once the user scrolls a screenful-ish up.
   const [showScrollDown, setShowScrollDown] = useState(false);
 
+  // Offset this component last put the scroller at — anything else is someone
+  // else moving it (see onScroll).
+  const appliedScrollRef = useRef(-1);
+
+  // Where the restore wants the scroller, applied against the CURRENT layout.
+  const applyScrollTarget = useCallback(() => {
+    const el = parentRef.current;
+    if (!el || el.clientHeight === 0) return;
+    const pos = savedRef.current;
+    if (followingBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    } else if (!pos) {
+      return;
+    } else {
+      const row = pos.anchorUuid
+        ? el.querySelector<HTMLElement>(
+            `[data-msg-row="${CSS.escape(pos.anchorUuid)}"]`,
+          )
+        : null;
+      if (!row) {
+        el.scrollTop = pos.scrollTop;
+      } else {
+        const want = pos.anchorOffset - (pos.scrollTop - pos.anchorScrollTop);
+        const delta =
+          row.getBoundingClientRect().top -
+          el.getBoundingClientRect().top -
+          want;
+        if (Math.abs(delta) > 0.5) el.scrollTop += delta;
+      }
+    }
+    appliedScrollRef.current = el.scrollTop;
+  }, []);
+
+  // A restore has to survive the transcript settling: rows are
+  // content-visibility'd (off-screen heights are estimates until rendered) and
+  // markdown/shiki/images resolve after the first paint, so the scroller keeps
+  // growing for a few frames. A one-shot restore lands wherever those estimates
+  // happened to put it — near the top of a long chat — so re-apply the target
+  // until it stops moving or the user takes over.
+  const settleUntilRef = useRef(0);
+  const rafRef = useRef(0);
+
+  const beginRestore = useCallback(() => {
+    settleUntilRef.current = performance.now() + RESTORE_SETTLE_MS;
+    applyScrollTarget();
+    if (rafRef.current) return;
+    const tick = () => {
+      rafRef.current = 0;
+      if (performance.now() > settleUntilRef.current) return;
+      applyScrollTarget();
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [applyScrollTarget]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  // Restore on mount and every time the pane comes back on screen — a hidden
+  // pane has no layout box, so the browser drops its scroll offset.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    beginRestore();
+  }, [visible, beginRestore]);
+
+  // Keep the bottom pinned as new content lands. `working` is a dep so the
+  // typing indicator appearing/disappearing keeps us anchored too.
+  useLayoutEffect(() => {
+    if (visibleRef.current && followingBottomRef.current) applyScrollTarget();
+  }, [items.length, deferredMessages, working, applyScrollTarget]);
+
+  // Rows grow after their row is committed (shiki, images, a
+  // content-visibility'd row rendering for real), which silently walks the
+  // viewport away from wherever it was pinned.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const ro = new ResizeObserver(() => {
+      if (!visibleRef.current) return;
+      if (followingBottomRef.current) applyScrollTarget();
+      else if (performance.now() < settleUntilRef.current) applyScrollTarget();
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [applyScrollTarget]);
+
+  // Record the position so returning to this chat resumes where it was left.
+  // scrollTop lands on every event (cheap); the anchor row is sampled once
+  // movement stops, and any scrolling since is replayed off `anchorScrollTop`.
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
+    let settleTimer = 0;
+
+    const save = (anchor: boolean) => {
+      const prev = savedRef.current;
+      const pos: ChatScrollPos = {
+        atBottom: followingBottomRef.current,
+        scrollTop: el.scrollTop,
+        anchorUuid: prev?.anchorUuid ?? null,
+        anchorOffset: prev?.anchorOffset ?? 0,
+        anchorScrollTop: prev?.anchorScrollTop ?? el.scrollTop,
+      };
+      if (anchor) {
+        const found = topRowAnchor(el);
+        pos.anchorUuid = found?.uuid ?? null;
+        pos.anchorOffset = found?.offset ?? 0;
+        pos.anchorScrollTop = el.scrollTop;
+      }
+      savedRef.current = pos;
+      if (scrollKey) setChatScroll(scrollKey, pos);
+    };
+
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      followingBottomRef.current = distance < 20;
       setShowScrollDown(distance > SCROLL_DOWN_THRESHOLD_PX);
+      // A hidden pane reports a collapsed scroller — not the user's position.
+      if (!visibleRef.current) return;
+      if (performance.now() < settleUntilRef.current) {
+        // A restore in flight moves the scroller itself; ignore those. An offset
+        // we didn't put there is someone else driving (a wheel, the message
+        // overview rail, find) — they win, so the restore stands down.
+        if (Math.abs(el.scrollTop - appliedScrollRef.current) <= 1) return;
+        settleUntilRef.current = 0;
+      }
+      followingBottomRef.current = distance < BOTTOM_EPSILON_PX;
+      save(false);
+      clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => save(true), ANCHOR_SAMPLE_MS);
     };
+
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [items.length]);
+    return () => {
+      clearTimeout(settleTimer);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [scrollKey]);
 
   const scrollToBottom = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
+    settleUntilRef.current = 0;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     followingBottomRef.current = true;
     setShowScrollDown(false);
@@ -1698,7 +1866,7 @@ export const MessageList = memo(function MessageList({
             its width for readability while the scrollbar stays at the pane edge.
             The cap is per-row (not on this wrapper) so a plan card showing a diff
             can opt out and run full-width, like the diff/file tabs do. */}
-          <div className="w-full">
+          <div ref={contentRef} className="w-full">
             {items.map((m, idx) => {
               const partMap = annotationsByMessage.get(m.uuid);
               const showHeader = showHeaderForRow[idx];

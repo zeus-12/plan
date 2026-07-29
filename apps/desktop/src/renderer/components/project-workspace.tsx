@@ -388,6 +388,7 @@ const ChatTabPane = memo(function ChatTabPane({
       {transcript ? (
         <MessageList
           messages={transcript.messages}
+          sessionId={tab.sessionId}
           encoded={encoded}
           annotations={annotations}
           onAddAnnotation={onAddAnnotation}
