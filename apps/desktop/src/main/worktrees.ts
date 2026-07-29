@@ -29,9 +29,11 @@ import {
   updateWorktreeRecord,
   worktreeNameTaken,
   listAllWorktreeRecords,
+  type StoredWorktree,
   type WorktreeRecord,
   type WorktreeRepoRecord,
 } from "./worktrees-store";
+import { latestActivity } from "./providers/claude-code/sessions";
 import type {
   CreatePrInput,
   CreatePrRepoResult,
@@ -232,13 +234,14 @@ export async function createWorktree(
   primeProjectCwd(wtEncoded, rootPath);
   // The checkouts just landed — drop any layout discovered before they existed.
   invalidateRepoLayout(wtEncoded);
-  return addWorktreeRecord({
+  const record = await addWorktreeRecord({
     projectEncoded: encoded,
     name,
     rootPath,
     encoded: wtEncoded,
     repos: created,
   });
+  return withActivity(record);
 }
 
 /**
@@ -281,9 +284,9 @@ export async function addReposToWorktree(
   // The worktree spans more repos now — its cached layout is stale.
   invalidateRepoLayout(rec.encoded);
 
-  const updated: WorktreeRecord = { ...rec, repos: [...rec.repos, ...created] };
+  const updated: StoredWorktree = { ...rec, repos: [...rec.repos, ...created] };
   await updateWorktreeRecord(updated);
-  return updated;
+  return withActivity(updated);
 }
 
 /** Remove a worktree's checkouts (per repo) and its on-disk dir, then forget it. */
@@ -415,13 +418,22 @@ export async function createWorktreePr(
   return { repos };
 }
 
+/**
+ * A worktree addresses its chats by its own `encoded` cwd, so the activity
+ * clock behind `ProjectEntry.mtimeMs` reads it unchanged: newest session
+ * transcript wins, 0 when the worktree has never been chatted in.
+ */
+async function withActivity(rec: StoredWorktree): Promise<WorktreeRecord> {
+  return { ...rec, mtimeMs: await latestActivity(rec.encoded) };
+}
+
 export async function listWorktrees(
   encoded: string,
 ): Promise<WorktreeRecord[]> {
   const records = await listWorktreeRecords(encoded);
   // Re-seed the cwd cache after a restart so content ops resolve immediately.
   for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
-  return records;
+  return Promise.all(records.map(withActivity));
 }
 
 /**
@@ -432,5 +444,5 @@ export async function listWorktrees(
 export async function listAllWorktrees(): Promise<WorktreeRecord[]> {
   const records = await listAllWorktreeRecords();
   for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
-  return records;
+  return Promise.all(records.map(withActivity));
 }

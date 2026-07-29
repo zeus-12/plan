@@ -445,7 +445,7 @@ function Shell() {
     ? {
         encoded: activeWorktree.encoded,
         cwd: activeWorktree.rootPath,
-        mtimeMs: activeWorktree.createdAt,
+        mtimeMs: activeWorktree.mtimeMs,
         archived: false,
       }
     : selected;

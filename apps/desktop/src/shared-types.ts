@@ -266,6 +266,12 @@ export interface WorktreeRecord {
   encoded: string;
   repos: WorktreeRepoRecord[];
   createdAt: number;
+  /**
+   * Newest session-transcript mtime under this worktree's own `encoded` cwd —
+   * the same activity clock `ProjectEntry.mtimeMs` carries. Derived on read,
+   * never persisted, so it can't go stale in `worktrees.json`.
+   */
+  mtimeMs: number;
 }
 
 /** Per-project defaults the user sets once; pre-fill new worktrees + terminals. */

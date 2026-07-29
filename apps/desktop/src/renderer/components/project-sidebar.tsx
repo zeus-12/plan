@@ -86,8 +86,8 @@ interface Props {
   onOpenClaudeConfig: () => void;
 }
 
-const LEAF_HEIGHT = 50;
-const WORKTREE_HEIGHT = 34;
+const LEAF_HEIGHT = 44;
+const WORKTREE_HEIGHT = 40;
 const GROUP_HEIGHT = 36;
 // Empty space above each top-level entry (project / group header) so one
 // project's block — itself plus its nested worktrees — reads as separate from
@@ -289,6 +289,20 @@ export function ProjectSidebar({
     () => buildProjectTree(active, reposByProject),
     [active, reposByProject],
   );
+
+  // A project row is titled by its folder name, so two projects with the same
+  // folder name under different parents would render identically. Those — and
+  // only those — keep a cwd line under the title to tell them apart.
+  const ambiguousNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of projects) {
+      const n = lastSegment(p.cwd);
+      counts.set(n, (counts.get(n) ?? 0) + 1);
+    }
+    return new Set(
+      [...counts].filter(([, c]) => c > 1).map(([name]) => name),
+    );
+  }, [projects]);
 
   // Auto-expand so the active selection is visible: the group containing the
   // selected project, and the project itself when a worktree of it is active.
@@ -534,7 +548,7 @@ export function ProjectSidebar({
                     >
                       <button
                         onClick={() => toggleGroup(row.node.key)}
-                        className="flex h-full w-full items-center gap-1.5 px-2.5 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                        className="flex h-full w-full items-center gap-1.5 px-2.5 text-left font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)]"
                       >
                         <ChevronRight
                           size={14}
@@ -575,6 +589,7 @@ export function ProjectSidebar({
                   // slugifies into it), so only surface it when it diverges.
                   // Same for the repo count — one line unless there's more to say.
                   const sub = [
+                    w.mtimeMs ? relativeTime(w.mtimeMs) : "",
                     branch && branch !== w.name ? branch : "",
                     w.repos.length > 1 ? `${w.repos.length} repos` : "",
                   ]
@@ -591,8 +606,8 @@ export function ProjectSidebar({
                           className={cn(
                             "group absolute left-0 top-0 flex w-full items-center gap-2 pr-2 transition-colors",
                             isActive
-                              ? "bg-[var(--bg-surface-hover)]"
-                              : "hover:bg-[var(--bg-surface-hover)]",
+                              ? "bg-[var(--row-selected)]"
+                              : "hover:bg-[var(--row-hover)]",
                           )}
                           style={{
                             transform,
@@ -607,7 +622,8 @@ export function ProjectSidebar({
                           />
                           <button
                             onClick={() => onSelectWorktree(wp.encoded, w.id)}
-                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                            aria-current={isActive ? "true" : undefined}
+                            className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
                           >
                             <GitBranch
                               size={13}
@@ -618,14 +634,21 @@ export function ProjectSidebar({
                                 className={cn(
                                   "truncate font-[family-name:var(--font-mono)] text-[13px]",
                                   isActive
-                                    ? "text-[var(--text)]"
+                                    ? "text-[var(--row-selected-text)]"
                                     : "text-[var(--text-secondary)]",
                                 )}
                               >
                                 {w.name}
                               </span>
                               {sub && (
-                                <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                                <span
+                                  className={cn(
+                                    "truncate font-[family-name:var(--font-mono)] text-[10px]",
+                                    isActive
+                                      ? "text-[var(--row-selected-meta)]"
+                                      : "text-[var(--row-meta)]",
+                                  )}
+                                >
                                   {sub}
                                 </span>
                               )}
@@ -662,6 +685,14 @@ export function ProjectSidebar({
                 const isLiveActive =
                   p.encoded === selected && activeWorktreeId === null;
                 const shortName = lastSegment(p.cwd);
+                // The row is titled by the folder name, so the cwd only earns a
+                // line when another project shares that name.
+                const sub = [
+                  p.mtimeMs ? relativeTime(p.mtimeMs) : "",
+                  ambiguousNames.has(shortName) ? p.cwd : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
                 const hasWorktrees = row.worktrees.length > 0;
                 const showCount = !row.expanded && hasWorktrees;
                 // The project's own live-copy session, plus (while collapsed)
@@ -690,8 +721,8 @@ export function ProjectSidebar({
                             "group flex h-full items-center pr-2 transition-colors",
                             p.archived && "opacity-60",
                             isLiveActive
-                              ? "bg-[var(--bg-surface-hover)]"
-                              : "hover:bg-[var(--bg-surface-hover)]",
+                              ? "bg-[var(--row-selected)]"
+                              : "hover:bg-[var(--row-hover)]",
                           )}
                           style={{
                             paddingLeft: row.depth > 0 ? 18 : 6,
@@ -704,7 +735,11 @@ export function ProjectSidebar({
                                 toggleGroup(p.encoded);
                               }}
                               aria-label={row.expanded ? "Collapse" : "Expand"}
-                              className="flex h-full w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] transition-colors hover:text-[var(--text)]"
+                              // The 20px glyph box is under the 24px target
+                              // floor; the pseudo-element claims the row's left
+                              // padding to make up the difference, so nothing
+                              // moves and it can't overlap the select button.
+                              className="relative flex h-full w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] transition-colors after:absolute after:inset-y-0 after:-left-1 after:right-0 after:content-[''] hover:text-[var(--text)]"
                             >
                               <ChevronRight
                                 size={14}
@@ -719,7 +754,8 @@ export function ProjectSidebar({
                           )}
                           <button
                             onClick={() => onSelectProject(p.encoded)}
-                            className="flex min-w-0 flex-1 items-center gap-2 py-1 pl-px pr-2 text-left"
+                            aria-current={isLiveActive ? "true" : undefined}
+                            className="flex min-w-0 flex-1 items-center gap-2 rounded-sm py-1 pl-px pr-2 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
                           >
                             <ProjectIcon
                               url={iconsByProject.get(p.encoded)}
@@ -730,18 +766,24 @@ export function ProjectSidebar({
                                 className={cn(
                                   "truncate font-[family-name:var(--font-mono)] text-[13px]",
                                   isLiveActive
-                                    ? "text-[var(--text)]"
+                                    ? "text-[var(--row-selected-text)]"
                                     : "text-[var(--text-secondary)]",
                                 )}
                               >
                                 {shortName}
                               </span>
-                              <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                                {p.mtimeMs
-                                  ? `${relativeTime(p.mtimeMs)} · `
-                                  : ""}
-                                {p.cwd}
-                              </span>
+                              {sub && (
+                                <span
+                                  className={cn(
+                                    "truncate font-[family-name:var(--font-mono)] text-[10px]",
+                                    isLiveActive
+                                      ? "text-[var(--row-selected-meta)]"
+                                      : "text-[var(--row-meta)]",
+                                  )}
+                                >
+                                  {sub}
+                                </span>
+                              )}
                             </span>
                           </button>
                           {/* Right slot: count + status dots flush to the edge at
@@ -759,7 +801,16 @@ export function ProjectSidebar({
                               working={projWorking}
                             />
                             {!p.archived && (
-                              <div className="absolute -right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md bg-[var(--bg-surface-hover)] pl-2 opacity-0 transition-opacity group-hover:opacity-100">
+                              <div
+                                className={cn(
+                                  "absolute -right-0.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md pl-2 opacity-0 transition-opacity group-hover:opacity-100",
+                                  // Occludes the count/dots, so it has to be
+                                  // painted with whatever fill the row is under.
+                                  isLiveActive
+                                    ? "bg-[var(--row-selected)]"
+                                    : "bg-[var(--row-hover)]",
+                                )}
+                              >
                                 <button
                                   onClick={() =>
                                     onOpenProjectDefaults(p.encoded)

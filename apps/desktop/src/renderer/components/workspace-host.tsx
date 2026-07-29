@@ -130,7 +130,7 @@ function WorkspaceHostImpl({
       return {
         encoded: worktreeRecord.encoded,
         cwd: worktreeRecord.rootPath,
-        mtimeMs: worktreeRecord.createdAt,
+        mtimeMs: worktreeRecord.mtimeMs,
         archived: false,
       };
     }
@@ -139,7 +139,7 @@ function WorkspaceHostImpl({
     isWorktree,
     worktreeRecord?.encoded,
     worktreeRecord?.rootPath,
-    worktreeRecord?.createdAt,
+    worktreeRecord?.mtimeMs,
     projects,
     target.projectEncoded,
   ]);

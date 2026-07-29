@@ -8,8 +8,15 @@ import type {
 
 export type { WorktreeRecord, WorktreeRepoRecord, ProjectDefaults };
 
+/**
+ * What actually lives in `worktrees.json`. `mtimeMs` is read off the session
+ * transcripts on demand, so keeping it out of the persisted shape means a stale
+ * copy can never be written back or trusted on load.
+ */
+export type StoredWorktree = Omit<WorktreeRecord, "mtimeMs">;
+
 interface Stored {
-  worktrees: WorktreeRecord[];
+  worktrees: StoredWorktree[];
   /** Keyed by projectEncoded. */
   defaults: Record<string, ProjectDefaults>;
 }
@@ -27,7 +34,7 @@ function sanitizeRepo(r: unknown): WorktreeRepoRecord | null {
   return { subPath: o.subPath, path: o.path, branch: o.branch, base: o.base };
 }
 
-function sanitizeWorktree(w: unknown): WorktreeRecord | null {
+function sanitizeWorktree(w: unknown): StoredWorktree | null {
   if (!w || typeof w !== "object") return null;
   const o = w as Record<string, unknown>;
   if (
@@ -63,7 +70,7 @@ const { load, scheduleWrite } = createJsonStore<Stored>(
       worktrees: Array.isArray(parsed.worktrees)
         ? parsed.worktrees
             .map(sanitizeWorktree)
-            .filter((w): w is WorktreeRecord => !!w)
+            .filter((w): w is StoredWorktree => !!w)
         : [],
       defaults:
         parsed.defaults && typeof parsed.defaults === "object"
@@ -75,28 +82,28 @@ const { load, scheduleWrite } = createJsonStore<Stored>(
 
 export async function listWorktreeRecords(
   projectEncoded: string,
-): Promise<WorktreeRecord[]> {
+): Promise<StoredWorktree[]> {
   const data = await load();
   return data.worktrees.filter((w) => w.projectEncoded === projectEncoded);
 }
 
-export async function listAllWorktreeRecords(): Promise<WorktreeRecord[]> {
+export async function listAllWorktreeRecords(): Promise<StoredWorktree[]> {
   const data = await load();
   return [...data.worktrees];
 }
 
 export async function getWorktreeRecord(
   id: string,
-): Promise<WorktreeRecord | null> {
+): Promise<StoredWorktree | null> {
   const data = await load();
   return data.worktrees.find((w) => w.id === id) ?? null;
 }
 
 export async function addWorktreeRecord(
-  rec: Omit<WorktreeRecord, "id" | "createdAt">,
-): Promise<WorktreeRecord> {
+  rec: Omit<StoredWorktree, "id" | "createdAt">,
+): Promise<StoredWorktree> {
   const data = await load();
-  const full: WorktreeRecord = {
+  const full: StoredWorktree = {
     ...rec,
     id: randomUUID(),
     createdAt: Date.now(),
@@ -107,7 +114,7 @@ export async function addWorktreeRecord(
 }
 
 /** Replace a worktree record in place (e.g. after adding repos to it). */
-export async function updateWorktreeRecord(rec: WorktreeRecord): Promise<void> {
+export async function updateWorktreeRecord(rec: StoredWorktree): Promise<void> {
   const data = await load();
   const idx = data.worktrees.findIndex((w) => w.id === rec.id);
   if (idx === -1) return;
