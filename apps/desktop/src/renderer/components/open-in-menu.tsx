@@ -19,8 +19,6 @@ interface Props {
   relPath?: string | null;
   /** Repo sub-path, for multi-repo projects. */
   subPath?: string;
-  /** Hide the "Open" label, leaving just the app icon (tight toolbars). */
-  compact?: boolean;
 }
 
 function ChevronDown() {
@@ -82,7 +80,6 @@ export function OpenInMenu({
   encoded,
   relPath = null,
   subPath = "",
-  compact = false,
 }: Props) {
   const apps = useExternalApps();
   const [defaultApp, setDefaultApp] = useDefaultExternalApp();
@@ -157,13 +154,10 @@ export function OpenInMenu({
         <button
           onClick={() => void openIn(defaultApp.id)}
           title={`Open this ${targetLabel} in ${defaultApp.label}`}
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-l-md text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
-            compact ? "px-1.5" : "pl-2 pr-2",
-          )}
+          className="flex h-7 items-center gap-1.5 rounded-l-md px-2 text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
         >
           <AppIcon app={defaultApp} size={14} />
-          {!compact && <span>Open</span>}
+          <span>Open</span>
         </button>
         <button
           onClick={() => setOpen((v) => !v)}

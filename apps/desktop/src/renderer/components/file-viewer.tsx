@@ -52,7 +52,6 @@ import { ImageLightbox } from "./image-lightbox";
 import { useWorktreeRevision } from "../lib/worktree-revision";
 import { blameLineInfo, tagBlame, type TextBlame } from "../lib/blame";
 import { useBlameCard } from "../lib/use-blame-card";
-import { OpenInMenu } from "./open-in-menu";
 
 const LINE_HEIGHT = 20;
 const CONTENT_PAD_LEFT = 12; // matches the content cell's `pl-3`
@@ -1832,7 +1831,6 @@ function FileViewerImpl({
               Share for comments
             </button>
           )}
-          {!buffer && <OpenInMenu encoded={encoded} relPath={path} />}
           <div className="relative" ref={settingsRef}>
             <button
               onClick={() => setSettingsOpen((o) => !o)}

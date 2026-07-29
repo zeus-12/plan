@@ -153,18 +153,36 @@ interface Props {
   onMoveSession?: (sessionId: string, title: string) => void;
 }
 
+/**
+ * What "Open in…" acts on: the file behind a file/diff tab, or the workspace
+ * itself for anything else (chat, search, scratch, a PR). Shared by the header
+ * control and the ⌘⇧O handler so the two can't drift.
+ */
+function openTarget(tab: Tab | null | undefined): {
+  relPath: string | null;
+  subPath: string;
+} {
+  if (tab?.kind === "file") return { relPath: tab.path, subPath: "" };
+  if (tab?.kind === "diff") return { relPath: tab.path, subPath: tab.subPath };
+  return { relPath: null, subPath: "" };
+}
+
 function WorkspaceHeader({
   project,
   projectsSidebarOpen,
   branch,
   repoLabel,
+  activeTab,
 }: {
   project: ProjectEntry;
   projectsSidebarOpen: boolean;
   branch: string | null;
   /** Set in multi-repo projects to say which repo the branch belongs to. */
   repoLabel: string | null;
+  /** Decides whether "Open in…" targets a file or the whole project. */
+  activeTab: Tab | null | undefined;
 }) {
+  const target = openTarget(activeTab);
   const middle = useSidebar();
   const shortName = lastSegment(project.cwd);
 
@@ -197,7 +215,11 @@ function WorkspaceHeader({
         )}
       </div>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
-        <OpenInMenu encoded={project.encoded} />
+        <OpenInMenu
+          encoded={project.encoded}
+          relPath={target.relPath}
+          subPath={target.subPath}
+        />
         <ThemeMenu />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1724,10 +1746,8 @@ function ProjectWorkspaceImpl({
     return () => window.removeEventListener("keydown", handler);
   }, [activeTab, fileStages, openTab]);
 
-  // ⌘⇧O — open the active file in the default app, or the project when the
-  // active tab isn't a file. Lives here rather than in OpenInMenu: that
-  // component is mounted once per header AND once per open file/diff tab, so a
-  // listener inside it would fire several times for one keypress.
+  // ⌘⇧O — the header control's action as a keystroke; `openTarget` keeps the
+  // two aiming at the same thing.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!activeRef.current) return;
@@ -1738,14 +1758,7 @@ function ProjectWorkspaceImpl({
       if (!app) return;
       e.preventDefault();
 
-      let relPath: string | null = null;
-      let subPath = "";
-      if (activeTab?.kind === "file") {
-        relPath = activeTab.path;
-      } else if (activeTab?.kind === "diff") {
-        relPath = activeTab.path;
-        subPath = activeTab.subPath;
-      }
+      const { relPath, subPath } = openTarget(activeTab);
       void window.electronAPI
         .openInExternalApp(app.id, project.encoded, relPath, subPath)
         .then((r) => {
@@ -1942,6 +1955,7 @@ function ProjectWorkspaceImpl({
                 ? repoDisplayName(headerRepo, project.cwd)
                 : null
             }
+            activeTab={activeTab}
           />
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col">

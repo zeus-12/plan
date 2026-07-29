@@ -22,20 +22,31 @@ interface AppDefinition {
   kind: ExternalAppKind;
   /**
    * The launcher the app ships INSIDE its bundle, relative to the .app. `open
-   * -b` only hands the app a path and lets it decide what to do, which for an
-   * editor generally means opening the enclosing project rather than the file
-   * asked for; the CLI opens the file itself. Taken from the bundle rather
-   * than PATH so it works whether or not the user ever ran the app's
-   * "install shell command". Missing at that path → falls back to `open -b`.
+   * -b` only hands the app a path and lets it decide what to do with it; the
+   * CLI takes both the workspace root and the file, so the editor opens the
+   * repo with that file focused and the rest of the tree still navigable.
+   * Taken from the bundle rather than PATH so it works whether or not the user
+   * ever ran the app's "install shell command". Missing at that path → falls
+   * back to `open -b`.
    */
-  cli?: { path: string; args?: readonly string[] };
+  cli?: { path: string; style: CliStyle };
+}
+
+/**
+ * How a CLI wants "open this file, in this project": VS Code and its forks
+ * take the folder positionally and the file behind `--goto`, everything else
+ * takes both as plain paths.
+ */
+type CliStyle = "vscode" | "paths";
+
+function cliArgs(style: CliStyle, root: string, file: string): string[] {
+  return style === "vscode" ? [root, "--goto", file] : [root, file];
 }
 
 /** The launcher every VS Code fork ships, `<bin>` being its own command name. */
 const vscodeCli = (bin: string) => ({
   path: `Contents/Resources/app/bin/${bin}`,
-  // Reuses an open window on that folder instead of spawning a bare one.
-  args: ["--goto"] as const,
+  style: "vscode" as const,
 });
 
 /**
@@ -81,7 +92,7 @@ const APPS: readonly AppDefinition[] = [
     label: "Zed",
     bundleIds: ["dev.zed.Zed", "dev.zed.Zed-Preview"],
     kind: "editor",
-    cli: { path: "Contents/MacOS/cli" },
+    cli: { path: "Contents/MacOS/cli", style: "paths" },
   },
   {
     id: "windsurf",
@@ -95,7 +106,7 @@ const APPS: readonly AppDefinition[] = [
     label: "Sublime Text",
     bundleIds: ["com.sublimetext.4", "com.sublimetext.3"],
     kind: "editor",
-    cli: { path: "Contents/SharedSupport/bin/subl" },
+    cli: { path: "Contents/SharedSupport/bin/subl", style: "paths" },
   },
   { id: "xcode", label: "Xcode", bundleIds: ["com.apple.dt.Xcode"], kind: "editor" },
   { id: "idea", label: "IntelliJ IDEA", bundleIds: ["com.jetbrains.intellij", "com.jetbrains.intellij.ce"], kind: "editor" },
@@ -216,7 +227,7 @@ async function iconUrl(id: string, appPath: string): Promise<string | null> {
 interface Resolved extends ExternalApp {
   bundleId: string;
   /** Absolute path to the in-bundle launcher, when the bundle ships one. */
-  cli: { command: string; args: readonly string[] } | null;
+  cli: { command: string; style: CliStyle } | null;
 }
 
 async function resolveCli(
@@ -226,7 +237,7 @@ async function resolveCli(
   if (!def.cli) return null;
   const command = join(appPath, def.cli.path);
   if (!(await pathExists(command))) return null;
-  return { command, args: def.cli.args ?? [] };
+  return { command, style: def.cli.style };
 }
 
 async function resolve(def: AppDefinition): Promise<Resolved | null> {
@@ -303,7 +314,8 @@ export async function openInExternalApp(
   relPath: string | null,
   subPath = "",
 ): Promise<{ ok: boolean; error?: string }> {
-  const target = await resolveTargetPath(encoded, relPath, subPath);
+  const root = await resolveWorkspaceCwd(encoded, subPath);
+  const target = relPath ? join(root, relPath) : root;
   const found = (await detect()).find((a) => a.id === appId);
   if (!found) return { ok: false, error: "That app is no longer installed." };
 
@@ -311,11 +323,15 @@ export async function openInExternalApp(
   // A terminal opens a working directory, so a file target means its parent.
   const path = found.kind === "terminal" && !dir ? dirname(target) : target;
 
-  // The bundle's own launcher opens the exact path it's given; `open -b` only
-  // hands the app a path, and an editor generally answers that by showing the
-  // enclosing project. Prefer the CLI, fall back when the bundle ships none.
+  // Hand the editor the workspace root AND the file, so it opens the repo with
+  // that file focused instead of the file on its own — the rest of the tree
+  // stays navigable. `open -b` can't express that: it passes a single path and
+  // lets the app decide. Fall back to it when the bundle ships no launcher.
   if (found.cli) {
-    const r = await run(found.cli.command, [...found.cli.args, path]);
+    const r = await run(
+      found.cli.command,
+      dir ? [target] : cliArgs(found.cli.style, root, target),
+    );
     if (r.ok) return { ok: true };
   }
 
