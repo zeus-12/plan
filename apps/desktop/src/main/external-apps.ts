@@ -20,7 +20,23 @@ interface AppDefinition {
   /** Candidate bundle ids, best first — editions and rebrands differ. */
   bundleIds: readonly string[];
   kind: ExternalAppKind;
+  /**
+   * The launcher the app ships INSIDE its bundle, relative to the .app. `open
+   * -b` only hands the app a path and lets it decide what to do, which for an
+   * editor generally means opening the enclosing project rather than the file
+   * asked for; the CLI opens the file itself. Taken from the bundle rather
+   * than PATH so it works whether or not the user ever ran the app's
+   * "install shell command". Missing at that path → falls back to `open -b`.
+   */
+  cli?: { path: string; args?: readonly string[] };
 }
+
+/** The launcher every VS Code fork ships, `<bin>` being its own command name. */
+const vscodeCli = (bin: string) => ({
+  path: `Contents/Resources/app/bin/${bin}`,
+  // Reuses an open window on that folder instead of spawning a bare one.
+  args: ["--goto"] as const,
+});
 
 /**
  * The apps we know how to open things in. Hardcoded, like every editor picker
@@ -32,18 +48,55 @@ interface AppDefinition {
 const APPS: readonly AppDefinition[] = [
   { id: "finder", label: "Finder", bundleIds: ["com.apple.finder"], kind: "file-manager" },
 
-  { id: "cursor", label: "Cursor", bundleIds: ["com.todesktop.230313mzl4w4u92"], kind: "editor" },
-  { id: "vscode", label: "VS Code", bundleIds: ["com.microsoft.VSCode"], kind: "editor" },
+  {
+    id: "cursor",
+    label: "Cursor",
+    bundleIds: ["com.todesktop.230313mzl4w4u92"],
+    kind: "editor",
+    cli: vscodeCli("cursor"),
+  },
+  {
+    id: "vscode",
+    label: "VS Code",
+    bundleIds: ["com.microsoft.VSCode"],
+    kind: "editor",
+    cli: vscodeCli("code"),
+  },
   {
     id: "vscode-insiders",
     label: "VS Code Insiders",
     bundleIds: ["com.microsoft.VSCodeInsiders"],
     kind: "editor",
+    cli: vscodeCli("code-insiders"),
   },
-  { id: "vscodium", label: "VSCodium", bundleIds: ["com.vscodium", "com.visualstudio.code.oss"], kind: "editor" },
-  { id: "zed", label: "Zed", bundleIds: ["dev.zed.Zed", "dev.zed.Zed-Preview"], kind: "editor" },
-  { id: "windsurf", label: "Windsurf", bundleIds: ["com.exafunction.windsurf"], kind: "editor" },
-  { id: "sublime", label: "Sublime Text", bundleIds: ["com.sublimetext.4", "com.sublimetext.3"], kind: "editor" },
+  {
+    id: "vscodium",
+    label: "VSCodium",
+    bundleIds: ["com.vscodium", "com.visualstudio.code.oss"],
+    kind: "editor",
+    cli: vscodeCli("codium"),
+  },
+  {
+    id: "zed",
+    label: "Zed",
+    bundleIds: ["dev.zed.Zed", "dev.zed.Zed-Preview"],
+    kind: "editor",
+    cli: { path: "Contents/MacOS/cli" },
+  },
+  {
+    id: "windsurf",
+    label: "Windsurf",
+    bundleIds: ["com.exafunction.windsurf"],
+    kind: "editor",
+    cli: vscodeCli("windsurf"),
+  },
+  {
+    id: "sublime",
+    label: "Sublime Text",
+    bundleIds: ["com.sublimetext.4", "com.sublimetext.3"],
+    kind: "editor",
+    cli: { path: "Contents/SharedSupport/bin/subl" },
+  },
   { id: "xcode", label: "Xcode", bundleIds: ["com.apple.dt.Xcode"], kind: "editor" },
   { id: "idea", label: "IntelliJ IDEA", bundleIds: ["com.jetbrains.intellij", "com.jetbrains.intellij.ce"], kind: "editor" },
   { id: "webstorm", label: "WebStorm", bundleIds: ["com.jetbrains.WebStorm"], kind: "editor" },
@@ -162,6 +215,18 @@ async function iconUrl(id: string, appPath: string): Promise<string | null> {
 
 interface Resolved extends ExternalApp {
   bundleId: string;
+  /** Absolute path to the in-bundle launcher, when the bundle ships one. */
+  cli: { command: string; args: readonly string[] } | null;
+}
+
+async function resolveCli(
+  def: AppDefinition,
+  appPath: string,
+): Promise<Resolved["cli"]> {
+  if (!def.cli) return null;
+  const command = join(appPath, def.cli.path);
+  if (!(await pathExists(command))) return null;
+  return { command, args: def.cli.args ?? [] };
 }
 
 async function resolve(def: AppDefinition): Promise<Resolved | null> {
@@ -174,10 +239,18 @@ async function resolve(def: AppDefinition): Promise<Resolved | null> {
         kind: def.kind,
         bundleId,
         icon: await iconUrl(def.id, path),
+        cli: await resolveCli(def, path),
       };
     }
     if (await isRegistered(bundleId)) {
-      return { id: def.id, label: def.label, kind: def.kind, bundleId, icon: null };
+      return {
+        id: def.id,
+        label: def.label,
+        kind: def.kind,
+        bundleId,
+        icon: null,
+        cli: null,
+      };
     }
   }
   return null;
@@ -237,6 +310,15 @@ export async function openInExternalApp(
   const dir = await isDirectory(target);
   // A terminal opens a working directory, so a file target means its parent.
   const path = found.kind === "terminal" && !dir ? dirname(target) : target;
+
+  // The bundle's own launcher opens the exact path it's given; `open -b` only
+  // hands the app a path, and an editor generally answers that by showing the
+  // enclosing project. Prefer the CLI, fall back when the bundle ships none.
+  if (found.cli) {
+    const r = await run(found.cli.command, [...found.cli.args, path]);
+    if (r.ok) return { ok: true };
+  }
+
   // Revealing selects the file inside its folder; a folder is opened directly.
   const args =
     found.kind === "file-manager" && !dir

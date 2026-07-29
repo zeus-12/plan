@@ -87,6 +87,7 @@ import { RenameSessionDialog } from "./rename-session-dialog";
 import { CommandsConfigModal } from "./commands-config-modal";
 import { ThemeMenu } from "./theme-menu";
 import { OpenInMenu } from "./open-in-menu";
+import { getDefaultExternalApp } from "../lib/external-apps-store";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "../lib/use-tab-switcher";
 import { mergeSession } from "../lib/merge-session";
@@ -1722,6 +1723,38 @@ function ProjectWorkspaceImpl({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [activeTab, fileStages, openTab]);
+
+  // ⌘⇧O — open the active file in the default app, or the project when the
+  // active tab isn't a file. Lives here rather than in OpenInMenu: that
+  // component is mounted once per header AND once per open file/diff tab, so a
+  // listener inside it would fire several times for one keypress.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "o")
+        return;
+      const app = getDefaultExternalApp();
+      if (!app) return;
+      e.preventDefault();
+
+      let relPath: string | null = null;
+      let subPath = "";
+      if (activeTab?.kind === "file") {
+        relPath = activeTab.path;
+      } else if (activeTab?.kind === "diff") {
+        relPath = activeTab.path;
+        subPath = activeTab.subPath;
+      }
+      void window.electronAPI
+        .openInExternalApp(app.id, project.encoded, relPath, subPath)
+        .then((r) => {
+          if (!r.ok) pushToast({ title: r.error ?? "Could not open that app." }, 4_000);
+        });
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeTab, project.encoded]);
 
   const startTerminalResize = useCallback(
     (e: React.PointerEvent) => {

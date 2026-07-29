@@ -2,7 +2,7 @@ import type { FoldRange } from "../lib/folding";
 
 export type { FoldRange };
 
-/** A code symbol (function/class/method/…) for the ⌘⇧O "go to symbol" palette. */
+/** A code symbol (function/class/method/…) for the ⌘⇧G "go to symbol" palette. */
 export interface CodeSymbol {
   /** Symbol name, e.g. the function/class identifier. */
   name: string;

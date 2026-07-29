@@ -368,7 +368,7 @@ function FileViewerImpl({
   // A line to drop the editor caret on after the next reveal scroll settles
   // (set by go-to-symbol so the cursor lands on the jumped-to line).
   const caretRequestRef = useRef<number | null>(null);
-  // Go-to-symbol palette (⌘⇧O).
+  // Go-to-symbol palette (⌘⇧G).
   const [symbolOpen, setSymbolOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [symbols, setSymbols] = useState<CodeSymbol[]>([]);
@@ -1420,7 +1420,7 @@ function FileViewerImpl({
     };
   }, [selectAllActive, active, text]);
 
-  // ⌘⇧O — go to symbol. Only when the active engine can supply symbols (the
+  // ⌘⇧G — go to symbol. Only when the active engine can supply symbols (the
   // tree-sitter engine on desktop; the indentation fallback can't parse names).
   useEffect(() => {
     if (!active || !searchable || !foldEngine.computeSymbols) return;
@@ -1429,7 +1429,7 @@ function FileViewerImpl({
         (e.metaKey || e.ctrlKey) &&
         e.shiftKey &&
         !e.altKey &&
-        e.key.toLowerCase() === "o"
+        e.key.toLowerCase() === "g"
       ) {
         e.preventDefault();
         setSymbolQuery("");

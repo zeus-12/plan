@@ -232,8 +232,14 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       {
         id: "goToSymbol",
         label: "Go to symbol",
-        chords: [{ mods: ["meta", "shift"], key: "O" }],
+        chords: [{ mods: ["meta", "shift"], key: "G" }],
         when: "file view",
+      },
+      {
+        id: "openInDefaultApp",
+        label: "Open in default app",
+        chords: [{ mods: ["meta", "shift"], key: "O" }],
+        when: "active file, else the project",
       },
       {
         id: "toggleLineWrap",

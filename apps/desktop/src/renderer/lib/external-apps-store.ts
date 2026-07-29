@@ -53,18 +53,24 @@ export function useExternalApps(): ExternalApp[] {
 }
 
 /**
- * The app the primary button opens, and a setter that makes a pick sticky.
- * Falls back to the first installed app when nothing is stored yet or the
- * stored one has since been uninstalled.
+ * The app the primary button opens: the stored pick, or the first installed app
+ * when nothing is stored yet or the stored one has since been uninstalled. Null
+ * until main has answered, so callers can't act on an unconfirmed app.
  */
+function resolveDefault(list: ExternalApp[], stored: string | null) {
+  return list.find((a) => a.id === stored) ?? list[0] ?? null;
+}
+
+export function getDefaultExternalApp(): ExternalApp | null {
+  return resolveDefault(apps, preference.get());
+}
+
+/** The default app plus a setter that makes a pick sticky. */
 export function useDefaultExternalApp(): [
   ExternalApp | null,
   (id: string) => void,
 ] {
-  const list = useExternalApps();
-  const stored = preference.useValue();
-  const resolved = list.find((a) => a.id === stored) ?? list[0] ?? null;
-  return [resolved, preference.set];
+  return [resolveDefault(useExternalApps(), preference.useValue()), preference.set];
 }
 
 export function preloadExternalApps(): void {
