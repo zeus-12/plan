@@ -61,11 +61,6 @@ const CreatePrModal = lazy(() =>
     default: m.CreatePrModal,
   })),
 );
-const ProjectDefaultsModal = lazy(() =>
-  import("./components/project-defaults-modal").then((m) => ({
-    default: m.ProjectDefaultsModal,
-  })),
-);
 const MoveSessionModal = lazy(() =>
   import("./components/move-session-modal").then((m) => ({
     default: m.MoveSessionModal,
@@ -348,7 +343,6 @@ function Shell() {
     else window.localStorage.removeItem(SELECTED_WORKTREE_KEY);
   }, [activeWorktreeId]);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
-  const [showDefaults, setShowDefaults] = useState(false);
   // Worktree id whose Create-PR modal is open (null = closed).
   const [prWorktreeId, setPrWorktreeId] = useState<string | null>(null);
   // Worktree id whose Add-repos modal is open (null = closed).
@@ -391,12 +385,6 @@ function Shell() {
     setSelectedEncoded(projectEncoded);
     setActiveWorktreeId(null);
     setShowNewWorktree(true);
-  }, []);
-
-  const handleOpenProjectDefaults = useCallback((projectEncoded: string) => {
-    setSelectedEncoded(projectEncoded);
-    setActiveWorktreeId(null);
-    setShowDefaults(true);
   }, []);
 
   // ── Move a chat session to another worktree ─────────────────────────
@@ -826,7 +814,6 @@ function Shell() {
         onSelectProject={selectProject}
         onSelectWorktree={selectWorktree}
         onNewWorktree={handleNewWorktree}
-        onOpenProjectDefaults={handleOpenProjectDefaults}
         onRemoveWorktree={handleRemoveWorktree}
         onCreatePr={setPrWorktreeId}
         onAddRepos={setAddReposWorktreeId}
@@ -958,14 +945,6 @@ function Shell() {
               return rec;
             }}
             onClose={() => setAddReposWorktreeId(null)}
-          />
-        )}
-        {showDefaults && selected && (
-          <ProjectDefaultsModal
-            encoded={selected.encoded}
-            defaults={worktrees.defaults}
-            onSave={worktrees.saveDefaults}
-            onClose={() => setShowDefaults(false)}
           />
         )}
       </Suspense>

@@ -29,6 +29,8 @@ import {
   updateWorktreeRecord,
   worktreeNameTaken,
   listAllWorktreeRecords,
+  getProjectDefaults,
+  setProjectDefaults,
   type StoredWorktree,
   type WorktreeRecord,
   type WorktreeRepoRecord,
@@ -186,7 +188,8 @@ async function addCheckouts(
  * `input.repos` selects which repos to span (default: all discovered). If the
  * base can't be resolved on the remote in any repo, nothing is created and the
  * error names every offending repo. On a later failure, the partially-created
- * checkouts are rolled back.
+ * checkouts are rolled back. A successful create stores `input.base` as the
+ * project's default, so the next New-worktree modal pre-fills it.
  */
 export async function createWorktree(
   encoded: string,
@@ -241,6 +244,10 @@ export async function createWorktree(
     encoded: wtEncoded,
     repos: created,
   });
+  const defaults = await getProjectDefaults(encoded);
+  if (defaults.base !== base) {
+    await setProjectDefaults(encoded, { ...defaults, base });
+  }
   return withActivity(record);
 }
 

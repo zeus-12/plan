@@ -20,7 +20,10 @@ export interface UseWorktrees {
   ) => Promise<WorktreeRecord>;
   createPr: (id: string, input: CreatePrInput) => Promise<CreatePrResult>;
   defaults: ProjectDefaults;
-  saveDefaults: (defaults: ProjectDefaults) => Promise<void>;
+  /** Patch the stored defaults; `current` is read fresh, never this hook's copy. */
+  saveDefaults: (
+    patch: (current: ProjectDefaults) => ProjectDefaults,
+  ) => Promise<void>;
 }
 
 /**
@@ -82,8 +85,14 @@ export function useWorktrees(projectEncoded: string): UseWorktrees {
     [],
   );
 
+  // Spreading this hook's `defaults` would revert fields written since it last
+  // refreshed — creating a worktree stores its base from the main process, so a
+  // Run/Build save moments later would put the old base back.
   const saveDefaults = useCallback(
-    async (next: ProjectDefaults) => {
+    async (patch: (current: ProjectDefaults) => ProjectDefaults) => {
+      const current =
+        await window.electronAPI.getWorktreeDefaults(projectEncoded);
+      const next = patch(current);
       await window.electronAPI.setWorktreeDefaults(projectEncoded, next);
       setDefaults(next);
     },

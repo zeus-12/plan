@@ -79,20 +79,20 @@ function WorkspaceHostImpl({
   );
   const onSaveRun = useCallback(
     (runCommands: ReturnType<typeof runEntriesOf>) =>
-      wt.saveDefaults({
-        ...wt.defaults,
+      wt.saveDefaults((current) => ({
+        ...current,
         runCommands,
         runCommand: undefined,
-      }),
+      })),
     [wt],
   );
   const onSaveBuild = useCallback(
     (buildCommands: ReturnType<typeof buildEntriesOf>) =>
-      wt.saveDefaults({
-        ...wt.defaults,
+      wt.saveDefaults((current) => ({
+        ...current,
         buildCommands,
         buildCommand: undefined,
-      }),
+      })),
     [wt],
   );
 

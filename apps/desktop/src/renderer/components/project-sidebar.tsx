@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  ChevronRight,
-  GitBranch,
-  Plus,
-  Settings as SettingsGear,
-} from "lucide-react";
+import { ChevronRight, GitBranch, Plus } from "lucide-react";
 import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { lastSegment } from "@plan/shared/lib/path";
 import {
@@ -73,8 +68,6 @@ interface Props {
   onSelectWorktree: (projectEncoded: string, worktreeId: string) => void;
   /** Create a new worktree in the given project. */
   onNewWorktree: (projectEncoded: string) => void;
-  /** Open the worktree-creation defaults for the given project. */
-  onOpenProjectDefaults: (projectEncoded: string) => void;
   onRemoveWorktree: (worktreeId: string) => void;
   onCreatePr: (worktreeId: string) => void;
   onAddRepos: (worktreeId: string) => void;
@@ -245,7 +238,6 @@ export function ProjectSidebar({
   onSelectProject,
   onSelectWorktree,
   onNewWorktree,
-  onOpenProjectDefaults,
   onRemoveWorktree,
   onCreatePr,
   onAddRepos,
@@ -812,15 +804,6 @@ export function ProjectSidebar({
                                 )}
                               >
                                 <button
-                                  onClick={() =>
-                                    onOpenProjectDefaults(p.encoded)
-                                  }
-                                  title="Project defaults"
-                                  className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
-                                >
-                                  <SettingsGear size={13} />
-                                </button>
-                                <button
                                   onClick={() => onNewWorktree(p.encoded)}
                                   title="New worktree"
                                   className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg)] hover:text-[var(--text)]"
@@ -835,18 +818,11 @@ export function ProjectSidebar({
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       {!p.archived && (
-                        <>
-                          <ContextMenuItem
-                            onSelect={() => onNewWorktree(p.encoded)}
-                          >
-                            New worktree…
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            onSelect={() => onOpenProjectDefaults(p.encoded)}
-                          >
-                            Project defaults…
-                          </ContextMenuItem>
-                        </>
+                        <ContextMenuItem
+                          onSelect={() => onNewWorktree(p.encoded)}
+                        >
+                          New worktree…
+                        </ContextMenuItem>
                       )}
                       {p.archived ? (
                         <ContextMenuItem

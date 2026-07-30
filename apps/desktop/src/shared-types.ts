@@ -274,8 +274,9 @@ export interface WorktreeRecord {
   mtimeMs: number;
 }
 
-/** Per-project defaults the user sets once; pre-fill new worktrees + terminals. */
+/** Per-project defaults that pre-fill new worktrees + the Run/Build terminals. */
 export interface ProjectDefaults {
+  /** Base branch of the last worktree created here; pre-fills the next one. */
   base?: string;
   /**
    * Legacy branch-prefix for new worktrees. No longer surfaced in the UI; kept
