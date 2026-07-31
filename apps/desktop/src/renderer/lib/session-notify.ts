@@ -10,8 +10,8 @@
  * A chat pty's id is `chat:<encoded>:<sessionId>`.
  */
 
-// Resolve a chat pty id to a human label for the notification body (project
-// name only, by design). Set by the app root from the live projects list.
+// Resolve a chat pty id to a human label for the notification body: the chat's
+// title when one is known, else the repo it lives in. Set by the app root.
 let resolveLabel: (id: string) => string = () => "Claude";
 
 export function setSessionLabelResolver(fn: (id: string) => string) {

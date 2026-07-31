@@ -101,6 +101,8 @@ import {
   setSessionLabelResolver,
   setSessionNavigator,
 } from "./lib/session-notify";
+import { getCachedSessions } from "./lib/session-cache";
+import { parseChatTerminalId } from "../terminal-ids";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 // The focused worktree persists alongside it so a relaunch lands back on the
@@ -580,17 +582,25 @@ function Shell() {
   // so one that drops mid-response gets nudged back instead of parking until
   // it's noticed. Gated on the auto-continue setting, checked when it fires.
   useEffect(() => startAutoContinueWatcher(), []);
-  // Keep the notification body's project label in sync with the project list.
-  // Deliberately just the project name — no chat title, no session id.
+  // Notification body: the chat's own title, falling back to the repo it lives
+  // in. Titles are only known for worktrees loaded this launch and a fresh chat
+  // has none — never fabricated, so those cases get the repo name instead.
   useEffect(() => {
-    const byEncoded = new Map(
+    const repoByEncoded = new Map(
       projects.map((p) => [p.encoded, lastSegment(p.cwd)]),
     );
+    for (const p of projects)
+      for (const w of allWorktrees.byProject.get(p.encoded) ?? [])
+        repoByEncoded.set(w.encoded, lastSegment(p.cwd));
     setSessionLabelResolver((id) => {
-      const m = id.match(/^chat:(.+):([^:]+)$/);
-      return (m && byEncoded.get(m[1])) || "Claude";
+      const parsed = parseChatTerminalId(id);
+      if (!parsed) return "Claude";
+      const title = getCachedSessions(parsed.encoded)
+        ?.find((s) => s.sessionId === parsed.sessionId)
+        ?.title?.trim();
+      return title || repoByEncoded.get(parsed.encoded) || "Claude";
     });
-  }, [projects]);
+  }, [projects, allWorktrees.byProject]);
   const navigateToSession = useCallback(
     (encoded: string, sessionId: string) => {
       // Open (or focus) the chat as a tab in the target worktree. This persists
