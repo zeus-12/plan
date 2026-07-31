@@ -259,6 +259,12 @@ export interface BlameResult {
 export interface CommitDetails {
   /** Full commit message: subject + body. */
   message: string;
+  /**
+   * The commit's page on the repo's hosting service, or null when the repo's
+   * remote isn't on a host whose URL layout we know exactly (self-hosted,
+   * enterprise, no remote) — the card then shows the hash unlinked.
+   */
+  url: string | null;
 }
 
 export interface DiscoveredRepo {

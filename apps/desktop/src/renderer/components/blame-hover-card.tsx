@@ -56,6 +56,7 @@ export function BlameHoverCard({
   }, [encoded, path, hash, uncommitted, cacheKey]);
 
   const time = commit?.authorTime ?? 0;
+  const url = details?.url ?? null;
   return (
     <div
       onMouseEnter={onMouseEnter}
@@ -70,11 +71,21 @@ export function BlameHoverCard({
             <span className="text-[var(--text-tertiary)]"> (You)</span>
           )}
         </span>
-        {!uncommitted && (
-          <span className="ml-auto shrink-0 text-[11px] text-[var(--text-tertiary)]">
-            {hash.slice(0, 7)}
-          </span>
-        )}
+        {!uncommitted &&
+          (url ? (
+            <button
+              type="button"
+              title={url}
+              onClick={() => window.electronAPI.openCommit(url)}
+              className="ml-auto shrink-0 cursor-pointer text-[11px] text-[var(--text-tertiary)] underline-offset-2 hover:text-[var(--text)] hover:underline"
+            >
+              {hash.slice(0, 7)}
+            </button>
+          ) : (
+            <span className="ml-auto shrink-0 text-[11px] text-[var(--text-tertiary)]">
+              {hash.slice(0, 7)}
+            </span>
+          ))}
       </div>
       {uncommitted ? (
         <div className="px-3 py-2 text-[11px] text-[var(--text-tertiary)]">

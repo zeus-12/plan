@@ -153,13 +153,99 @@ async function blame(
   return parsed ? { ...parsed, userEmail: email } : null;
 }
 
+// A repo's remote is effectively fixed for an app run, and the blame card
+// resolves it on every hover — one lookup per cwd. Keyed by the blamed file's
+// directory, so a project holding several repos gets one entry per repo tree.
+const remoteUrlByCwd = new Map<string, Promise<string | null>>();
+function remoteUrl(cwd: string): Promise<string | null> {
+  let p = remoteUrlByCwd.get(cwd);
+  if (!p) {
+    p = resolveRemoteUrl(cwd);
+    remoteUrlByCwd.set(cwd, p);
+  }
+  return p;
+}
+
+/** The URL of `origin`, or of the only other remote when there's no origin. */
+async function resolveRemoteUrl(cwd: string): Promise<string | null> {
+  const list = await runGit(cwd, ["remote"]);
+  const remotes = (list ?? "")
+    .split("\n")
+    .map((r) => r.trim())
+    .filter(Boolean);
+  if (remotes.length === 0) return null;
+  const name = remotes.includes("origin") ? "origin" : remotes[0];
+  const url = await runGit(cwd, ["remote", "get-url", name]);
+  return url?.trim() || null;
+}
+
+// Hosts whose commit-page URL we can build exactly. Anything else — a
+// self-hosted GitLab, GitHub Enterprise, a plain ssh path — is left unlinked
+// rather than guessed into a dead link.
+const COMMIT_URL_BY_HOST: Record<
+  string,
+  (repo: string, hash: string) => string
+> = {
+  "github.com": (repo, hash) => `https://github.com/${repo}/commit/${hash}`,
+  "gitlab.com": (repo, hash) => `https://gitlab.com/${repo}/-/commit/${hash}`,
+  "bitbucket.org": (repo, hash) =>
+    `https://bitbucket.org/${repo}/commits/${hash}`,
+};
+
+/** Host + owner/name from a remote URL, in either the scheme form
+ *  (https://host/a/b.git, ssh://git@host/a/b) or the scp form (git@host:a/b). */
+function parseRemoteUrl(url: string): { host: string; repo: string } | null {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  let host: string;
+  let repo: string;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      host = parsed.hostname;
+      repo = parsed.pathname;
+    } catch {
+      return null;
+    }
+  } else {
+    const scp = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(trimmed);
+    if (!scp) return null;
+    host = scp[1];
+    repo = scp[2];
+  }
+  repo = repo.replace(/^\/+/, "").replace(/\.git$/, "");
+  // owner/name, or a deeper path for GitLab subgroups.
+  if (!host || !/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/.test(repo)) {
+    return null;
+  }
+  return { host: host.toLowerCase(), repo };
+}
+
+function commitUrl(remote: string, hash: string): string | null {
+  const parsed = parseRemoteUrl(remote);
+  const build = parsed && COMMIT_URL_BY_HOST[parsed.host];
+  return build ? build(parsed.repo, hash) : null;
+}
+
+const COMMIT_URL_RE = new RegExp(
+  `^https://(?:${Object.keys(COMMIT_URL_BY_HOST)
+    .map((h) => h.replace(/\./g, "\\."))
+    .join("|")})/[A-Za-z0-9._/-]+/[0-9a-f]{4,40}$`,
+);
+
+/** Does this URL match one this module handed out? Guards the open-in-browser
+ *  channel so the renderer can't route an arbitrary URL through it. */
+export function isCommitUrl(url: string): boolean {
+  return COMMIT_URL_RE.test(url);
+}
+
 // Commit objects are immutable, so a resolved message never goes stale —
 // re-hovering the same blame chip shouldn't re-spawn `git show`. Bounded by a
 // full clear (messages are small; simpler than LRU bookkeeping).
 const commitDetailsCache = new Map<string, CommitDetails>();
 const COMMIT_DETAILS_CACHE_MAX = 500;
 
-/** Full commit message for the blame hover card (the blame pass only carries the subject). */
+/** Full commit message + hosting-service link for the blame hover card (the
+ *  blame pass only carries the subject). */
 export async function getCommitDetails(
   encoded: string,
   relPath: string,
@@ -171,9 +257,15 @@ export async function getCommitDetails(
   const key = `${loc.cwd}\n${hash}`;
   const cached = commitDetailsCache.get(key);
   if (cached) return cached;
-  const out = await runGit(loc.cwd, ["show", "-s", "--format=%B", hash, "--"]);
+  const [out, remote] = await Promise.all([
+    runGit(loc.cwd, ["show", "-s", "--format=%B", hash, "--"]),
+    remoteUrl(loc.cwd),
+  ]);
   if (out == null) return null;
-  const details = { message: out.trim() };
+  const details = {
+    message: out.trim(),
+    url: remote ? commitUrl(remote, hash) : null,
+  };
   if (commitDetailsCache.size >= COMMIT_DETAILS_CACHE_MAX) {
     commitDetailsCache.clear();
   }

@@ -304,11 +304,13 @@ export interface IpcInvokeContract {
     args: [encoded: string, relPath: string, rev: string];
     result: BlameResult | null;
   };
-  /** Full message for one commit (for the blame hover card). */
+  /** Full message + hosting-service link for one commit (blame hover card). */
   "git:commitDetails": {
     args: [encoded: string, relPath: string, hash: string];
     result: CommitDetails | null;
   };
+  /** Open a commit page (a `CommitDetails.url`) in the user's browser. */
+  "git:openCommit": { args: [url: string]; result: void };
 
   // Chat engines (keyed by chat id — see chat-engines.ts / terminal-ids.ts).
   // These are the driver-level operations: which engines exist, and how to
@@ -493,6 +495,7 @@ export const API_INVOKE = {
   blameContents: "git:blameContents",
   blameRev: "git:blameRev",
   commitDetails: "git:commitDetails",
+  openCommit: "git:openCommit",
 
   listChatEngines: "chat:engines",
   startChat: "chat:start",

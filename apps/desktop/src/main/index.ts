@@ -136,7 +136,12 @@ import {
   unstageAll,
   unstageFile,
 } from "./git";
-import { blameContents, blameRev, getCommitDetails } from "./git-blame";
+import {
+  blameContents,
+  blameRev,
+  getCommitDetails,
+  isCommitUrl,
+} from "./git-blame";
 import {
   createWorktree,
   removeWorktree,
@@ -575,6 +580,9 @@ const invokeHandlers: {
   "git:blameRev": (_e, encoded, path, rev) => blameRev(encoded, path, rev),
   "git:commitDetails": (_e, encoded, path, hash) =>
     getCommitDetails(encoded, path, hash),
+  "git:openCommit": (_e, url) => {
+    if (isCommitUrl(url)) void shell.openExternal(url);
+  },
 
   // Chat engines (keyed by chat id) — see main/agents/engine-registry.
   "chat:engines": () => chatEngineDescriptors(),
