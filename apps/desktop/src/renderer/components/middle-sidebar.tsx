@@ -476,7 +476,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                           : !t.hasUpstream
                             ? "Publish branch"
                             : t.ahead > 0
-                              ? `Push ${t.ahead}`
+                              ? `Pull & push ${t.ahead}`
                               : "Up to date"}
                       </span>
                     </span>

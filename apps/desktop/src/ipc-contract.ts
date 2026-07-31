@@ -49,6 +49,7 @@ import type {
   PrFileView,
   ProjectDefaults,
   ProjectEntry,
+  PushPreview,
   ProjectFile,
   ScratchData,
   SearchOptions,
@@ -263,6 +264,11 @@ export interface IpcInvokeContract {
   "git:stashAll": {
     args: [encoded: string, subPath?: string];
     result: GitOpResult;
+  };
+  /** Read-only: what `git:push` would send, for the push dialog. */
+  "git:pushPreview": {
+    args: [encoded: string, subPath?: string];
+    result: PushPreview;
   };
   "git:push": {
     args: [encoded: string, subPath?: string];
@@ -480,6 +486,7 @@ export const API_INVOKE = {
   unstageAll: "git:unstageAll",
   discardAll: "git:discardAll",
   stashAll: "git:stashAll",
+  pushPreview: "git:pushPreview",
   push: "git:push",
   commit: "git:commit",
   applyPatch: "git:applyPatch",

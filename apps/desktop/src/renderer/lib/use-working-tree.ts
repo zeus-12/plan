@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
 import { lastSegment } from "@plan/shared/lib/path";
-import type { DiscoveredRepo, GitFileStatus } from "../../shared-types";
+import type {
+  DiscoveredRepo,
+  GitFileStatus,
+  GitOpResult,
+} from "../../shared-types";
 import type { FileEntry, RepoFileGroup } from "../components/file-list";
 import {
   getProjectTabs,
@@ -383,12 +387,12 @@ export function useWorkingTree(opts: {
   );
 
   const push = useCallback(
-    async (subPath: string) => {
+    async (subPath: string): Promise<GitOpResult> => {
       setPushingRepo(subPath);
       try {
         const res = await window.electronAPI.push(encoded, subPath);
-        if (!res.ok) console.warn("push failed:", res.error);
         await refreshDiff();
+        return res;
       } finally {
         setPushingRepo(null);
       }

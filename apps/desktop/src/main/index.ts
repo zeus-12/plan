@@ -129,6 +129,7 @@ import {
   getWorkingTreeDiff,
   invalidateRepoLayout,
   push as gitPush,
+  pushPreview as gitPushPreview,
   stageAll,
   stageFile,
   stashAll,
@@ -562,6 +563,8 @@ const invokeHandlers: {
   "git:unstageAll": (_e, encoded, subPath = "") => unstageAll(encoded, subPath),
   "git:discardAll": (_e, encoded, subPath = "") => discardAll(encoded, subPath),
   "git:stashAll": (_e, encoded, subPath = "") => stashAll(encoded, subPath),
+  "git:pushPreview": (_e, encoded, subPath = "") =>
+    gitPushPreview(encoded, subPath),
   "git:push": (_e, encoded, subPath = "") => gitPush(encoded, subPath),
   "git:commit": (_e, encoded, message, subPath = "") =>
     gitCommit(encoded, message, subPath),

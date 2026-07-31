@@ -210,6 +210,25 @@ export interface GitOpResult {
   error?: string;
 }
 
+/** One commit a push would send. */
+export interface PendingCommit {
+  sha: string;
+  subject: string;
+}
+
+/** What pushing this repo would do, read from git before anything runs. */
+export interface PushPreview {
+  available: boolean;
+  branch: string | null;
+  /** Configured upstream ref (`origin/main`); null when unpublished. */
+  upstream: string | null;
+  /** Ref a first push would create; null when there's no `origin` remote. */
+  publishTarget: string | null;
+  /** Pending commits, newest first, capped — `truncated` marks the cap. */
+  commits: PendingCommit[];
+  truncated: boolean;
+}
+
 /** One commit's identity as reported by `git blame --porcelain`. */
 export interface BlameCommit {
   hash: string;

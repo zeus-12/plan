@@ -28,6 +28,7 @@ import type {
   ParsedSession,
   DiscoveredRepo,
   CommandEntry,
+  PushPreview,
   WorktreeRecord,
 } from "../../shared-types";
 import { MiddleSidebar } from "./middle-sidebar";
@@ -85,6 +86,7 @@ import { ScratchEditor } from "./scratch-editor";
 import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { CommandsConfigModal } from "./commands-config-modal";
+import { PushModal } from "./push-modal";
 import { ThemeMenu } from "./theme-menu";
 import { OpenInMenu } from "./open-in-menu";
 import { getDefaultExternalApp } from "../lib/external-apps-store";
@@ -566,6 +568,32 @@ function ProjectWorkspaceImpl({
   }, [selectedSessionId]);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
+
+  // Repo whose push dialog is open — pushing goes through it, never directly.
+  // The preview is read BEFORE mounting so the dialog opens at its final size
+  // instead of growing once the commit list lands.
+  const [pushDialog, setPushDialog] = useState<{
+    subPath: string;
+    preview: PushPreview;
+  } | null>(null);
+  const pushPreviewPending = useRef(false);
+
+  const openPushDialog = useCallback(
+    async (subPath: string) => {
+      if (pushPreviewPending.current) return;
+      pushPreviewPending.current = true;
+      try {
+        const preview = await window.electronAPI.pushPreview(
+          project.encoded,
+          subPath,
+        );
+        setPushDialog({ subPath, preview });
+      } finally {
+        pushPreviewPending.current = false;
+      }
+    },
+    [project.encoded],
+  );
 
   // ── Git working tree (per-repo diff/status + ops) ────────────
   // See useWorkingTree: ops route via subPath, every op re-pulls git state,
@@ -1858,6 +1886,22 @@ function ProjectWorkspaceImpl({
       shortcut={active ? MIDDLE_SIDEBAR_SHORTCUT : undefined}
     >
       {confirmDialog}
+      {pushDialog && (
+        <PushModal
+          preview={pushDialog.preview}
+          repoLabel={
+            repos.length > 1
+              ? (syncTargets.find((t) => t.subPath === pushDialog.subPath)
+                  ?.repoName ?? null)
+              : null
+          }
+          onPush={() => handlePush(pushDialog.subPath)}
+          onRefreshPreview={() =>
+            window.electronAPI.pushPreview(project.encoded, pushDialog.subPath)
+          }
+          onClose={() => setPushDialog(null)}
+        />
+      )}
       {runConfigOpen && (
         <CommandsConfigModal
           title="Run"
@@ -2299,7 +2343,7 @@ function ProjectWorkspaceImpl({
           onDiscardAll={handleDiscardAll}
           onStashAll={handleStashAll}
           syncTargets={syncTargets}
-          onPush={handlePush}
+          onPush={openPushDialog}
           onCommit={handleCommit}
           filesLoading={filesLoading}
           diffAvailable={repos.length > 0}

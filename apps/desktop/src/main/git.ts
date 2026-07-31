@@ -10,6 +10,8 @@ import type {
   GitDiffResult,
   GitFileStatus,
   GitStatusResult,
+  PendingCommit,
+  PushPreview,
 } from "../shared-types";
 
 /** Cheap pre-check: is there a `.git` file or directory at this path? */
@@ -254,6 +256,73 @@ export async function getStatus(
   return { available: true, branch, files, ahead, hasUpstream };
 }
 
+/** Remote the publish path below pushes a branch to on its first push. */
+const PUBLISH_REMOTE = "origin";
+const PUSH_PREVIEW_LIMIT = 50;
+
+/**
+ * What `push` below would send, read before it runs so the push dialog states
+ * facts instead of guesses. With an upstream that's `@{upstream}..HEAD`; before
+ * the first push there's no upstream to diff against, so it's every commit no
+ * remote-tracking ref already holds.
+ */
+export async function pushPreview(
+  encoded: string,
+  subPath: string = "",
+): Promise<PushPreview> {
+  const cwd = await resolveWorkspaceCwd(encoded, subPath);
+  const empty: PushPreview = {
+    available: false,
+    branch: null,
+    upstream: null,
+    publishTarget: null,
+    commits: [],
+    truncated: false,
+  };
+  if (!(await isGitRepo(cwd))) return empty;
+
+  const branch = await branchAt(cwd);
+  const [up, remotes] = await Promise.all([
+    run(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
+    run(cwd, ["remote"]),
+  ]);
+  const upstream = up.code === 0 ? up.stdout.trim() || null : null;
+  const hasPublishRemote = remotes.stdout
+    .split("\n")
+    .map((r) => r.trim())
+    .includes(PUBLISH_REMOTE);
+
+  const range = upstream
+    ? ["@{upstream}..HEAD"]
+    : ["HEAD", "--not", "--remotes"];
+  const log = await run(cwd, [
+    "log",
+    `--max-count=${PUSH_PREVIEW_LIMIT + 1}`,
+    "--format=%h%x00%s",
+    ...range,
+  ]);
+  const lines =
+    log.code === 0 ? log.stdout.split("\n").filter((l) => l.length > 0) : [];
+  const commits: PendingCommit[] = lines
+    .slice(0, PUSH_PREVIEW_LIMIT)
+    .map((line) => {
+      const sep = line.indexOf("\0");
+      return { sha: line.slice(0, sep), subject: line.slice(sep + 1) };
+    });
+
+  return {
+    available: true,
+    branch,
+    upstream,
+    publishTarget:
+      upstream || !branch || !hasPublishRemote
+        ? null
+        : `${PUBLISH_REMOTE}/${branch}`,
+    commits,
+    truncated: lines.length > PUSH_PREVIEW_LIMIT,
+  };
+}
+
 export async function push(
   encoded: string,
   subPath: string = "",
@@ -286,7 +355,12 @@ export async function push(
   if (/upstream|set[- ]upstream/i.test(r.stderr)) {
     const branch = await branchAt(cwd);
     if (!branch) return { ok: false, error: r.stderr };
-    const r2 = await run(cwd, ["push", "--set-upstream", "origin", branch]);
+    const r2 = await run(cwd, [
+      "push",
+      "--set-upstream",
+      PUBLISH_REMOTE,
+      branch,
+    ]);
     if (r2.code !== 0)
       return { ok: false, error: r2.stderr || "git push failed" };
     return { ok: true };
