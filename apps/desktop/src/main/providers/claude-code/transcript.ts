@@ -130,7 +130,10 @@ function applyMetaFields(fields: MetaFields, obj: RawLine): void {
 
 /** Parse one message line's renderable parts, or null for non-message /
  *  no-renderable-parts lines (which don't count toward the transcript). */
-function parseMessageLine(obj: RawLine): ConversationMessage | null {
+function parseMessageLine(
+  obj: RawLine,
+  parentMessageUuid: string | null,
+): ConversationMessage | null {
   if (obj.type !== "user" && obj.type !== "assistant") return null;
   const message = (obj as { message?: { content?: unknown } }).message;
   const content = message?.content;
@@ -141,7 +144,9 @@ function parseMessageLine(obj: RawLine): ConversationMessage | null {
   if (parts.length === 0) return null;
 
   const promptSource =
-    obj.promptSource === "system" || obj.promptSource === "typed"
+    obj.promptSource === "system" ||
+    obj.promptSource === "typed" ||
+    obj.promptSource === "queued"
       ? obj.promptSource
       : undefined;
   // A failed request is still written as an assistant turn; `isApiErrorMessage`
@@ -160,6 +165,7 @@ function parseMessageLine(obj: RawLine): ConversationMessage | null {
   return {
     uuid: typeof obj.uuid === "string" ? obj.uuid : "",
     parentUuid: typeof obj.parentUuid === "string" ? obj.parentUuid : null,
+    parentMessageUuid,
     role: obj.type,
     timestamp: typeof obj.timestamp === "string" ? obj.timestamp : "",
     parts,
@@ -175,10 +181,17 @@ function parseMessageLine(obj: RawLine): ConversationMessage | null {
 interface SessionFold {
   fields: MetaFields;
   messages: ConversationMessage[];
+  /** Every uuid'd line → the nearest message at or above it, which is what
+   *  resolves `parentMessageUuid`. Non-message lines (`attachment`, and message
+   *  lines with nothing renderable) pass their own owner down, so a chain like
+   *  prompt → attachment → attachment → reply collapses to prompt → reply.
+   *  Ancestors always precede their children in the file, so this folds
+   *  append-only like everything else here. */
+  owner: Map<string, string>;
 }
 
 function freshSessionFold(): SessionFold {
-  return { fields: freshMetaFields(), messages: [] };
+  return { fields: freshMetaFields(), messages: [], owner: new Map() };
 }
 
 function applySessionLine(fold: SessionFold, line: string): void {
@@ -190,7 +203,14 @@ function applySessionLine(fold: SessionFold, line: string): void {
     return;
   }
   applyMetaFields(fold.fields, obj);
-  const message = parseMessageLine(obj);
+  const uuid = typeof obj.uuid === "string" ? obj.uuid : "";
+  const parentUuid = typeof obj.parentUuid === "string" ? obj.parentUuid : "";
+  const parentOwner = fold.owner.get(parentUuid) ?? null;
+  const message = parseMessageLine(obj, parentOwner);
+  if (uuid) {
+    if (message) fold.owner.set(uuid, uuid);
+    else if (parentOwner) fold.owner.set(uuid, parentOwner);
+  }
   if (message) fold.messages.push(message);
 }
 
@@ -360,8 +380,9 @@ function applyMetaLine(state: MetaState, line: string): void {
   applyMetaFields(state.fields, obj);
   // Mirror parseSessionJsonl: a message with no renderable parts doesn't count.
   // Parsed and dropped (rather than kept like the transcript fold) so the meta
-  // path never retains message bodies for every session in every project.
-  if (parseMessageLine(obj)) state.messageCount += 1;
+  // path never retains message bodies for every session in every project — and
+  // for the same reason it doesn't resolve the message tree.
+  if (parseMessageLine(obj, null)) state.messageCount += 1;
 }
 
 // Dedup concurrent reads of the same file so overlapping listSessions calls

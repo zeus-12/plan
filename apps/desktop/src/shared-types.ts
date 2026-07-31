@@ -19,6 +19,11 @@ export type MessagePart =
 export interface ConversationMessage {
   uuid: string;
   parentUuid: string | null;
+  /** Nearest ancestor that is itself a rendered message. Claude threads
+   *  `attachment` lines between a prompt and its reply, so a reply's
+   *  `parentUuid` usually names a line the transcript never renders — walking
+   *  `parentUuid` alone gives a disconnected forest, not a conversation tree. */
+  parentMessageUuid: string | null;
   role: "user" | "assistant";
   timestamp: string;
   parts: MessagePart[];
@@ -26,9 +31,13 @@ export interface ConversationMessage {
    *  instructions) — these are machinery, not something the user typed, so the
    *  UI renders them as a muted system card rather than a user bubble. */
   isMeta?: boolean;
-  /** "typed" = real user input; "system" = harness-injected (loop tick,
-   *  task-notification re-injection). Absent on assistant turns. */
-  promptSource?: "typed" | "system";
+  /** How the prompt was submitted: "typed" straight into the TUI, "queued"
+   *  behind a turn that was already running, or "system" for harness-injected
+   *  ones (loop tick, task-notification re-injection). Absent on assistant
+   *  turns, on tool results, and on prompts Claude Code handles locally without
+   *  a request (`/compact`) — so its presence is also what separates a real
+   *  submission from the machinery sharing the `user` role. */
+  promptSource?: "typed" | "system" | "queued";
   /** Present when this assistant turn is one Claude wrote for a failed request
    *  (`isApiErrorMessage`) rather than a real reply — its own classification of
    *  what went wrong. See api-errors for which of these are worth retrying. */

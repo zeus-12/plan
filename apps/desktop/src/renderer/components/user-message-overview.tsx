@@ -28,6 +28,10 @@ interface UserMessage {
 interface Props {
   /** The full (filtered) timeline — we pick the real user turns out of it. */
   messages: ConversationMessage[];
+  /** Prompts that never reached Claude. Left out of the minimap: it's for
+   *  navigating what you actually asked, and an abandoned prompt is usually a
+   *  near-duplicate of the one right after it. */
+  abortedUuids: Set<string>;
   /** Ref to the transcript's scrollable element (the one holding the rows). */
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -54,7 +58,11 @@ function previewText(m: ConversationMessage): string {
  * highlighted. Hovering reveals the messages as text; clicking a line (or a
  * row) scrolls that message into view.
  */
-export function UserMessageOverview({ messages, scrollRef }: Props) {
+export function UserMessageOverview({
+  messages,
+  abortedUuids,
+  scrollRef,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [activeUuid, setActiveUuid] = useState<string | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -72,9 +80,9 @@ export function UserMessageOverview({ messages, scrollRef }: Props) {
   const computedUserMessages = useMemo<UserMessage[]>(
     () =>
       messages
-        .filter(isRealUserTurn)
+        .filter((m) => isRealUserTurn(m) && !abortedUuids.has(m.uuid))
         .map((m) => ({ uuid: m.uuid, text: previewText(m) })),
-    [messages],
+    [messages, abortedUuids],
   );
   const stableUserMessages = useRef(computedUserMessages);
   if (!sameJson(stableUserMessages.current, computedUserMessages)) {

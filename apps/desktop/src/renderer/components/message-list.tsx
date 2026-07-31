@@ -36,6 +36,7 @@ import {
   type ChatScrollPos,
 } from "../lib/chat-scroll-store";
 import {
+  abortedPromptUuids,
   classifyMessage,
   imageOnlyPaths,
   isRealUserTurn,
@@ -718,7 +719,6 @@ function TranscriptImage({ path }: { path: string }) {
   );
 }
 
-
 /**
  * A background-task notification rendered like a tool call (see ToolCallBlock):
  * a borderless one-line summary — a muted "Task" verb, a ✓/✗ status icon, the
@@ -1258,6 +1258,16 @@ export const MessageList = memo(function MessageList({
       deferredMessages.filter(
         (m) => !m.parts.every((p) => p.kind === "tool_result"),
       ),
+    [deferredMessages],
+  );
+
+  // Derived per render rather than carried on the message: whether a prompt was
+  // abandoned only becomes knowable when LATER lines land, and `session:read`
+  // sends appends only — a flag baked in at parse time would stay stale on the
+  // rows the renderer already holds. Runs over the unfiltered list because the
+  // cutoff reads file order across tool turns too.
+  const abortedPrompts = useMemo(
+    () => abortedPromptUuids(deferredMessages),
     [deferredMessages],
   );
 
@@ -1855,7 +1865,11 @@ export const MessageList = memo(function MessageList({
       <div className="relative h-full">
         <FindWidget find={find} revealTrigger={findReveal} />
         {!find.open && (
-          <UserMessageOverview messages={items} scrollRef={parentRef} />
+          <UserMessageOverview
+            messages={items}
+            abortedUuids={abortedPrompts}
+            scrollRef={parentRef}
+          />
         )}
         <div
           ref={parentRef}
@@ -1881,6 +1895,7 @@ export const MessageList = memo(function MessageList({
               // width; assistant turns run full-width with no bubble. Bash-mode
               // turns read as terminal output, so they go left/full-width too.
               const isUser = isRealUserTurn(m);
+              const aborted = isUser && abortedPrompts.has(m.uuid);
               return (
                 <div
                   key={m.uuid || idx}
@@ -1908,101 +1923,127 @@ export const MessageList = memo(function MessageList({
                       isUser ? "justify-end" : "justify-start",
                     )}
                   >
-                  {(() => {
-                    const partNodes = m.parts.map((p, i) => {
-                      const partKey = `${m.uuid}:${i}`;
-                      // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
-                      if (hiddenParts.has(partKey)) return null;
-                      // tool_result renders inline within its tool_use; an empty
-                      // wrapper here would add a stray flex gap.
-                      if (p.kind === "tool_result") return null;
-                      const planVersionIndex =
-                        planVersionByPart.get(partKey) ?? -1;
-                      return (
-                        <PartView
-                          key={i}
-                          messageUuid={m.uuid}
-                          partIndex={i}
-                          partAnns={partMap?.get(i) ?? EMPTY_PART_ANNS}
-                          pendingCover={
-                            pending
-                              ? coverForSpanPart(
-                                  pending.data.start,
-                                  pending.data.end,
-                                  m.uuid,
-                                  i,
-                                  partOrder,
-                                )
-                              : null
-                          }
-                          onClickAnnotation={handleClickAnnotation}
-                          part={p}
-                          message={m}
-                          result={
-                            p.kind === "tool_use"
-                              ? resultByToolUseId.get(p.id)
-                              : undefined
-                          }
-                          terminalReady={terminalReady}
-                          onSendKeys={onSendKeys}
-                          planVersions={
-                            planVersionIndex >= 0
-                              ? planVersions
-                              : EMPTY_PLAN_VERSIONS
-                          }
-                          planVersionIndex={planVersionIndex}
-                          encoded={encoded}
-                        />
-                      );
-                    });
-                    if (!isUser) {
-                      const time = formatMessageTime(m.timestamp);
-                      const text = messageText(m);
-                      return (
-                        <div className="flex w-full flex-col gap-1">
-                          <div className="flex w-full flex-col gap-1.5">
-                            {partNodes}
-                          </div>
-                          {/* Meta row (reply time + copy) shows on ONLY the
+                    {(() => {
+                      const partNodes = m.parts.map((p, i) => {
+                        const partKey = `${m.uuid}:${i}`;
+                        // Edit/MultiEdit/ExitPlanMode parts the plan card subsumes.
+                        if (hiddenParts.has(partKey)) return null;
+                        // tool_result renders inline within its tool_use; an empty
+                        // wrapper here would add a stray flex gap.
+                        if (p.kind === "tool_result") return null;
+                        const planVersionIndex =
+                          planVersionByPart.get(partKey) ?? -1;
+                        return (
+                          <PartView
+                            key={i}
+                            messageUuid={m.uuid}
+                            partIndex={i}
+                            partAnns={partMap?.get(i) ?? EMPTY_PART_ANNS}
+                            pendingCover={
+                              pending
+                                ? coverForSpanPart(
+                                    pending.data.start,
+                                    pending.data.end,
+                                    m.uuid,
+                                    i,
+                                    partOrder,
+                                  )
+                                : null
+                            }
+                            onClickAnnotation={handleClickAnnotation}
+                            part={p}
+                            message={m}
+                            result={
+                              p.kind === "tool_use"
+                                ? resultByToolUseId.get(p.id)
+                                : undefined
+                            }
+                            terminalReady={terminalReady}
+                            onSendKeys={onSendKeys}
+                            planVersions={
+                              planVersionIndex >= 0
+                                ? planVersions
+                                : EMPTY_PLAN_VERSIONS
+                            }
+                            planVersionIndex={planVersionIndex}
+                            encoded={encoded}
+                          />
+                        );
+                      });
+                      if (!isUser) {
+                        const time = formatMessageTime(m.timestamp);
+                        const text = messageText(m);
+                        return (
+                          <div className="flex w-full flex-col gap-1">
+                            <div className="flex w-full flex-col gap-1.5">
+                              {partNodes}
+                            </div>
+                            {/* Meta row (reply time + copy) shows on ONLY the
                           newest prose-bearing assistant row, and only once the
                           reply has finished (`!working`) — so it marks the end
                           of the latest response instead of trailing every turn
                           or flashing mid-stream. */}
-                          {idx === lastAssistantTextIdx && !working && text && (
-                            <div className="flex items-center gap-[7px] pl-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                              {time && (
-                                <span className="text-[11px] text-[var(--text-tertiary)]">
-                                  {time}
-                                </span>
+                            {idx === lastAssistantTextIdx &&
+                              !working &&
+                              text && (
+                                <div className="flex items-center gap-[7px] pl-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                                  {time && (
+                                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                                      {time}
+                                    </span>
+                                  )}
+                                  <CopyButton getText={() => text} />
+                                </div>
                               )}
-                              <CopyButton getText={() => text} />
-                            </div>
-                          )}
+                          </div>
+                        );
+                      }
+                      const time = formatMessageTime(m.timestamp);
+                      return (
+                        <div className="flex max-w-[80%] flex-col items-end gap-1">
+                          {/* An abandoned prompt keeps its bubble — you did type
+                          it — but drops the fill for a dashed edge, so it reads
+                          as a draft that never left. */}
+                          <div
+                            className={cn(
+                              "flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] px-3.5 py-2",
+                              aborted
+                                ? "border-dashed bg-transparent opacity-55"
+                                : "bg-[var(--bg-surface)]",
+                            )}
+                          >
+                            <CollapsibleUserMessage>
+                              {partNodes}
+                            </CollapsibleUserMessage>
+                          </div>
+                          {/* Meta row sits outside the bubble, bottom-right, and
+                          waits for a hover — except on an abandoned prompt,
+                          where "Not sent" is the whole point. */}
+                          <div
+                            className={cn(
+                              "flex items-center gap-[7px] pr-0.5 transition-opacity",
+                              !aborted &&
+                                "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                            )}
+                          >
+                            {aborted && (
+                              <span
+                                className="text-[11px] text-[var(--text-tertiary)]"
+                                title="You interrupted this before it reached Claude, so it was never part of the conversation."
+                              >
+                                Not sent
+                              </span>
+                            )}
+                            {time && (
+                              <span className="text-[11px] text-[var(--text-tertiary)]">
+                                {time}
+                              </span>
+                            )}
+                            <CopyButton getText={() => messageText(m)} />
+                          </div>
                         </div>
                       );
-                    }
-                    const time = formatMessageTime(m.timestamp);
-                    return (
-                      <div className="flex max-w-[80%] flex-col items-end gap-1">
-                        <div className="flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2">
-                          <CollapsibleUserMessage>
-                            {partNodes}
-                          </CollapsibleUserMessage>
-                        </div>
-                        {/* Meta row sits outside the bubble, bottom-right: the send
-                        time, then a small gap, then a copy button. Hidden until
-                        the message row is hovered or focused. */}
-                        <div className="flex items-center gap-[7px] pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                          {time && (
-                            <span className="text-[11px] text-[var(--text-tertiary)]">
-                              {time}
-                            </span>
-                          )}
-                          <CopyButton getText={() => messageText(m)} />
-                        </div>
-                      </div>
-                    );
-                  })()}
+                    })()}
                   </div>
                 </div>
               );

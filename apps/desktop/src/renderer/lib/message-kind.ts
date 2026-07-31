@@ -169,3 +169,75 @@ export function isRealUserTurn(m: ConversationMessage): boolean {
   }
   return v;
 }
+
+/**
+ * A turn the human submitted for Claude to answer. `promptSource` is only
+ * written on those, which is what separates them from the rest of what shares
+ * the `user` role once tool results are excluded: `[Request interrupted by
+ * user]` markers, the image lines that trail a pasted screenshot, and prompts
+ * Claude Code executes locally without a request (`/compact`) all lack it.
+ * "system" is excluded too — a harness-injected turn isn't the user's.
+ */
+function isSubmittedPrompt(m: ConversationMessage): boolean {
+  return m.promptSource === "typed" || m.promptSource === "queued";
+}
+
+/**
+ * Prompts that sit in the transcript but never reached the model. Claude Code
+ * appends a prompt to the JSONL the moment it's submitted, before the request
+ * goes out; pressing Esc before the first token aborts the turn but leaves the
+ * line there, and writes no `[Request interrupted by user]` marker (that one
+ * only appears once a reply had started). So an abandoned prompt is
+ * indistinguishable from a real turn until you walk the message tree and find
+ * it never got an assistant descendant.
+ *
+ * "No reply" alone isn't enough, though — an unanswered prompt at the end of a
+ * transcript may just be in flight, or queued behind a turn that's still
+ * running. What proves abandonment is a LATER submission that did get answered:
+ * Claude moved on, so this one is never getting a reply. Prompts after that
+ * point stay unmarked, which is the honest answer for a session that ends right
+ * after a submit — abandoned and about-to-be-answered look identical there.
+ */
+export function abortedPromptUuids(
+  messages: ConversationMessage[],
+): Set<string> {
+  const aborted = new Set<string>();
+  const parentOf = new Map<string, string | null>();
+  for (const m of messages) parentOf.set(m.uuid, m.parentMessageUuid);
+
+  const answered = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    let cur = m.parentMessageUuid;
+    while (cur && !answered.has(cur)) {
+      answered.add(cur);
+      cur = parentOf.get(cur) ?? null;
+    }
+  }
+  // The newest submission that did get answered — only prompts before it are
+  // provably abandoned. This also fails safe: a transcript whose parent links
+  // didn't resolve has no answered submission at all, so it claims nothing
+  // rather than dimming every turn in the session.
+  let lastAnswered = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isSubmittedPrompt(messages[i]) && answered.has(messages[i].uuid)) {
+      lastAnswered = i;
+      break;
+    }
+  }
+  // Forward pass, so the `[Image: source: …]` line a pasted screenshot hangs off
+  // its prompt is already reachable from an aborted parent by the time we get to
+  // it — one submission dims as one unit instead of half of it. That inheritance
+  // ignores the cutoff: the parent's verdict was already made under it, and a
+  // trailing image line would otherwise sit undimmed beneath a dimmed prompt.
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!isRealUserTurn(m) || answered.has(m.uuid)) continue;
+    const partOfAbortedSubmission =
+      m.parentMessageUuid !== null && aborted.has(m.parentMessageUuid);
+    if (partOfAbortedSubmission || (i < lastAnswered && isSubmittedPrompt(m))) {
+      aborted.add(m.uuid);
+    }
+  }
+  return aborted;
+}
