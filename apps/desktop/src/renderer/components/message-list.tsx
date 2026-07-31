@@ -39,6 +39,7 @@ import {
   abortedPromptUuids,
   classifyMessage,
   imageOnlyPaths,
+  isImageOnlyMessage,
   isRealUserTurn,
   parseBashBlock,
   parseTaskNotifications,
@@ -662,30 +663,88 @@ function mediaUrl(path: string): string {
   return `file://${encodeURI(path)}`;
 }
 
-function TranscriptImage({ path }: { path: string }) {
+/** Uniform tile a grouped attachment crops into (3:2, ~3 to a row). */
+const IMAGE_TILE = "h-[86px] w-[130px]";
+/** Three tiles + their gaps — the wrap point for an attachment grid. */
+const IMAGE_GRID_MAX_W = 3 * 130 + 2 * 6;
+
+function TranscriptImage({
+  path,
+  tiled,
+  onOpen,
+}: {
+  path: string;
+  tiled: boolean;
+  onOpen: () => void;
+}) {
   const [failed, setFailed] = useState(false);
-  const [preview, setPreview] = useState(false);
   if (failed) {
     return (
-      <div className="my-1 rounded-md border border-dashed border-[var(--border)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+      <div
+        className={cn(
+          "flex flex-col justify-center rounded-[10px] border border-dashed border-[var(--border)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]",
+          tiled && IMAGE_TILE,
+        )}
+      >
         Image unavailable
-        <div className="truncate text-[var(--text-tertiary)]">{path}</div>
+        <div className="truncate">{path}</div>
       </div>
     );
   }
-  const src = mediaUrl(path);
+  return (
+    <img
+      src={mediaUrl(path)}
+      alt="Attached image"
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+      onClick={onOpen}
+      className={cn(
+        "cursor-zoom-in rounded-[10px] ring-[var(--border)] transition-shadow hover:ring-1",
+        tiled
+          ? `${IMAGE_TILE} object-cover`
+          : "max-h-[200px] max-w-[280px] object-contain",
+      )}
+    />
+  );
+}
+
+/**
+ * This part's attachments. A lone image keeps its shape (small); once a message
+ * carries several they crop to uniform tiles that wrap into a grid — Claude Code
+ * writes one image per part, so `all` is the whole message's set and the tiling
+ * decision (and the lightbox's ←/→ range) spans parts, not just this one.
+ */
+function TranscriptImages({
+  paths,
+  all,
+  offset,
+}: {
+  paths: string[];
+  all: string[];
+  offset: number;
+}) {
+  const [at, setAt] = useState<number | null>(null);
+  const tiled = all.length > 1;
   return (
     <>
-      <img
-        src={src}
-        alt="Attached image"
-        loading="lazy"
-        decoding="async"
-        onError={() => setFailed(true)}
-        onClick={() => setPreview(true)}
-        className="my-1 max-h-[340px] max-w-full cursor-zoom-in rounded-md border border-[var(--border)] object-contain"
-      />
-      {preview && <ImageLightbox src={src} onClose={() => setPreview(false)} />}
+      <div className="flex flex-wrap justify-end gap-1.5">
+        {paths.map((p, i) => (
+          <TranscriptImage
+            key={`${i}:${p}`}
+            path={p}
+            tiled={tiled}
+            onOpen={() => setAt(offset + i)}
+          />
+        ))}
+      </div>
+      {at !== null && (
+        <ImageLightbox
+          srcs={all.map(mediaUrl)}
+          index={at}
+          onClose={() => setAt(null)}
+        />
+      )}
     </>
   );
 }
@@ -932,13 +991,13 @@ function renderPartContent({
     case "text": {
       const imgPaths = imageOnlyPaths(part.text);
       if (imgPaths) {
-        return (
-          <div className="flex flex-col gap-2">
-            {imgPaths.map((p, i) => (
-              <TranscriptImage key={`${i}:${p}`} path={p} />
-            ))}
-          </div>
-        );
+        const all: string[] = [];
+        let offset = 0;
+        for (const p of message.parts) {
+          if (p === part) offset = all.length;
+          if (p.kind === "text") all.push(...(imageOnlyPaths(p.text) ?? []));
+        }
+        return <TranscriptImages paths={imgPaths} all={all} offset={offset} />;
       }
       // A slash-command the user typed: strip the `<command-*>` tag soup and
       // render the clean `/cmd args` as normal bubble text (it IS user input).
@@ -1968,6 +2027,7 @@ export const MessageList = memo(function MessageList({
                           </div>
                         );
                       }
+                      const imageOnly = isImageOnlyMessage(m);
                       return (
                         <div className="flex max-w-[80%] flex-col items-end gap-1">
                           {/* An abandoned prompt keeps its bubble — you did type
@@ -1975,15 +2035,33 @@ export const MessageList = memo(function MessageList({
                           as a draft that never left. */}
                           <div
                             className={cn(
-                              "flex w-full flex-col gap-1.5 rounded-2xl rounded-br-sm border border-[var(--border)] px-3.5 py-2",
-                              aborted
-                                ? "border-dashed bg-transparent opacity-55"
-                                : "bg-[var(--bg-surface)]",
+                              "flex gap-1.5",
+                              aborted && "opacity-55",
+                              imageOnly
+                                ? // Attachments carry their own edges: no bubble
+                                  // to draw a second border inside them, and they
+                                  // wrap sideways instead of stacking.
+                                  "w-fit flex-wrap justify-end"
+                                : [
+                                    "w-full flex-col rounded-2xl rounded-br-sm border border-[var(--border)] px-3.5 py-2",
+                                    aborted
+                                      ? "border-dashed bg-transparent"
+                                      : "bg-[var(--bg-surface)]",
+                                  ],
                             )}
+                            style={
+                              imageOnly
+                                ? { maxWidth: IMAGE_GRID_MAX_W }
+                                : undefined
+                            }
                           >
-                            <CollapsibleUserMessage>
-                              {partNodes}
-                            </CollapsibleUserMessage>
+                            {imageOnly ? (
+                              partNodes
+                            ) : (
+                              <CollapsibleUserMessage>
+                                {partNodes}
+                              </CollapsibleUserMessage>
+                            )}
                           </div>
                           {/* Meta row sits outside the bubble, bottom-right, and
                           waits for a hover — except on an abandoned prompt,

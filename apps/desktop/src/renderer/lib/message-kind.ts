@@ -119,6 +119,18 @@ export function isTaskNotificationMessage(m: ConversationMessage): boolean {
 }
 
 /**
+ * A turn that carries nothing but attachments. It gets no bubble chrome and no
+ * height clamp — thumbnails are already small, and a bubble around them would
+ * draw a second border inside the image's own edge.
+ */
+export function isImageOnlyMessage(m: ConversationMessage): boolean {
+  return (
+    m.parts.length > 0 &&
+    m.parts.every((p) => p.kind === "text" && imageOnlyPaths(p.text) !== null)
+  );
+}
+
+/**
  * A harness-injected turn (skill body, loop tick, context caveat) flagged by
  * metadata. Rendered full-width as a muted, collapsible system card, not in the
  * user bubble. Image-only meta turns are left alone — they render as images.
@@ -126,9 +138,7 @@ export function isTaskNotificationMessage(m: ConversationMessage): boolean {
 export function isSystemMetaMessage(m: ConversationMessage): boolean {
   if (m.role !== "user") return false;
   if (m.isMeta !== true && m.promptSource !== "system") return false;
-  return !m.parts.every(
-    (p) => p.kind === "text" && imageOnlyPaths(p.text) !== null,
-  );
+  return !isImageOnlyMessage(m);
 }
 
 export type MessageCategory = "user-real" | "tool" | "assistant";

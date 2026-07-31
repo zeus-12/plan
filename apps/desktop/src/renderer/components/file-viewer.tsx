@@ -2269,7 +2269,7 @@ function FileViewerImpl({
       )}
       {blameCard}
       {lightbox && imageUrl && (
-        <ImageLightbox src={imageUrl} onClose={() => setLightbox(false)} />
+        <ImageLightbox srcs={[imageUrl]} onClose={() => setLightbox(false)} />
       )}
       <CommandPalette
         open={symbolOpen}
