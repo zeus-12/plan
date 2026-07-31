@@ -16,6 +16,7 @@ import {
 } from "@plan/shared/components/ui/sidebar";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import {
   Tooltip,
   TooltipContent,
@@ -426,7 +427,11 @@ const ChatTabPane = memo(function ChatTabPane({
         />
       ) : (
         <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-          {isNew ? "New chat — send a message to start it." : "Loading…"}
+          {isNew ? (
+            "New chat — send a message to start it."
+          ) : (
+            <TextShimmer duration={2.4}>Loading…</TextShimmer>
+          )}
         </div>
       )}
     </div>
@@ -2158,15 +2163,17 @@ function ProjectWorkspaceImpl({
                                       : "bg-emerald-500",
                               )}
                             />
-                            <span>
-                              {awaitingSelection
-                                ? "Needs input"
-                                : !agentLive
-                                  ? "Terminal"
-                                  : chatWorking
-                                    ? "Working"
+                            {!awaitingSelection && agentLive && chatWorking ? (
+                              <TextShimmer duration={2.4}>Working</TextShimmer>
+                            ) : (
+                              <span>
+                                {awaitingSelection
+                                  ? "Needs input"
+                                  : !agentLive
+                                    ? "Terminal"
                                     : "Claude"}
-                            </span>
+                              </span>
+                            )}
                           </span>
                         ) : (
                           <Button

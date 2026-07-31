@@ -65,6 +65,27 @@ body {
 }
 
 /*
+ * Sweep behind TextShimmer. The rule sits outside every @layer, so it beats the
+ * `text-transparent` utility when motion is off — otherwise killing the
+ * animation would leave a transparent, unreadable label.
+ */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 50%;
+  }
+  100% {
+    background-position: -200% 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-shimmer {
+    animation: none;
+    background-image: none;
+    color: var(--shimmer-lit, var(--text));
+  }
+}
+
+/*
  * Chat annotation / find highlights use the CSS Custom Highlight API, whose
  * `::highlight()` pseudo-element only the desktop renderer registers. Its rules
  * are injected at runtime there (see message-list.tsx) rather than living here,

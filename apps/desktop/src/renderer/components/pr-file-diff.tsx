@@ -5,6 +5,7 @@ import { useDiffSettings } from "@plan/shared/lib/settings";
 import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
 import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
 import { reconstructOldText } from "@plan/shared/lib/diff-reconstruct";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import { useDiffBlame } from "../lib/use-diff-blame";
 
 interface Props {
@@ -178,14 +179,18 @@ export const PrFileDiff = memo(function PrFileDiff({
           <Placeholder>Binary file</Placeholder>
         ) : !headSha ? (
           headShaPending ? (
-            <Placeholder>Loading…</Placeholder>
+            <Placeholder>
+              <TextShimmer duration={2.4}>Loading…</TextShimmer>
+            </Placeholder>
           ) : (
             <Placeholder>
               Diff unavailable — couldn&apos;t fetch this PR&apos;s head commit.
             </Placeholder>
           )
         ) : !contents ? (
-          <Placeholder>Loading…</Placeholder>
+          <Placeholder>
+            <TextShimmer duration={2.4}>Loading…</TextShimmer>
+          </Placeholder>
         ) : contents.binary ? (
           <Placeholder>Binary file</Placeholder>
         ) : (

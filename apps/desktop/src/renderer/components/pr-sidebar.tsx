@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn, toggleInSet } from "@plan/shared/lib/utils";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import type { DiscoveredRepo, PrSummary } from "../../shared-types";
 import { usePrList } from "../lib/pr-store";
 import { Chevron } from "./chevron";
@@ -102,7 +103,11 @@ function RepoPrList({
     return <ShimmerRows />;
   }
   if (!result) {
-    return <Empty>Loading…</Empty>;
+    return (
+      <Empty>
+        <TextShimmer duration={2.4}>Loading…</TextShimmer>
+      </Empty>
+    );
   }
   if (!result.available) {
     return <Empty>{result.error ?? "No GitHub remote"}</Empty>;

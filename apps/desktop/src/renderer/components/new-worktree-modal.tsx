@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
+import {
+  TextShimmer,
+  onAccentShimmer,
+} from "@plan/shared/components/ui/text-shimmer";
 import { BranchCombo } from "./branch-combo";
 import type {
   ProjectDefaults,
@@ -87,9 +91,7 @@ export function NewWorktreeModal({
   const multiRepo = (repos?.length ?? 0) > 1;
   const selectedRepos = (repos ?? []).filter((r) => selected.has(r.subPath));
   // Suggestions for the shared field: every branch across the project's repos.
-  const allBranches = [
-    ...new Set(Object.values(branchesByRepo).flat()),
-  ].sort();
+  const allBranches = [...new Set(Object.values(branchesByRepo).flat())].sort();
   // A repo's base is its override, falling back to the shared default.
   const baseFor = (subPath: string) =>
     repoBases[subPath]?.trim() || base.trim();
@@ -286,9 +288,7 @@ export function NewWorktreeModal({
                         <span
                           className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[12px]"
                           style={{
-                            color: on
-                              ? "var(--text)"
-                              : "var(--text-secondary)",
+                            color: on ? "var(--text)" : "var(--text-secondary)",
                           }}
                           title={label}
                         >
@@ -359,7 +359,9 @@ export function NewWorktreeModal({
               disabled={!canSubmit}
             >
               {busy ? (
-                "Creating…"
+                <TextShimmer duration={2.4} style={onAccentShimmer}>
+                  Creating…
+                </TextShimmer>
               ) : (
                 <>
                   Create

@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { NotebookPen } from "lucide-react";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import {
   Sidebar,
   SidebarContent,
@@ -471,13 +472,15 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     <span className="flex min-w-0 items-center gap-1.5">
                       <UploadIcon />
                       <span className="truncate">
-                        {t.pushing
-                          ? "Pushing…"
-                          : !t.hasUpstream
-                            ? "Publish branch"
-                            : t.ahead > 0
-                              ? `Pull & push ${t.ahead}`
-                              : "Up to date"}
+                        {t.pushing ? (
+                          <TextShimmer duration={2.4}>Pushing…</TextShimmer>
+                        ) : !t.hasUpstream ? (
+                          "Publish branch"
+                        ) : t.ahead > 0 ? (
+                          `Pull & push ${t.ahead}`
+                        ) : (
+                          "Up to date"
+                        )}
                       </span>
                     </span>
                     <span className="shrink-0 truncate text-[10px] text-[var(--text-tertiary)]">

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
+import {
+  TextShimmer,
+  onAccentShimmer,
+} from "@plan/shared/components/ui/text-shimmer";
 import type {
   WorktreeRecord,
   CreatePrInput,
@@ -143,7 +147,13 @@ export function CreatePrModal({ worktree, onCreate, onClose }: Props) {
                 onClick={() => void submit()}
                 disabled={!canSubmit}
               >
-                {busy ? "Creating…" : "Create PR"}
+                {busy ? (
+                  <TextShimmer duration={2.4} style={onAccentShimmer}>
+                    Creating…
+                  </TextShimmer>
+                ) : (
+                  "Create PR"
+                )}
               </Button>
             )}
           </div>

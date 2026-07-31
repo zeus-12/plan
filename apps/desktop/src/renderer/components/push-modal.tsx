@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
+import {
+  TextShimmer,
+  onAccentShimmer,
+} from "@plan/shared/components/ui/text-shimmer";
 import type { GitOpResult, PushPreview } from "../../shared-types";
 
 interface Props {
@@ -121,11 +125,9 @@ export function PushModal({
             className="gap-1.5"
           >
             {busy ? (
-              publishing ? (
-                "Publishing…"
-              ) : (
-                "Pushing…"
-              )
+              <TextShimmer duration={2.4} style={onAccentShimmer}>
+                {publishing ? "Publishing…" : "Pushing…"}
+              </TextShimmer>
             ) : (
               <>
                 {publishing ? "Publish" : "Pull & push"}

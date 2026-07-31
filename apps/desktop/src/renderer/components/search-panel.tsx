@@ -9,6 +9,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename, dirname } from "@plan/shared/lib/path";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import type { SearchFileResult, SearchOptions } from "../../shared-types";
 import { FileIcon } from "./file-icon";
 import { Chevron } from "./chevron";
@@ -273,7 +274,11 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
                 : "text-[var(--text-tertiary)]",
             )}
           >
-            {summary}
+            {status === "searching" ? (
+              <TextShimmer duration={2.4}>{summary}</TextShimmer>
+            ) : (
+              summary
+            )}
           </div>
         )}
       </div>

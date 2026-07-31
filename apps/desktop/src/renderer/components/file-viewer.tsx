@@ -38,6 +38,7 @@ import Fuse from "fuse.js";
 import { CommandPalette, type PaletteItem } from "./command-palette";
 import type { Annotation } from "@plan/shared/lib/store";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
 import { useTextFind } from "@plan/shared/lib/use-text-find";
 import { offsetOfBoundary } from "@plan/shared/lib/dom-text";
@@ -1909,7 +1910,9 @@ function FileViewerImpl({
       </div>
 
       {status === "loading" ? (
-        <Centered>Loading…</Centered>
+        <Centered>
+          <TextShimmer duration={2.4}>Loading…</TextShimmer>
+        </Centered>
       ) : status === "missing" ? (
         <Centered>File not found</Centered>
       ) : isImage ? (
