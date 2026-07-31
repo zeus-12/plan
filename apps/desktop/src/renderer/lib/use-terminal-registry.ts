@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useProjectTerminals } from "./terminal-store";
 import { rekeyChat } from "./chat-driver-store";
+import { relocateSessionUnread } from "./unread-response-store";
 import {
   chatTerminalPrefix,
   shellTerminalId,
@@ -76,6 +77,7 @@ export function useTerminalRegistry(
       // session the driver didn't actually move to.
       const ok = await rekeyChat(oldTid, newTid);
       if (!ok) return false;
+      relocateSessionUnread(oldTid, newTid);
       setOpenedIds((ids) =>
         ids.includes(oldTid)
           ? ids.map((id) => (id === oldTid ? newTid : id))

@@ -79,6 +79,8 @@ import {
 import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
+import { relocateSessionUnread } from "./lib/unread-response-store";
+import { chatTerminalId } from "../terminal-ids";
 import { forgetProject } from "./lib/composer-memory";
 import { AttentionSwitcher } from "./attention-switcher";
 import type { AttentionTarget } from "./attention-switcher";
@@ -720,6 +722,10 @@ function Shell() {
       forgetNewSession(sessionId);
       // Drop it from the source's cached list so it doesn't linger there.
       removeCachedSession(fromEncoded, sessionId);
+      relocateSessionUnread(
+        chatTerminalId(fromEncoded, sessionId),
+        chatTerminalId(toEncoded, sessionId),
+      );
       closeProjectTab(fromEncoded, chatTabId(sessionId));
       openProjectTab(toEncoded, makeChatTab(sessionId));
       if (toWorktreeId) selectWorktree(selectedEncoded, toWorktreeId);

@@ -50,6 +50,7 @@ import {
 } from "../lib/annotation-store";
 import { chatTerminalId, chatTerminalPrefix } from "../../terminal-ids";
 import {
+  clearSessionUnread,
   markSessionUnread,
   setViewedSession,
 } from "../lib/unread-response-store";
@@ -742,6 +743,9 @@ function ProjectWorkspaceImpl({
       if (archived) {
         window.electronAPI.terminalKill(`chat:${project.encoded}:${sessionId}`);
         forgetSession(sessionId);
+        // Unread now outlives the pty, so putting a chat away has to retire its
+        // badge explicitly — otherwise it would sit in the rollup unreachable.
+        clearSessionUnread(chatTerminalId(project.encoded, sessionId));
       }
       refreshSessions();
     },

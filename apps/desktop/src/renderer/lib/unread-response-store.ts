@@ -20,10 +20,17 @@ import { isChatTerminalId, parseChatTerminalId } from "../../terminal-ids";
  * projection for sidebar rollups). Kept separate from the approval and working
  * stores because the three states are independent: a session can be working,
  * then done-unread, and either may coexist with a sibling session's approval.
+ *
+ * Unlike those two, this one is PERSISTED (localStorage). Working and approval
+ * are facts about a live process, so main can re-answer them after a refresh and
+ * they are genuinely false once the ptys are gone. "Replied and you haven't
+ * looked" is a fact about the transcript: it outlives the process, the reload
+ * and the app, so it has to be stored rather than re-derived.
  */
 
-// Chat ids that have replied and not yet been seen.
-let unread = new Set<string>();
+// Chat ids that have replied and not yet been seen, mapped to when they were
+// marked — the timestamp exists only so stale entries can be pruned on load.
+let unread = new Map<string, number>();
 // Projected to target `encoded` cwds; rebuilt only when `unread` changes so the
 // sidebar hook gets a stable reference between events (useSyncExternalStore
 // requires it to avoid an infinite render loop).
@@ -37,13 +44,52 @@ const listeners = new Set<() => void>();
 let viewedId: string | null = null;
 let focused = typeof document !== "undefined" ? document.hasFocus() : true;
 
+const STORAGE_KEY = "plan.unreadSessions";
+// A badge nobody cleared in a month is for a chat that's been dealt with or
+// deleted; keeping it forever would only grow the blob.
+const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_ENTRIES = 500;
+
+function load(): Map<string, number> {
+  const loaded = new Map<string, number>();
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return loaded;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return loaded;
+    const cutoff = Date.now() - MAX_AGE_MS;
+    const fresh = Object.entries(parsed as Record<string, unknown>)
+      .filter(
+        (e): e is [string, number] =>
+          isChatTerminalId(e[0]) && typeof e[1] === "number" && e[1] > cutoff,
+      )
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, MAX_ENTRIES);
+    for (const [id, at] of fresh) loaded.set(id, at);
+  } catch {
+    // Unreadable or hand-edited — start with no badges rather than guess.
+  }
+  return loaded;
+}
+
+function persist() {
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(unread)),
+    );
+  } catch {
+    // localStorage can throw (quota) — the in-memory set stays authoritative.
+  }
+}
+
 function emit() {
   listeners.forEach((l) => l());
 }
 
 function rebuildEncoded() {
   const encoded = new Set<string>();
-  for (const id of unread) {
+  for (const id of unread.keys()) {
     const parsed = parseChatTerminalId(id);
     if (parsed) encoded.add(parsed.encoded);
   }
@@ -52,17 +98,19 @@ function rebuildEncoded() {
 
 function add(id: string) {
   if (unread.has(id)) return;
-  unread = new Set(unread);
-  unread.add(id);
+  unread = new Map(unread);
+  unread.set(id, Date.now());
   rebuildEncoded();
+  persist();
   emit();
 }
 
 function clear(id: string) {
   if (!unread.has(id)) return;
-  unread = new Set(unread);
+  unread = new Map(unread);
   unread.delete(id);
   rebuildEncoded();
+  persist();
   emit();
 }
 
@@ -98,6 +146,23 @@ export function clearSessionUnread(id: string) {
 }
 
 /**
+ * Carry an unread badge to a chat id the same session now answers to — a
+ * `/branch` fork or a move to another worktree. Without this the badge would
+ * stay parked on an id nothing renders any more, since it no longer expires
+ * with the pty.
+ */
+export function relocateSessionUnread(oldId: string, newId: string) {
+  const at = unread.get(oldId);
+  if (at === undefined) return;
+  unread = new Map(unread);
+  unread.delete(oldId);
+  unread.set(newId, at);
+  rebuildEncoded();
+  persist();
+  emit();
+}
+
+/**
  * Report which chat is the on-screen pane (null when the center pane isn't a
  * chat). Called only by the active workspace. Viewing a session with the window
  * focused clears its unread badge.
@@ -114,6 +179,8 @@ function onFocusChange(next: boolean) {
 }
 
 if (typeof window !== "undefined") {
+  unread = load();
+  rebuildEncoded();
   window.addEventListener("focus", () => onFocusChange(true));
   window.addEventListener("blur", () => onFocusChange(false));
   // A resumed turn supersedes "replied — waiting on you": if it's working
@@ -121,11 +188,6 @@ if (typeof window !== "undefined") {
   // while working, but clearing keeps the sidebar rollup honest too.
   window.electronAPI?.onChatActivity?.((id, activity) => {
     if (activity.busy) clear(id);
-  });
-  // An ended session isn't actionable. Deferred a tick so other exit listeners
-  // (which prune their own sets) run first.
-  window.electronAPI?.onChatExit?.((id) => {
-    setTimeout(() => clear(id), 0);
   });
 }
 
@@ -152,7 +214,7 @@ export function useSessionHasUnread(id: string | null): boolean {
  * and side-effect-free so the feature that uses them stays easy to remove.
  */
 export function currentUnreadIds(): string[] {
-  return [...unread];
+  return [...unread.keys()];
 }
 export function subscribeUnread(listener: () => void): () => void {
   return subscribe(listener);
