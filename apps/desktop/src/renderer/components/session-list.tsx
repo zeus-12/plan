@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import { chatTerminalId } from "../../terminal-ids";
-import { relativeTime } from "../lib/time";
+import { TimeAgo } from "./time-ago";
 import { useChatWorking } from "../lib/session-activity-store";
 import { useSessionNeedsApproval } from "../lib/session-approval-store";
 import {
@@ -253,9 +253,10 @@ const SessionRow = memo(function SessionRow({
               hasUnread && <RepliedDot />
             )}
           </span>
-          <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-            {relativeTime(s.updatedAt)}
-          </span>
+          <TimeAgo
+            ts={s.updatedAt}
+            className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]"
+          />
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent>

@@ -54,6 +54,7 @@ import {
 } from "./tool-preview-card";
 import { ImageLightbox } from "./image-lightbox";
 import { UserMessageOverview } from "./user-message-overview";
+import { TimeAgo } from "./time-ago";
 import type { ConversationMessage, MessagePart } from "../../shared-types";
 import type {
   ChatAnchor,
@@ -319,36 +320,6 @@ function messageText(m: ConversationMessage): string {
     .map((p) => p.text)
     .join("\n\n")
     .trim();
-}
-
-/**
- * Timestamp shown under a message. Stays relative while the message is recent
- * — "just now", "5 mins ago", "3 hours ago", "yesterday", "10 days ago" — so
- * anything within the last two weeks reads at a glance. Past 14 days it flips
- * to an absolute Indian-format date, DD/MM/YY. The stored timestamp is UTC ISO;
- * Date does the local-timezone conversion. Empty on an unparseable ts.
- */
-function formatMessageTime(ts: string): string {
-  const ms = Date.parse(ts);
-  if (!Number.isFinite(ms)) return "";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins} min${mins === 1 ? "" : "s"} ago`;
-
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-
-  const days = Math.floor(diff / 86_400_000);
-  if (days === 1) return "yesterday";
-  if (days <= 14) return `${days} days ago`;
-
-  const d = new Date(ms);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${dd}/${mm}/${yy}`;
 }
 
 /** How tall (px) a user bubble grows before it clips behind a "Show more". */
@@ -1971,7 +1942,6 @@ export const MessageList = memo(function MessageList({
                         );
                       });
                       if (!isUser) {
-                        const time = formatMessageTime(m.timestamp);
                         const text = messageText(m);
                         return (
                           <div className="flex w-full flex-col gap-1">
@@ -1987,18 +1957,17 @@ export const MessageList = memo(function MessageList({
                               !working &&
                               text && (
                                 <div className="flex items-center gap-[7px] pl-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                                  {time && (
-                                    <span className="text-[11px] text-[var(--text-tertiary)]">
-                                      {time}
-                                    </span>
-                                  )}
+                                  <TimeAgo
+                                    ts={m.timestamp}
+                                    variant="message"
+                                    className="text-[11px] text-[var(--text-tertiary)]"
+                                  />
                                   <CopyButton getText={() => text} />
                                 </div>
                               )}
                           </div>
                         );
                       }
-                      const time = formatMessageTime(m.timestamp);
                       return (
                         <div className="flex max-w-[80%] flex-col items-end gap-1">
                           {/* An abandoned prompt keeps its bubble — you did type
@@ -2034,11 +2003,11 @@ export const MessageList = memo(function MessageList({
                                 Not sent
                               </span>
                             )}
-                            {time && (
-                              <span className="text-[11px] text-[var(--text-tertiary)]">
-                                {time}
-                              </span>
-                            )}
+                            <TimeAgo
+                              ts={m.timestamp}
+                              variant="message"
+                              className="text-[11px] text-[var(--text-tertiary)]"
+                            />
                             <CopyButton getText={() => messageText(m)} />
                           </div>
                         </div>

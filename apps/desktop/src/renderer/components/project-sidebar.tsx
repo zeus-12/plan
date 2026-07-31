@@ -39,7 +39,8 @@ import type {
   ProjectEntry,
   WorktreeRecord,
 } from "../../shared-types";
-import { relativeTime } from "../lib/time";
+import { isRelative, relativeTime } from "../lib/time";
+import { useMinuteTick } from "../lib/now";
 import {
   buildProjectTree,
   flattenTree,
@@ -336,6 +337,18 @@ export function ProjectSidebar({
     }
     return flattenTree(tree, expanded, worktreesByProject);
   }, [archivedView, archived, tree, expanded, worktreesByProject]);
+
+  // Each row's "3 mins ago" is built into a joined meta line, so the whole
+  // (virtualized) list re-renders on the tick rather than each label alone —
+  // far less churn than the watcher refreshes it already absorbs. Nothing
+  // recent on screen means nothing left to update, and the clock stays off.
+  useMinuteTick(
+    rows.some((r) =>
+      r.kind === "worktree"
+        ? isRelative(r.worktree.mtimeMs, "compact")
+        : r.kind === "project" && isRelative(r.project.mtimeMs, "compact"),
+    ),
+  );
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
