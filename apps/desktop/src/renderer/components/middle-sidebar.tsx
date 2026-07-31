@@ -323,6 +323,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   // during the toggle; fitting on those intermediate frames leaves the pty (and
   // Claude's TUI) stuck a couple of columns wide once the animation ends.
   const [fitSignal, setFitSignal] = useState(0);
+  const [searchFocusSignal, setSearchFocusSignal] = useState(0);
 
   const startTermResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -349,6 +350,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       if (e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         onTabChange("search");
+        setSearchFocusSignal((v) => v + 1);
         return;
       }
       if (e.shiftKey) return;
@@ -556,6 +558,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             <SearchPanel
               encoded={encoded}
               active={tab === "search"}
+              focusSignal={searchFocusSignal}
               onOpenResult={onOpenSearchResult}
             />
           </TabsContent>

@@ -18,6 +18,8 @@ interface Props {
   encoded: string;
   /** True while the Search tab is the visible one — focuses the input. */
   active: boolean;
+  /** Bumped on every ⌘⇧F so the box refocuses even when the tab is already open. */
+  focusSignal: number;
   /** Open a match: project-relative path + 1-based line + char range on it. */
   onOpenResult: (
     path: string,
@@ -103,7 +105,12 @@ function ToggleBtn({
   );
 }
 
-export function SearchPanel({ encoded, active, onOpenResult }: Props) {
+export function SearchPanel({
+  encoded,
+  active,
+  focusSignal,
+  onOpenResult,
+}: Props) {
   const [query, setQuery] = useState("");
   const [opts, setOpts] = useState<SearchOptions>({
     caseSensitive: false,
@@ -179,7 +186,7 @@ export function SearchPanel({ encoded, active, onOpenResult }: Props) {
       el.select();
     });
     return () => cancelAnimationFrame(id);
-  }, [active]);
+  }, [active, focusSignal]);
 
   const toggle = useCallback(
     (key: keyof SearchOptions) => setOpts((o) => ({ ...o, [key]: !o[key] })),
