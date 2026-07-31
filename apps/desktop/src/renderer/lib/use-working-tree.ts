@@ -38,6 +38,15 @@ interface RepoFiles {
   hasUpstream: boolean;
 }
 
+/** What one refresh read from git, for callers that report it to the user. */
+export interface WorkingTreeSummary {
+  /** Changed paths across every repo (a path counts once, as git lists it). */
+  changedFiles: number;
+  reposWithChanges: number;
+  /** Repos in the project, changed or not. */
+  repos: number;
+}
+
 /** One repo's push-target row for the sync bar. */
 export interface SyncTarget {
   subPath: string;
@@ -108,12 +117,15 @@ export function useWorkingTree(opts: {
   /** subPath currently being pushed (for the sync-bar spinner). */
   const [pushingRepo, setPushingRepo] = useState<string | null>(null);
 
-  const refreshDiff = useCallback(async () => {
+  /** What the refresh actually read, for callers that report it (the ⌘R
+   *  toast names counts, so it must state the fresh numbers rather than the
+   *  render-state ones, which land a tick later). */
+  const refreshDiff = useCallback(async (): Promise<WorkingTreeSummary> => {
     if (repos.length === 0) {
       setFilesByRepo(new Map());
       setFilesLoading(false);
       loadedRef.current = true;
-      return;
+      return { changedFiles: 0, reposWithChanges: 0, repos: 0 };
     }
     if (!loadedRef.current) setFilesLoading(true);
     try {
@@ -162,6 +174,14 @@ export function useWorkingTree(opts: {
           closeProjectTab(encoded, t.id);
         }
       }
+      let changedFiles = 0;
+      let reposWithChanges = 0;
+      for (const state of next.values()) {
+        if (state.status.length === 0) continue;
+        changedFiles += state.status.length;
+        reposWithChanges += 1;
+      }
+      return { changedFiles, reposWithChanges, repos: repos.length };
     } finally {
       loadedRef.current = true;
       setFilesLoading(false);

@@ -3,6 +3,7 @@ import { readFile } from "fs/promises";
 import { relative, sep, isAbsolute, join } from "path";
 import ignore, { type Ignore } from "ignore";
 import { git } from "./git-exec";
+import { repoLayout, type RepoLocation } from "./git";
 import { resolveProjectCwd } from "./providers/claude-code/projects";
 import { IGNORED_DIRS } from "./ignored-dirs";
 
@@ -14,6 +15,9 @@ import { IGNORED_DIRS } from "./ignored-dirs";
  * This is separate from session-watcher.ts, which only watches the Claude
  * session `.jsonl` files under ~/.claude/projects. Here we watch the working
  * tree itself plus the few `.git` files that signal a stage/commit/checkout.
+ * Those git dirs are resolved PER REPO (see resolveGitDirs) — in a worktree or
+ * any multi-repo project they live outside the project root, so a root-only
+ * resolution watched none of them and staging was invisible to the UI.
  *
  * Backend: native recursive `fs.watch` — on macOS that is ONE FSEvents stream
  * per watch root, O(1) file descriptors regardless of tree size. This used to
@@ -30,6 +34,15 @@ import { IGNORED_DIRS } from "./ignored-dirs";
  */
 
 const DEBOUNCE_MS = 200;
+// Ceiling on how long a burst can postpone the refresh. The debounce above is
+// trailing-only, so an agent writing files back-to-back (or a `git gc` churning
+// `.git/objects`) re-arms it forever and the UI never updates until things go
+// quiet. Past this many ms since the burst's FIRST event we fire regardless.
+const MAX_DEBOUNCE_MS = 800;
+// FSEvents streams are cheap (one shared thread, no per-file fd) but not free,
+// and a project's roots come from repo discovery, which we don't control. Cap
+// them and say out loud what didn't get watched.
+const MAX_WATCH_ROOTS = 24;
 
 export interface WorktreeEvent {
   kind: "worktree-changed";
@@ -50,6 +63,8 @@ interface ActiveWatch {
   /** One recursive watcher per root (worktree + any external git dirs). */
   watchers: FSWatcher[];
   debounce: ReturnType<typeof setTimeout> | null;
+  /** When the current burst started — drives the MAX_DEBOUNCE_MS ceiling. */
+  burstStart: number | null;
 }
 
 const watchers = new Map<string, ActiveWatch>();
@@ -86,23 +101,46 @@ function isInside(dir: string, p: string): boolean {
 }
 
 /**
- * Resolve the absolute git dir(s) for a worktree. For a linked worktree the
- * per-worktree git dir (index/HEAD live here) differs from the common dir
- * (shared refs/objects), so we may watch both.
+ * Absolute git dir(s) for ONE repo. For a linked worktree the per-worktree git
+ * dir (index/HEAD live here) differs from the common dir (shared refs), so both
+ * come back and both get watched.
  */
-async function resolveGitDirs(cwd: string): Promise<string[]> {
+async function gitDirsFor(repoPath: string): Promise<string[]> {
   const r = await git(
-    cwd,
+    repoPath,
     ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
     { timeoutMs: 5000 },
   );
   if (r.code !== 0) return [];
-  const lines = r.stdout
+  return r.stdout
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
-    .map((l) => (isAbsolute(l) ? l : join(cwd, l)));
-  return [...new Set(lines)];
+    .map((l) => (isAbsolute(l) ? l : join(repoPath, l)));
+}
+
+/**
+ * Git dirs to watch, resolved PER REPO rather than at the project root. This is
+ * the whole reason staging shows up promptly: in a plan worktree (and in any
+ * project whose root is a container of repos) the root is not itself a repo, so
+ * a root-only `rev-parse` fails and we'd watch no git dir at all — while the
+ * repo's real index sits in `<source-repo>/.git/worktrees/<name>/`, outside the
+ * watched tree. `git add` / `commit` / `checkout` then fire NO event and the
+ * Diffs tab stays stale until an unrelated file write happens to wake it.
+ */
+async function resolveGitDirs(
+  cwd: string,
+  repos: RepoLocation[],
+): Promise<string[]> {
+  const paths = repos.length > 0 ? repos.map((r) => r.path) : [cwd];
+  const lists = await Promise.all(paths.map(gitDirsFor));
+  return [...new Set(lists.flat())];
+}
+
+/** A directory whose `.gitignore` governs the paths beneath it. */
+interface IgnoreBase {
+  dir: string;
+  ig: Ignore;
 }
 
 async function loadGitignore(cwd: string): Promise<Ignore> {
@@ -116,10 +154,19 @@ async function loadGitignore(cwd: string): Promise<Ignore> {
   return ig;
 }
 
+/** Per-repo ignore rules, most specific first — a nested repo's `.gitignore`
+ *  must be applied relative to that repo, not to the project root. */
+async function loadIgnores(dirs: string[]): Promise<IgnoreBase[]> {
+  const bases = await Promise.all(
+    dirs.map(async (dir) => ({ dir, ig: await loadGitignore(dir) })),
+  );
+  return bases.sort((a, b) => b.dir.length - a.dir.length);
+}
+
 export async function startWorktreeWatch(encoded: string): Promise<void> {
   if (watchers.has(encoded)) return;
   // Claim the slot synchronously so concurrent calls don't both build watchers.
-  const slot: ActiveWatch = { watchers: [], debounce: null };
+  const slot: ActiveWatch = { watchers: [], debounce: null, burstStart: null };
   watchers.set(encoded, slot);
 
   let cwd: string;
@@ -130,14 +177,24 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
     return;
   }
 
-  const gitDirs = await resolveGitDirs(cwd);
-  const ig = await loadGitignore(cwd);
+  const repos = await repoLayout(encoded).catch(() => [] as RepoLocation[]);
+  const gitDirs = await resolveGitDirs(cwd, repos);
+  const ignores = await loadIgnores([
+    cwd,
+    ...repos.map((r) => r.path).filter((p) => p !== cwd),
+  ]);
 
   // If the watch was torn down while we resolved paths, abort.
   if (watchers.get(encoded) !== slot) return;
 
+  // Longest first, so a path resolves against the most specific git dir. A
+  // linked worktree's git dir sits INSIDE the common dir: matched against the
+  // common dir, its `index` reads as `worktrees/<name>/index`, which fails the
+  // relevance test and would drop every staging event.
+  const matchGitDirs = [...gitDirs].sort((a, b) => b.length - a.length);
+
   const ignored = (p: string): boolean => {
-    const gd = gitDirs.find((d) => isInside(d, p));
+    const gd = matchGitDirs.find((d) => isInside(d, p));
     if (gd) {
       const rel = relative(gd, p);
       // The git dir root itself (a null-filename event) and the index/HEAD/ref
@@ -147,29 +204,52 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
       return !gitPathIsRelevant(rel);
     }
 
-    const rel = relative(cwd, p);
+    const base = ignores.find((b) => isInside(b.dir, p));
+    if (!base) return false;
+    const rel = relative(base.dir, p);
     if (rel === "") return false;
-    if (rel.startsWith("..") || isAbsolute(rel)) return false;
     const parts = rel.split(sep);
     if (parts.some((seg) => ALWAYS_IGNORE_DIRS.has(seg))) return true;
     try {
-      if (ig.ignores(rel)) return true;
+      if (base.ig.ignores(rel)) return true;
     } catch {
       // ignore throws on odd paths — don't let it kill the watcher
     }
     return false;
   };
 
-  // Watch the worktree root plus any git dirs that live outside it (linked
-  // worktrees). For a normal repo the git dir is under cwd and already covered.
-  const roots = [cwd, ...gitDirs.filter((d) => !isInside(cwd, d))];
+  // The worktree root plus every git dir that isn't already inside a root a
+  // recursive watch covers (a plain single-repo project keeps exactly one
+  // stream, as before).
+  // Shortest first so a parent absorbs its children — a linked worktree's git
+  // dir lives inside the common dir, and watching both would double every
+  // event for one stream's worth of coverage.
+  const orderedGitDirs = [...gitDirs].sort((a, b) => a.length - b.length);
+  const roots: string[] = [];
+  for (const dir of [cwd, ...orderedGitDirs]) {
+    if (roots.some((r) => isInside(r, dir))) continue;
+    if (roots.length >= MAX_WATCH_ROOTS) {
+      console.warn(
+        `[worktree-watcher] ${encoded}: at the ${MAX_WATCH_ROOTS}-root cap, not watching ${dir}`,
+      );
+      continue;
+    }
+    roots.push(dir);
+  }
 
   const schedule = () => {
+    const now = Date.now();
+    if (slot.burstStart === null) slot.burstStart = now;
     if (slot.debounce) clearTimeout(slot.debounce);
+    const wait = Math.max(
+      0,
+      Math.min(DEBOUNCE_MS, slot.burstStart + MAX_DEBOUNCE_MS - now),
+    );
     slot.debounce = setTimeout(() => {
       slot.debounce = null;
+      slot.burstStart = null;
       callbacks?.onEvent({ kind: "worktree-changed", encoded });
-    }, DEBOUNCE_MS);
+    }, wait);
   };
 
   for (const root of roots) {
@@ -195,6 +275,17 @@ export async function startWorktreeWatch(encoded: string): Promise<void> {
     w.on("error", () => {});
     slot.watchers.push(w);
   }
+}
+
+/**
+ * Rebuild an active watch. Roots are resolved once at start from the repo
+ * layout, so a project that gains a repo (a checkout added to a worktree) would
+ * otherwise never watch the new repo's git dir.
+ */
+export async function restartWorktreeWatch(encoded: string): Promise<void> {
+  if (!watchers.has(encoded)) return;
+  stopWorktreeWatch(encoded);
+  await startWorktreeWatch(encoded);
 }
 
 export function stopWorktreeWatch(encoded: string): void {

@@ -1,6 +1,9 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { NotebookPen } from "lucide-react";
-import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
+import {
+  TextShimmer,
+  onAccentShimmer,
+} from "@plan/shared/components/ui/text-shimmer";
 import {
   Sidebar,
   SidebarContent,
@@ -62,6 +65,8 @@ interface Props {
   ) => Promise<{ ok: boolean; error?: string }>;
   filesLoading: boolean;
   diffAvailable: boolean;
+  /** A manual (⌘R) git re-read is in flight — shimmers the Diffs tab label. */
+  diffsRefreshing: boolean;
 
   sessions: SessionListItem[];
   selectedSession: string | null;
@@ -173,7 +178,13 @@ function UploadIcon() {
  * scroll position (never assumed), and the active tab is scrolled into view so
  * a tab is never selected-but-hidden.
  */
-function WorkTabStrip({ tab }: { tab: WorkTab }) {
+function WorkTabStrip({
+  tab,
+  diffsRefreshing,
+}: {
+  tab: WorkTab;
+  diffsRefreshing: boolean;
+}) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: false, end: false });
 
@@ -217,7 +228,19 @@ function WorkTabStrip({ tab }: { tab: WorkTab }) {
       >
         <TabsList className="w-max">
           <TabsTrigger value="chat">Chat</TabsTrigger>
-          <TabsTrigger value="diffs">Diffs</TabsTrigger>
+          <TabsTrigger value="diffs">
+            {/* Shimmer rather than an icon: it's the app's existing "working"
+                language and costs no width, so the strip can't shift. */}
+            {diffsRefreshing ? (
+              // Only reachable while this tab is active, i.e. on the accent
+              // fill — the theme's text tokens would be invisible there.
+              <TextShimmer duration={1.2} style={onAccentShimmer}>
+                Diffs
+              </TextShimmer>
+            ) : (
+              "Diffs"
+            )}
+          </TabsTrigger>
           <TabsTrigger value="files">Files</TabsTrigger>
           <TabsTrigger value="search">Search</TabsTrigger>
           <TabsTrigger value="pr">PR</TabsTrigger>
@@ -254,6 +277,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onCommit,
   filesLoading,
   diffAvailable,
+  diffsRefreshing,
   sessions,
   selectedSession,
   onSelectSession,
@@ -401,7 +425,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       >
         <SidebarHeader className="h-[44px] px-3 pt-2 pb-2 [-webkit-app-region:drag]">
           <div className="flex w-full min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
-            <WorkTabStrip tab={tab} />
+            <WorkTabStrip tab={tab} diffsRefreshing={diffsRefreshing} />
             {/* Detached from the tab group: opens the scratchpad as a center-pane
                 tab rather than switching this sidebar's view. */}
             <button

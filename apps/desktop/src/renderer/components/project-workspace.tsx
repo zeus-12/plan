@@ -105,6 +105,7 @@ import {
   setCachedTranscripts,
 } from "../lib/session-cache";
 import { pushToast } from "../lib/toast-store";
+import { setReloadOverride } from "../lib/reload-override";
 import {
   markNewSession,
   isNewSession,
@@ -894,40 +895,36 @@ function ProjectWorkspaceImpl({
   // Watcher: re-pull what's relevant. Debounced — a streaming session fires
   // events continuously, and refreshing (git + session list + transcript) on
   // every single one stalls the renderer.
+  //
+  // Git and session work run on SEPARATE timers. They shared one before, and
+  // since the timer was trailing-only and every event re-armed it, a streaming
+  // turn's JSONL events kept postponing the git refresh — a `git add` in the
+  // terminal stayed invisible in the Diffs tab until the agent went quiet. The
+  // git timer also has a max wait: under continuous churn it fires anyway.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    // What the window's events actually touched — git spawns (diff/status) are
-    // only worth paying when the worktree changed, and the session list only
-    // when a JSONL did. A streaming turn is almost all session events, so this
-    // keeps the 250ms loop off git entirely between file edits.
-    let sawWorktree = false;
-    let sawSession = false;
+    let gitTimer: ReturnType<typeof setTimeout> | null = null;
+    let gitBurstStart = 0;
+    let sessionTimer: ReturnType<typeof setTimeout> | null = null;
     const changedSids = new Set<string>();
     // Freshly-appeared transcripts this tick — candidates for a `/branch` follow.
     const newSids = new Set<string>();
-    const off = window.electronAPI.onWatcherEvent((e) => {
-      if (e.encoded !== project.encoded) return;
-      if (e.kind === "new-session" && e.sessionId) newSids.add(e.sessionId);
-      // A worktree change (file edit / git op on disk) bumps the content
-      // revision so open diff/file/image panes re-fetch — refreshDiff below
-      // covers the sidebar status, this covers the mounted content panes.
-      if (e.kind === "worktree-changed") {
-        bumpWorktreeRevision(e.encoded);
-        sawWorktree = true;
-      } else {
-        sawSession = true;
-      }
-      // Refresh the transcript of any OPEN chat tab whose JSONL changed.
-      if (e.sessionId && chatSessionIdsRef.current.includes(e.sessionId)) {
-        changedSids.add(e.sessionId);
-      }
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        if (sawWorktree) refreshDiff();
-        if (sawSession) refreshSessions();
-        sawWorktree = false;
-        sawSession = false;
+
+    const scheduleGit = () => {
+      const now = Date.now();
+      if (gitTimer) clearTimeout(gitTimer);
+      else gitBurstStart = now;
+      const wait = Math.max(0, Math.min(250, gitBurstStart + 800 - now));
+      gitTimer = setTimeout(() => {
+        gitTimer = null;
+        refreshDiff();
+      }, wait);
+    };
+
+    const scheduleSession = () => {
+      if (sessionTimer) clearTimeout(sessionTimer);
+      sessionTimer = setTimeout(() => {
+        sessionTimer = null;
+        refreshSessions();
         for (const sid of changedSids) void refreshTranscript(sid);
         changedSids.clear();
         // If a `/branch` is armed, see whether one of the new transcripts is its
@@ -937,12 +934,78 @@ function ProjectWorkspaceImpl({
         }
         newSids.clear();
       }, 250);
+    };
+
+    const off = window.electronAPI.onWatcherEvent((e) => {
+      if (e.encoded !== project.encoded) return;
+      if (e.kind === "new-session" && e.sessionId) newSids.add(e.sessionId);
+      // A worktree change (file edit / git op on disk) bumps the content
+      // revision so open diff/file/image panes re-fetch — refreshDiff below
+      // covers the sidebar status, this covers the mounted content panes.
+      if (e.kind === "worktree-changed") {
+        bumpWorktreeRevision(e.encoded);
+        scheduleGit();
+        return;
+      }
+      // Refresh the transcript of any OPEN chat tab whose JSONL changed.
+      if (e.sessionId && chatSessionIdsRef.current.includes(e.sessionId)) {
+        changedSids.add(e.sessionId);
+      }
+      scheduleSession();
     });
     return () => {
       off();
-      if (timer) clearTimeout(timer);
+      if (gitTimer) clearTimeout(gitTimer);
+      if (sessionTimer) clearTimeout(sessionTimer);
     };
   }, [project.encoded, refreshDiff, refreshSessions, refreshTranscript]);
+
+  // Catch-up on window focus: whatever the watcher missed while we were in the
+  // background is reconciled the moment the user comes back. One read per
+  // focus, not a poll.
+  useEffect(() => {
+    const onFocus = () => void refreshDiff();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshDiff]);
+
+  // ⌘R while the Diffs tab is up re-reads git instead of reloading the window.
+  // The watcher already covers the normal path; this is the manual one, and it
+  // reports what it read so a press is never ambiguous.
+  const [diffsRefreshing, setDiffsRefreshing] = useState(false);
+  const manualRefreshDiff = useCallback(async () => {
+    setDiffsRefreshing(true);
+    const startedAt = Date.now();
+    const summary = await refreshDiff().finally(() => {
+      // Sub-100ms refreshes would flash the spinner into an artifact — hold it
+      // long enough to read as feedback.
+      const elapsed = Date.now() - startedAt;
+      setTimeout(() => setDiffsRefreshing(false), Math.max(0, 400 - elapsed));
+    });
+    const files = summary.changedFiles;
+    const description =
+      summary.repos === 0
+        ? "No git repo in this project."
+        : files === 0
+          ? "No changes in the working tree."
+          : `${files} changed file${files === 1 ? "" : "s"}` +
+            (summary.reposWithChanges > 1
+              ? ` across ${summary.reposWithChanges} repos.`
+              : ".");
+    pushToast(
+      {
+        id: `diffs-refreshed:${project.encoded}`,
+        title: "Diffs refreshed",
+        description,
+      },
+      3_000,
+    );
+  }, [refreshDiff, project.encoded]);
+
+  useEffect(() => {
+    if (tab !== "diffs") return;
+    return setReloadOverride(() => void manualRefreshDiff(), "sidebar");
+  }, [tab, manualRefreshDiff]);
 
   // ── Project files (Files tab + ⌘P) ───────────────────────────
   // Indexed lazily the first time the Files tab (or ⌘P) is used, then cached
@@ -2357,6 +2420,7 @@ function ProjectWorkspaceImpl({
           onCommit={handleCommit}
           filesLoading={filesLoading}
           diffAvailable={repos.length > 0}
+          diffsRefreshing={diffsRefreshing}
           sessions={sessions}
           selectedSession={openKind === "chat" ? selectedSessionId : null}
           onSelectSession={handleSelectSession}

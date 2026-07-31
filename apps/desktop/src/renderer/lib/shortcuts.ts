@@ -257,6 +257,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         chords: [{ mods: ["meta"], key: "Z" }],
         when: "diff view",
       },
+      {
+        id: "refreshDiffs",
+        label: "Re-read git status",
+        chords: [{ mods: ["meta"], key: "R" }],
+        when: "Diffs tab",
+      },
     ],
   },
   {

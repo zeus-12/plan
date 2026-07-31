@@ -1,29 +1,47 @@
 /**
  * ⌘R routing. Main forwards every ⌘R press to the renderer (see
- * before-input-event in main/index.ts) instead of reloading directly. A page
- * that fetches its own data — currently the PR view — claims the shortcut while
- * it's visible so ⌘R force-refreshes THAT page's data. When nothing claims it,
- * we do the ordinary full-app reload the user expects everywhere else.
+ * before-input-event in main/index.ts) instead of reloading directly. A surface
+ * that fetches its own data claims the shortcut while it's visible so ⌘R
+ * refreshes THAT data — the PR view, and the Diffs sidebar. When nothing claims
+ * it, we do the ordinary full-app reload the user expects everywhere else.
  *
- * Overrides stack: registering returns an unregister that restores the previous
- * claimant, so switching between PR tabs (each claims while active) leaves the
- * right one in charge and tearing them all down falls back to reload.
+ * Claims carry a priority because two surfaces can be visible at once: an open
+ * PR tab in the content pane and the Diffs list beside it. The content pane
+ * wins — it's what the user is looking at. Within a priority the most recent
+ * claim wins, so switching between PR tabs leaves the right one in charge.
  */
-let current: (() => void) | null = null;
+export type ReloadPriority = "sidebar" | "content";
 
-/** Claim ⌘R. Returns an unregister that restores the previous claimant. */
-export function setReloadOverride(fn: () => void): () => void {
-  const prev = current;
-  current = fn;
+const RANK: Record<ReloadPriority, number> = { sidebar: 0, content: 1 };
+
+interface Claim {
+  fn: () => void;
+  rank: number;
+  seq: number;
+}
+
+let claims: Claim[] = [];
+let nextSeq = 0;
+
+/** Claim ⌘R. Returns an unregister that drops this claim. */
+export function setReloadOverride(
+  fn: () => void,
+  priority: ReloadPriority = "content",
+): () => void {
+  const claim: Claim = { fn, rank: RANK[priority], seq: nextSeq++ };
+  claims.push(claim);
   return () => {
-    // Only restore if we're still the active claimant — guards against
-    // out-of-order cleanup when several overrides mount/unmount.
-    if (current === fn) current = prev;
+    claims = claims.filter((c) => c !== claim);
   };
 }
 
 /** Invoked when main forwards a ⌘R press. */
 export function handleReloadRequest() {
-  if (current) current();
+  let best: Claim | null = null;
+  for (const c of claims) {
+    if (!best || c.rank > best.rank || (c.rank === best.rank && c.seq > best.seq))
+      best = c;
+  }
+  if (best) best.fn();
   else window.location.reload();
 }

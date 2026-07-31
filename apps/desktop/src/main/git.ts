@@ -219,32 +219,26 @@ export async function getStatus(
       hasUpstream: false,
     };
   }
-  const [branchRes, statusRes] = await Promise.all([
-    run(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
-    // --untracked-files=all lists each untracked file individually instead of
-    // collapsing a fully-untracked directory into a single "dir/" entry.
-    run(cwd, [
-      "status",
-      "--porcelain=v1",
-      "--no-renames",
-      "--untracked-files=all",
-    ]),
+  // One spawn answers all four questions. `--branch` adds the `## ` header
+  // carrying branch, upstream and ahead-count, which used to cost a `rev-parse`
+  // and a `rev-list` of their own — three processes per repo on every refresh,
+  // and refreshes are watcher-driven so they run whenever the tree moves.
+  // --untracked-files=all lists each untracked file individually instead of
+  // collapsing a fully-untracked directory into a single "dir/" entry.
+  const statusRes = await run(cwd, [
+    "status",
+    "--porcelain=v1",
+    "--branch",
+    "--no-renames",
+    "--untracked-files=all",
   ]);
-  const branchRaw = branchRes.stdout.trim();
-  const branch = !branchRaw || branchRaw === "HEAD" ? null : branchRaw;
 
-  // Commits ahead of the upstream (for the push button). No upstream → 0.
-  let ahead = 0;
-  let hasUpstream = false;
-  const up = await run(cwd, ["rev-list", "--count", "@{upstream}..HEAD"]);
-  if (up.code === 0) {
-    hasUpstream = true;
-    ahead = parseInt(up.stdout.trim() || "0", 10) || 0;
-  }
+  const lines = statusRes.stdout.split("\n");
+  const head = parseBranchHeader(lines[0] ?? "");
 
   const files: GitFileStatus[] = [];
-  for (const line of statusRes.stdout.split("\n")) {
-    if (!line || line.length < 3) continue;
+  for (const line of lines) {
+    if (!line || line.length < 3 || line.startsWith("## ")) continue;
     const x = line[0];
     const y = line[1];
     const path = line.slice(3);
@@ -253,7 +247,48 @@ export async function getStatus(
     files.push({ path, staged, unstaged, code: `${x}${y}` });
   }
 
-  return { available: true, branch, files, ahead, hasUpstream };
+  return {
+    available: true,
+    branch: head.branch,
+    files,
+    ahead: head.ahead,
+    hasUpstream: head.hasUpstream,
+  };
+}
+
+/**
+ * Parse porcelain-v1's branch header. Shapes git emits:
+ *   `## main`                              — no upstream
+ *   `## main...origin/main`                — upstream, in sync
+ *   `## main...origin/main [ahead 2, behind 1]`
+ *   `## HEAD (no branch)`                  — detached
+ *   `## No commits yet on main...origin/main`
+ * A ref name can't contain two consecutive dots, so `...` is an unambiguous
+ * separator.
+ */
+function parseBranchHeader(line: string): {
+  branch: string | null;
+  ahead: number;
+  hasUpstream: boolean;
+} {
+  const none = { branch: null, ahead: 0, hasUpstream: false };
+  if (!line.startsWith("## ")) return none;
+  const body = line.slice(3).trim();
+  if (body.startsWith("HEAD (no branch)")) return none;
+
+  const fresh = /^No commits yet on (.+)$/.exec(body);
+  const rest = fresh ? fresh[1] : body;
+
+  const sep = rest.indexOf("...");
+  if (sep === -1) return { branch: rest || null, ahead: 0, hasUpstream: false };
+
+  const branch = rest.slice(0, sep);
+  const ahead = /\[(?:[^\]]*, )?ahead (\d+)/.exec(rest.slice(sep + 3));
+  return {
+    branch: branch || null,
+    ahead: ahead ? parseInt(ahead[1], 10) : 0,
+    hasUpstream: true,
+  };
 }
 
 /** Remote the publish path below pushes a branch to on its first push. */

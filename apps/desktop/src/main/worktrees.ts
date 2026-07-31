@@ -9,6 +9,7 @@ import {
 import { encodeCwd, safeSegment } from "./providers/claude-code/encoding";
 import { PLAN_DIR } from "./plan-config";
 import { discoverRepos, invalidateRepoLayout } from "./git";
+import { restartWorktreeWatch } from "./worktree-watcher";
 import { deleteScratch } from "./scratch-store";
 import type { DiscoveredRepo } from "../shared-types";
 
@@ -288,8 +289,10 @@ export async function addReposToWorktree(
     toAdd.map((repo) => ({ repo, base: input.bases[repo.subPath].trim() })),
   );
   const created = await addCheckouts(starts, rec.rootPath, branch);
-  // The worktree spans more repos now — its cached layout is stale.
+  // The worktree spans more repos now — its cached layout is stale, and the
+  // file watcher's roots (one git dir per repo) were resolved from that layout.
   invalidateRepoLayout(rec.encoded);
+  await restartWorktreeWatch(rec.encoded);
 
   const updated: StoredWorktree = { ...rec, repos: [...rec.repos, ...created] };
   await updateWorktreeRecord(updated);
