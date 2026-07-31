@@ -28,6 +28,9 @@ interface Props {
   onClose?: () => void;
   /** ⌘W while this terminal is focused asks to close it (scratch shells). */
   onRequestClose?: () => void;
+  /** The attach result from main: `error` when no pty is running and none could
+   *  be started, so the owner can drop the pane instead of showing a dead one. */
+  onOpened?: (result: { error?: string }) => void;
   /** Changing this value forces a refit (e.g. the dock height during a drag). */
   fitSignal?: number;
 }
@@ -132,6 +135,13 @@ function buildTerminalTheme(): ITheme {
   };
 }
 
+// How many lines of output stay scrollable (and so selectable/copyable) before
+// the oldest are dropped. xterm allocates a row lazily, as `3 * cols` uint32s —
+// ~1.4 KB per 120-column line — so an idle terminal costs nothing and the cap
+// only bites on output actually produced: a run that really emits 100k lines
+// holds ~140 MB. Rendering is unaffected either way (only the viewport paints).
+const SCROLLBACK_LINES = 100_000;
+
 /**
  * An embedded terminal bound to the project's pty (cwd = project dir). The pty
  * lives in the main process and persists across ⌘J toggles and project
@@ -149,6 +159,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       visible,
       onClose,
       onRequestClose,
+      onOpened,
       fitSignal,
     },
     ref,
@@ -158,9 +169,11 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     const fitRef = useRef<FitAddon | null>(null);
     const { theme } = useTheme();
 
-    // Held in a ref so changing the callback doesn't tear down the pty.
+    // Held in refs so changing a callback doesn't tear down the pty.
     const onRequestCloseRef = useRef(onRequestClose);
     onRequestCloseRef.current = onRequestClose;
+    const onOpenedRef = useRef(onOpened);
+    onOpenedRef.current = onOpened;
 
     // While hidden, output is buffered (capped) instead of parsed/rendered —
     // a hidden xterm processing a streaming TUI burns the main thread for
@@ -201,8 +214,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
         fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
         fontSize: 12,
         cursorBlink: true,
-        // The DOM renderer repaints aggressively; scrollback is cheap.
-        scrollback: 10000,
+        scrollback: SCROLLBACK_LINES,
         theme: buildTerminalTheme(),
       });
       const fit = new FitAddon();
@@ -315,15 +327,22 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
 
       scheduleFit();
       // Attaches to the pty, creating it only if nothing has yet — a chat pane
-      // finds one its engine already started.
-      void window.electronAPI.terminalOpen(
-        id,
-        encoded,
-        term.cols,
-        term.rows,
-        initialCommand,
-        subPath,
-      );
+      // finds one its engine already started. The result is reported back: a
+      // failed attach leaves NO pty, so an owner that waits for `exit` to tell
+      // it the pane is dead would wait forever.
+      let attached = true;
+      void window.electronAPI
+        .terminalOpen(
+          id,
+          encoded,
+          term.cols,
+          term.rows,
+          initialCommand,
+          subPath,
+        )
+        .then((r) => {
+          if (attached) onOpenedRef.current?.({ error: r.error });
+        });
 
       const offData = window.electronAPI.onTerminalData((chunk) => {
         if (chunk.id !== id) return;
@@ -368,6 +387,7 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       ro.observe(host);
 
       return () => {
+        attached = false;
         if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
         offData();
         inputSub.dispose();

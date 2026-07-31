@@ -2,6 +2,7 @@ import type { IPty } from "node-pty";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { defaultShell, shellEnv } from "./shell-env";
 import { resolveWorkspaceCwd } from "./workspace";
+import { descendantPids } from "./process-tree";
 import type { TerminalChunk, TerminalInfo } from "../shared-types";
 
 interface Session {
@@ -19,6 +20,13 @@ interface Session {
    *  whether the renderer's xterm is visible — so we can read the rendered
    *  screen (the input box vs. an approval menu) even from the diffs tab. */
   screen: HeadlessTerminal;
+  /** Teardown (deregister + `exit`) runs exactly once: from the pty's own exit,
+   *  or from a kill that verified the process is gone. */
+  tornDown: boolean;
+  /** Escalation/verification timers for a kill in flight. */
+  killTimers: ReturnType<typeof setTimeout>[];
+  /** Resolvers waiting for this pty to actually be gone. */
+  exitWaiters: (() => void)[];
 }
 
 /**
@@ -158,8 +166,15 @@ export async function openTerminal(
       pendingOut: "",
       flushTimer: null,
       screen,
+      tornDown: false,
+      killTimers: [],
+      exitWaiters: [],
     };
     pty.onData((data) => {
+      // The socket can still flush buffered bytes after teardown disposed the
+      // screen; writing to a disposed emulator throws inside node-pty's own
+      // callback, where nothing catches it.
+      if (session.tornDown) return;
       session.screen.write(data);
       session.pendingOut += data;
       if (session.flushTimer) return;
@@ -170,18 +185,7 @@ export async function openTerminal(
         if (out) emitData({ id: session.id, data: out });
       }, 16);
     });
-    pty.onExit(() => {
-      if (session.flushTimer) clearTimeout(session.flushTimer);
-      if (session.pendingOut)
-        emitData({ id: session.id, data: session.pendingOut });
-      try {
-        session.screen.dispose();
-      } catch {
-        /* already disposed */
-      }
-      sessions.delete(session.id);
-      emitExit(session.id);
-    });
+    pty.onExit(() => teardown(session));
     sessions.set(id, session);
     if (initialCommand) {
       // The shell buffers stdin until its prompt is ready, so a write right
@@ -204,7 +208,13 @@ export async function openTerminal(
 }
 
 export function writeTerminal(id: string, data: string) {
-  sessions.get(id)?.pty.write(data);
+  const s = sessions.get(id);
+  if (!s) return;
+  try {
+    s.pty.write(data);
+  } catch {
+    /* the pty died between its last read and its exit event */
+  }
 }
 
 /** Whether a pty is alive under this id. */
@@ -224,7 +234,7 @@ export function terminalPid(id: string): number | null {
 export function sendKeys(id: string, keys: string[]) {
   if (!sessions.has(id)) return;
   keys.forEach((key, i) => {
-    setTimeout(() => sessions.get(id)?.pty.write(key), i * 60);
+    setTimeout(() => writeTerminal(id, key), i * 60);
   });
 }
 
@@ -239,21 +249,134 @@ export function resizeTerminal(id: string, cols: number, rows: number) {
   }
 }
 
-export function killTerminal(id: string) {
-  const s = sessions.get(id);
-  if (!s) return;
-  if (s.flushTimer) clearTimeout(s.flushTimer);
-  try {
-    s.pty.kill();
-  } catch {
-    // already gone
+/**
+ * Deregister a pty and announce it — the ONE place a session leaves the table.
+ * Runs only when the process is really gone (its own exit, or a kill we
+ * verified), so everything keyed on "is there a pty under this id" stays true
+ * while one is shutting down: input and resize still reach it, another kill
+ * escalates instead of vanishing, and a re-open attaches instead of spawning a
+ * second pty on top of a live one.
+ */
+function teardown(session: Session) {
+  if (session.tornDown) return;
+  session.tornDown = true;
+  if (session.flushTimer) {
+    clearTimeout(session.flushTimer);
+    session.flushTimer = null;
+  }
+  for (const t of session.killTimers) clearTimeout(t);
+  session.killTimers = [];
+  if (session.pendingOut) {
+    emitData({ id: session.id, data: session.pendingOut });
+    session.pendingOut = "";
   }
   try {
-    s.screen.dispose();
+    session.screen.dispose();
   } catch {
     /* already disposed */
   }
-  sessions.delete(id);
+  if (sessions.get(session.id) === session) sessions.delete(session.id);
+  const waiters = session.exitWaiters;
+  session.exitWaiters = [];
+  for (const w of waiters) w();
+  emitExit(session.id);
+}
+
+// A polite SIGHUP gets this long before we stop asking. Sized for a dev server
+// draining connections, not for an unbounded shutdown hook.
+const KILL_ESCALATE_MS = 2_000;
+// After SIGKILL, how long the kernel gets before we check whether it worked.
+const KILL_VERIFY_MS = 500;
+
+/** Is `pid` still a live process? EPERM = alive, just not ours to signal. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function signalPid(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    /* already gone, or not ours */
+  }
+}
+
+/**
+ * Signal the pty's shell AND everything it spawned. node-pty's `kill()` only
+ * signals the shell (`process.kill(pid, 'SIGHUP')`, errors swallowed), and an
+ * interactive shell runs each job in its own process group — so the command
+ * itself is only reachable by walking the process tree. Skipping that is what
+ * leaves a "restarted" dev server's old process alive and still holding its
+ * port. Children go first: felling the shell first reparents them away.
+ */
+function signalTree(session: Session, signal: NodeJS.Signals, fresh: boolean) {
+  const root = session.pty.pid;
+  const signalRoot = () => {
+    signalPid(root, signal);
+    // The shell is a session leader (forkpty calls setsid), so its pgid is its
+    // pid — this reaches anything left in the shell's own group.
+    signalPid(-root, signal);
+  };
+  descendantPids(root, fresh).then(
+    (pids) => {
+      for (const pid of pids) signalPid(pid, signal);
+      signalRoot();
+    },
+    () => signalRoot(),
+  );
+}
+
+/**
+ * Ask a pty to stop. This is a REQUEST, not an event: the session stays
+ * registered until the process is verifiably gone. SIGHUP first, SIGKILL if
+ * that didn't take, and a second call while one is in flight skips straight to
+ * the hard kill (so clicking "restart" again on a wedged command does escalate
+ * rather than nothing).
+ */
+export function killTerminal(id: string) {
+  const s = sessions.get(id);
+  if (!s || s.tornDown) return;
+  if (s.killTimers.length > 0) {
+    hardKill(s);
+    return;
+  }
+  signalTree(s, "SIGHUP", false);
+  s.killTimers.push(setTimeout(() => hardKill(s), KILL_ESCALATE_MS));
+}
+
+function hardKill(session: Session) {
+  if (session.tornDown) return;
+  for (const t of session.killTimers) clearTimeout(t);
+  session.killTimers = [];
+  // Fresh `ps` this time: anything spawned since the first sweep is exactly
+  // what's still holding the port.
+  signalTree(session, "SIGKILL", true);
+  session.killTimers.push(
+    setTimeout(() => verifyKilled(session), KILL_VERIFY_MS),
+  );
+}
+
+function verifyKilled(session: Session) {
+  if (session.tornDown) return; // the pty reported its own exit — nothing to do
+  session.killTimers = [];
+  if (pidAlive(session.pty.pid)) {
+    // We can't confirm it stopped, so we don't claim it did: the pane keeps
+    // showing it as running and the next click escalates again.
+    emitData({
+      id: session.id,
+      data: `\r\n\x1b[31m[plan] couldn't stop this command — pid ${session.pty.pid} is still running.\x1b[0m\r\n`,
+    });
+    return;
+  }
+  // Verifiably gone, but node-pty never delivered `exit` — its exit event is
+  // gated on the pty socket closing, which can be missed. Close it out here so
+  // nothing is left waiting on an event that will never arrive.
+  teardown(session);
 }
 
 /**
@@ -264,34 +387,33 @@ export function killTerminal(id: string) {
  */
 export function killTerminalAndWait(
   id: string,
-  timeoutMs = 4000,
+  timeoutMs = 6000,
 ): Promise<void> {
   const s = sessions.get(id);
   if (!s) return Promise.resolve();
   return new Promise<void>((resolve) => {
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
       resolve();
     };
-    const timer = setTimeout(finish, timeoutMs);
-    try {
-      s.pty.onExit(() => {
-        clearTimeout(timer);
-        finish();
-      });
-    } catch {
-      clearTimeout(timer);
-      finish();
-      return;
-    }
+    // Long enough to cover the full SIGHUP → SIGKILL → verify escalation.
+    timer = setTimeout(finish, timeoutMs);
+    s.exitWaiters.push(finish);
     killTerminal(id);
   });
 }
 
+/** Quit path: signal every pty synchronously — no `ps` sweep, since the app is
+ *  going away and nothing would be alive to run the escalation timers. */
 export function killAllTerminals() {
-  for (const enc of [...sessions.keys()]) killTerminal(enc);
+  for (const s of [...sessions.values()]) {
+    signalPid(s.pty.pid, "SIGHUP");
+    signalPid(-s.pty.pid, "SIGHUP");
+  }
 }
 
 /** The visible screen of terminal `id` as plain text rows (trailing ws trimmed).

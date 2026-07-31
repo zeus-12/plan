@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import type { CommandEntry, DiscoveredRepo } from "../../shared-types";
 import { commandTerminalId } from "../../terminal-ids";
@@ -76,6 +76,11 @@ function MiniPlayIcon() {
   );
 }
 
+// How long a kill request waits for main to report the stop before we go ask
+// what's actually running. Comfortably past main's SIGHUP → SIGKILL → verify
+// escalation, so the normal path is always the exit event, never this.
+const KILL_WATCHDOG_MS = 5_000;
+
 // The one prominent action in the header — a proper filled button, not a ghost.
 const runBtnCls =
   "flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-[var(--text)] px-2.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--bg)] transition-opacity hover:opacity-90";
@@ -113,9 +118,83 @@ export function CommandsTerminal({
   const [started, setStarted] = useState<Record<string, boolean>>({});
   const [active, setActive] = useState<string | null>(entries[0]?.id ?? null);
   const [probed, setProbed] = useState(false);
-  // Entry ids whose next exit (from our own kill) is immediately followed by a
+  // Why an entry's pty couldn't be attached, straight from main's open result.
+  // Shown in place of the dead pane a failed spawn would otherwise leave.
+  const [openError, setOpenError] = useState<Record<string, string>>({});
+  // Entry ids whose next stop (from our own kill) is immediately followed by a
   // fresh start — that's a per-tab "Restart".
   const pendingRestart = useRef<Set<string>>(new Set());
+  // Entry ids main has confirmed a live pty for. Only these get reconciled
+  // against main's pty table: one that's still mounting hasn't been answered
+  // yet and must not be mistaken for a pty that died.
+  const confirmed = useRef<Set<string>>(new Set());
+  // Kill requests still waiting to be told the pty stopped.
+  const killWatchdogs = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  // Read by callbacks that outlive the render they were made in.
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
+  const clearWatchdog = useCallback((id: string) => {
+    const t = killWatchdogs.current.get(id);
+    if (t) clearTimeout(t);
+    killWatchdogs.current.delete(id);
+  }, []);
+
+  useEffect(() => {
+    const timers = killWatchdogs.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
+
+  // Everything that means "this entry's pty is gone" funnels through here: the
+  // real exit event, and a reconcile that found main has no pty under that id.
+  const markStopped = useCallback(
+    (id: string) => {
+      confirmed.current.delete(id);
+      clearWatchdog(id);
+      setStarted((s) => {
+        if (!s[id]) return s;
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
+      if (pendingRestart.current.has(id)) {
+        pendingRestart.current.delete(id);
+        // A separate task, not the same batch: the pane has to actually unmount
+        // before it re-mounts, since mounting is what re-runs the command. A
+        // timer rather than rAF — rAF doesn't fire while the window is hidden,
+        // which strands the restart until the app is brought forward.
+        setTimeout(() => setStarted((s) => ({ ...s, [id]: true })), 0);
+      }
+    },
+    [clearWatchdog],
+  );
+
+  // Ask main which ptys actually exist, and drop any tab we show as running
+  // that doesn't. Without this a single missed `exit` stranded a tab as
+  // "running" forever: typing went nowhere and rerun killed a pty main had
+  // already forgotten, so nothing happened.
+  const reconcile = useCallback(async () => {
+    let ptys;
+    try {
+      ptys = await window.electronAPI.terminalList();
+    } catch {
+      return; // couldn't ask — leave the view as it is rather than guess
+    }
+    const live = new Set(ptys.map((t) => t.id));
+    for (const e of entriesRef.current) {
+      if (
+        confirmed.current.has(e.id) &&
+        !live.has(commandTerminalId(kind, encoded, e.id))
+      ) {
+        markStopped(e.id);
+      }
+    }
+  }, [encoded, kind, markStopped]);
 
   // Keep the active sub-tab pointing at a still-present entry.
   useEffect(() => {
@@ -135,6 +214,12 @@ export function CommandsTerminal({
   useEffect(() => {
     let cancelled = false;
     setProbed(false);
+    // A pending restart belongs to the worktree and entry set it was asked for.
+    // Carrying one across a switch would re-run a command in the new worktree
+    // that nobody asked to restart.
+    pendingRestart.current.clear();
+    for (const t of killWatchdogs.current.values()) clearTimeout(t);
+    killWatchdogs.current.clear();
     Promise.all(
       entries.map(async (e) => {
         const s = await window.electronAPI.terminalStatus(ptyId(e));
@@ -143,8 +228,15 @@ export function CommandsTerminal({
     ).then((pairs) => {
       if (cancelled) return;
       const next: Record<string, boolean> = {};
-      for (const [id, running] of pairs) if (running) next[id] = true;
+      const live = new Set<string>();
+      for (const [id, running] of pairs) {
+        if (!running) continue;
+        next[id] = true;
+        live.add(id);
+      }
+      confirmed.current = live;
       setStarted(next);
+      setOpenError({});
       setProbed(true);
     });
     return () => {
@@ -158,42 +250,46 @@ export function CommandsTerminal({
   useEffect(
     () =>
       window.electronAPI.onTerminalExit((exited) => {
-        const entry = entries.find((e) => ptyId(e) === exited);
-        if (!entry) return;
-        // Drop the tab to idle first (unmounts its TerminalPanel). A pending
-        // restart then re-mounts a fresh panel next frame — the remount is what
-        // re-runs the command (mounting calls terminalOpen with initialCommand);
-        // keeping it mounted would leave a dead pane with nothing re-run.
-        setStarted((s) => {
-          const next = { ...s };
-          delete next[entry.id];
-          return next;
-        });
-        if (pendingRestart.current.has(entry.id)) {
-          pendingRestart.current.delete(entry.id);
-          requestAnimationFrame(() =>
-            setStarted((s) => ({ ...s, [entry.id]: true })),
-          );
-        }
+        const entry = entriesRef.current.find((e) => ptyId(e) === exited);
+        if (entry) markStopped(entry.id);
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entryKey, encoded, kind],
+    [encoded, kind, markStopped],
   );
 
+  // Re-check against main whenever this pane comes into view or the window is
+  // focused: cheap (one IPC, no process scan) and it heals any tab whose pty
+  // died while we weren't listening.
+  useEffect(() => {
+    if (!visible || !probed) return;
+    void reconcile();
+    const onFocus = () => void reconcile();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [visible, probed, reconcile]);
+
   const startEntry = (id: string) => setStarted((s) => ({ ...s, [id]: true }));
-  // The single header action: (re)run every command. Idle entries start; already-
-  // running ones restart (kill → the exit handler re-mounts a fresh pty). This is
-  // the sole start/restart control now — there's no separate Restart button.
-  // (Re)run just one command, leaving the others alone: idle → start, running →
-  // restart (kill; the exit handler re-mounts a fresh pty).
+  // (Re)run one command, leaving the others alone: idle → start, running → ask
+  // main to stop it, and restart once the stop is confirmed.
   const runEntry = (e: CommandEntry) => {
     if (!e.command.trim()) return;
-    if (started[e.id]) {
-      pendingRestart.current.add(e.id);
-      window.electronAPI.terminalKill(ptyId(e));
-    } else {
+    if (!started[e.id]) {
       startEntry(e.id);
+      return;
     }
+    pendingRestart.current.add(e.id);
+    window.electronAPI.terminalKill(ptyId(e));
+    // Main escalates SIGHUP → SIGKILL and only reports a stop it verified, so
+    // this can legitimately take a few seconds. If nothing arrives by then, ask
+    // main what's really running rather than waiting on the event forever.
+    clearWatchdog(e.id);
+    killWatchdogs.current.set(
+      e.id,
+      setTimeout(() => {
+        killWatchdogs.current.delete(e.id);
+        void reconcile();
+      }, KILL_WATCHDOG_MS),
+    );
   };
   // The header action: (re)run every command at once.
   const runAll = () => {
@@ -320,13 +416,37 @@ export function CommandsTerminal({
                 initialCommand={e.command.trim()}
                 visible={visible && e.id === active}
                 fitSignal={fitSignal}
+                onOpened={({ error }) => {
+                  if (!error) {
+                    confirmed.current.add(e.id);
+                    setOpenError((prev) =>
+                      e.id in prev
+                        ? Object.fromEntries(
+                            Object.entries(prev).filter(([k]) => k !== e.id),
+                          )
+                        : prev,
+                    );
+                    return;
+                  }
+                  // Nothing was started, so no exit will ever arrive for it.
+                  // Drop the pane and say why, rather than leave a dead
+                  // terminal that silently swallows everything typed into it.
+                  pendingRestart.current.delete(e.id);
+                  markStopped(e.id);
+                  setOpenError((prev) => ({ ...prev, [e.id]: error }));
+                }}
               />
             </div>
           ) : null,
         )}
 
         {activeEntry && !started[activeEntry.id] && (
-          <div className="group absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg)] px-6 text-center">
+          <div className="group absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--bg)] px-6 text-center">
+            {openError[activeEntry.id] && (
+              <p className="max-w-[36ch] font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                Couldn&apos;t start: {openError[activeEntry.id]}
+              </p>
+            )}
             <button
               onClick={() => startEntry(activeEntry.id)}
               disabled={!activeEntry.command.trim()}
