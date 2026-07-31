@@ -22,8 +22,9 @@ interface MessageOutputProps {
   sendLabel?: string;
   /**
    * When true, the send button claims ⌘↵ as a global shortcut and shows the
-   * hint on the button. Callers set this only while their own input box is
-   * blurred, so the chord doesn't compete with the box's own ⌘↵.
+   * hint on the button — regardless of where focus sits. Text boxes that want
+   * their own ⌘↵ (the comment popover, the edit modal) stop the stroke from
+   * reaching this listener.
    */
   shortcutEnabled?: boolean;
   /**

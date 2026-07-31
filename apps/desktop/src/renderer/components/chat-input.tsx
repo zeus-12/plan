@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -13,6 +14,7 @@ import {
   $isRangeSelection,
   COMMAND_PRIORITY_HIGH,
   COMMAND_PRIORITY_LOW,
+  HISTORY_MERGE_TAG,
   KEY_ENTER_COMMAND,
   PASTE_COMMAND,
   UNDO_COMMAND,
@@ -25,6 +27,14 @@ import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { Kbd } from "@plan/shared/components/ui/kbd";
+import {
+  capHistoryDepth,
+  clearLastSent,
+  readLastSent,
+  saveHistory,
+  takeHistory,
+  writeLastSent,
+} from "../lib/composer-memory";
 import { ReferenceNode } from "./reference-node";
 import { FileMentionPlugin, SkillMentionPlugin } from "./mention-plugins";
 import { isMentionMenuOpen } from "./mention-menu-state";
@@ -57,13 +67,13 @@ interface Props {
   blocked?: boolean;
   /** Invoked when the user tries to send while blocked (reveals the terminal). */
   onBlocked?: () => void;
-  /** Reports the composer's focus state so siblings can adjust their own
-   *  shortcuts (e.g. the compose buffer only claims ⌘↵ when this is blurred). */
-  onFocusChange?: (focused: boolean) => void;
   /** ⌘Z right after "Add to chat" (while the inserted text is untouched) undoes
    *  the move: the composer strips the text it appended and calls this so the
    *  parent can restore the comments it cleared. */
   onAddToChatUndo?: () => void;
+  /** Comments are waiting in the pending-comments panel, so ⌘↵ belongs to that
+   *  panel's "Add to chat". With nothing pending, ⌘↵ sends instead. */
+  commentsPending?: boolean;
   /** This session's last turn died on a recoverable API error and nothing has
    *  been sent since — offer the one-click nudge. */
   canContinue?: boolean;
@@ -168,8 +178,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     autoFocus,
     blocked,
     onBlocked,
-    onFocusChange,
     onAddToChatUndo,
+    commentsPending,
     canContinue,
     atSessionLimit,
     sessionLimitReset,
@@ -194,10 +204,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   // can't land a caret — the editor is read-only. We park it here and fire it
   // the moment the session starts and the editor turns editable.
   const pendingFocusRef = useRef<(() => void) | null>(null);
-  // Last message sent from THIS session's composer (serialized editor state) —
-  // ⌘Z restores it, chips and all, into an empty box so an accidental send
-  // (or lost text) can be recovered verbatim.
-  const lastSentRef = useRef<string | null>(null);
   // Serialized draft from just before an "Add to chat" insertion — what ⌘Z
   // restores. Kept only while the inserted text is untouched: the update
   // listener in {@link CommandsPlugin} clears it the moment the user edits the
@@ -207,6 +213,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   // handler so it never needs re-registering.
   const onAddToChatUndoRef = useRef(onAddToChatUndo);
   onAddToChatUndoRef.current = onAddToChatUndo;
+  const commentsPendingRef = useRef(commentsPending);
+  commentsPendingRef.current = commentsPending;
 
   const clearAttachments = useCallback(() => {
     setAttachments((prev) => {
@@ -215,11 +223,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     });
     setPreview(null);
   }, []);
-
-  // Browsers don't reliably fire `blur` when the editor unmounts (tab switch,
-  // session change), so tell the parent the composer is gone — otherwise it
-  // would keep treating a non-existent box as focused.
-  useEffect(() => () => onFocusChange?.(false), [onFocusChange]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -254,11 +257,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
 
   // Restore (or clear, on session switch) the pasted images for this session,
   // verifying each temp file still exists — the OS can purge it, and we never
-  // show or send a path we can't confirm. The undo buffer resets too so ⌘Z
-  // can't pull another chat's text back.
+  // show or send a path we can't confirm.
   useEffect(() => {
     loadedRef.current = false;
-    lastSentRef.current = null;
     let cancelled = false;
     setAttachments((prev) => {
       prev.forEach((a) => revokeIfBlob(a.previewUrl));
@@ -312,7 +313,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     // terminal can type them as a real path the way a direct paste does.
     onSend(text, imagePaths);
     // Snapshot the full editor state so ⌘Z can bring it back verbatim.
-    lastSentRef.current = JSON.stringify(editor.getEditorState().toJSON());
+    writeLastSent(
+      sessionId,
+      projectEncoded,
+      JSON.stringify(editor.getEditorState().toJSON()),
+    );
     editor.update(() => {
       const root = $getRoot();
       root.clear();
@@ -330,6 +335,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     onBlocked,
     onSend,
     sessionId,
+    projectEncoded,
     clearAttachments,
   ]);
 
@@ -511,32 +517,27 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
               placeholder={null}
               ErrorBoundary={LexicalErrorBoundary}
             />
-            <HistoryPlugin />
             <EditorRefPlugin editorRef={editorRef} />
             <EditablePlugin inactive={!!inactive} />
-            <DraftPlugin
+            <SessionMemoryPlugin
               sessionId={sessionId}
+              projectEncoded={projectEncoded}
               onEmptyChange={setIsEmpty}
               onBashModeChange={setBashMode}
             />
             <CommandsPlugin
               sendRef={sendRef}
-              lastSentRef={lastSentRef}
+              sessionIdRef={sessionRef}
               addToChatUndoRef={addToChatUndoRef}
               onAddToChatUndoRef={onAddToChatUndoRef}
+              commentsPendingRef={commentsPendingRef}
             />
             <ImagePastePlugin addImageRef={addImageRef} inactive={!!inactive} />
             <FocusPlugin
               autoFocus={!!autoFocus}
               sessionId={sessionId}
-              onFocus={() => {
-                setFocused(true);
-                onFocusChange?.(true);
-              }}
-              onBlur={() => {
-                setFocused(false);
-                onFocusChange?.(false);
-              }}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
             />
             <FileMentionPlugin projectEncoded={projectEncoded} />
             <SkillMentionPlugin projectEncoded={projectEncoded} />
@@ -665,43 +666,78 @@ function EditablePlugin({ inactive }: { inactive: boolean }) {
   return null;
 }
 
-/** Load the draft on session switch; persist (debounced) on every change. */
-function DraftPlugin({
+/**
+ * Everything this chat's composer remembers: its undo history, the draft it
+ * swaps in on a session change, and the debounced persistence of that draft.
+ *
+ * History and the swap live together on purpose. The swap must not land on the
+ * incoming chat's undo stack, which means it has to run after that stack is
+ * registered — rendering HistoryPlugin as our own child makes React guarantee
+ * that (child effects before parent), instead of it resting on the order two
+ * siblings happen to appear in.
+ */
+function SessionMemoryPlugin({
   sessionId,
+  projectEncoded,
   onEmptyChange,
   onBashModeChange,
 }: {
   sessionId: string;
+  projectEncoded: string;
   onEmptyChange: (empty: boolean) => void;
   onBashModeChange: (bash: boolean) => void;
 }) {
   const [editor] = useLexicalComposerContext();
   const firstSession = useRef(true);
 
-  // initialConfig.editorState already loaded the first session's draft; only
-  // swap when the session actually changes.
+  // Rebuilt per editor: Lexical's undo() applies a popped entry to the editor
+  // named IN that entry, so a stack from a previous mount would drive a dead
+  // one and ⌘Z would do nothing.
+  const history = useMemo(
+    () => takeHistory(editor, sessionId),
+    [editor, sessionId],
+  );
+
   useEffect(() => {
-    if (firstSession.current) {
-      firstSession.current = false;
-      return;
-    }
-    const raw = readDraft(sessionId);
-    if (raw) {
-      try {
-        editor.setEditorState(editor.parseEditorState(raw));
-        onEmptyChange(false);
-        return;
-      } catch {
-        // fall through to a clean slate
+    // initialConfig.editorState already loaded the first session's draft; only
+    // swap when the session actually changes.
+    if (!firstSession.current) {
+      const raw = readDraft(sessionId);
+      let restored = false;
+      if (raw) {
+        try {
+          editor.setEditorState(editor.parseEditorState(raw), {
+            tag: HISTORY_MERGE_TAG,
+          });
+          onEmptyChange(false);
+          restored = true;
+        } catch {
+          // fall through to a clean slate
+        }
+      }
+      if (!restored) {
+        editor.update(
+          () => {
+            const root = $getRoot();
+            root.clear();
+            root.append($createParagraphNode());
+          },
+          { tag: HISTORY_MERGE_TAG },
+        );
+        onEmptyChange(true);
       }
     }
-    editor.update(() => {
-      const root = $getRoot();
-      root.clear();
-      root.append($createParagraphNode());
-    });
-    onEmptyChange(true);
-  }, [editor, sessionId, onEmptyChange]);
+    firstSession.current = false;
+    // What's on screen is where undo steps back FROM. A swap sets this itself,
+    // but a fresh mount takes its draft through initialConfig — before any
+    // history listener exists — so the first edit would have nothing to undo to.
+    history.current = { editor, editorState: editor.getEditorState() };
+    const uncap = editor.registerUpdateListener(() => capHistoryDepth(history));
+    return () => {
+      uncap();
+      saveHistory(sessionId, projectEncoded, history);
+    };
+  }, [editor, sessionId, projectEncoded, history, onEmptyChange]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -726,20 +762,22 @@ function DraftPlugin({
     };
   }, [editor, sessionId, onEmptyChange, onBashModeChange]);
 
-  return null;
+  return <HistoryPlugin externalHistoryState={history} />;
 }
 
 /** Enter→send, Shift+Enter→newline, and ⌘Z→undo-add-to-chat / restore-last-sent. */
 function CommandsPlugin({
   sendRef,
-  lastSentRef,
+  sessionIdRef,
   addToChatUndoRef,
   onAddToChatUndoRef,
+  commentsPendingRef,
 }: {
   sendRef: React.MutableRefObject<() => void>;
-  lastSentRef: React.MutableRefObject<string | null>;
+  sessionIdRef: React.MutableRefObject<string>;
   addToChatUndoRef: React.MutableRefObject<{ before: string } | null>;
   onAddToChatUndoRef: React.MutableRefObject<(() => void) | undefined>;
+  commentsPendingRef: React.MutableRefObject<boolean | undefined>;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -755,6 +793,14 @@ function CommandsPlugin({
             const sel = $getSelection();
             if ($isRangeSelection(sel)) sel.insertLineBreak();
           });
+          return true;
+        }
+        // With comments waiting, ⌘↵ belongs to the pending-comments panel —
+        // swallow it here (so the contenteditable doesn't take it as a line
+        // break) and let it bubble to that window listener instead of sending.
+        // With nothing pending there's no panel to claim it, so it sends.
+        if ((e?.metaKey || e?.ctrlKey) && commentsPendingRef.current) {
+          e?.preventDefault();
           return true;
         }
         e?.preventDefault();
@@ -782,15 +828,16 @@ function CommandsPlugin({
           }
         }
 
-        const snap = lastSentRef.current;
-        if (!snap) return false;
         const empty = editor
           .getEditorState()
           .read(() => $getRoot().getTextContent().trim().length === 0);
         if (!empty) return false;
+        const sid = sessionIdRef.current;
+        const snap = readLastSent(sid);
+        if (!snap) return false;
         try {
           editor.setEditorState(editor.parseEditorState(snap));
-          lastSentRef.current = null;
+          clearLastSent(sid);
           return true;
         } catch {
           return false;
@@ -814,7 +861,14 @@ function CommandsPlugin({
       unUndo();
       unDirty();
     };
-  }, [editor, sendRef, lastSentRef, addToChatUndoRef, onAddToChatUndoRef]);
+  }, [
+    editor,
+    sendRef,
+    sessionIdRef,
+    addToChatUndoRef,
+    onAddToChatUndoRef,
+    commentsPendingRef,
+  ]);
 
   return null;
 }

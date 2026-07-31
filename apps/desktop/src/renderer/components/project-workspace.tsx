@@ -81,6 +81,7 @@ import {
   type Tab,
 } from "../lib/tabs-store";
 import { cachedPrTitle } from "../lib/pr-store";
+import { forgetSession, rekeySession } from "../lib/composer-memory";
 import { PrView } from "./pr-view";
 import { TabBar } from "./tab-bar";
 import { ScratchEditor } from "./scratch-editor";
@@ -667,9 +668,6 @@ function ProjectWorkspaceImpl({
   // Composer handle (⌘L focuses it; "Add to chat" appends to it). The text
   // itself lives inside ChatInput so keystrokes don't re-render the workspace.
   const chatInputRef = useRef<ChatInputHandle>(null);
-  // Whether the chat composer holds focus — the compose buffer only claims ⌘↵
-  // (and shows the hint) while it's blurred, so the chord never fights the box.
-  const [chatInputFocused, setChatInputFocused] = useState(false);
 
   // Session ids that currently have an open chat tab — drives transcript loads.
   const chatSessionIds = useMemo(
@@ -743,6 +741,7 @@ function ProjectWorkspaceImpl({
       // then drops it from openedIds. No hidden Claude left running for it.
       if (archived) {
         window.electronAPI.terminalKill(`chat:${project.encoded}:${sessionId}`);
+        forgetSession(sessionId);
       }
       refreshSessions();
     },
@@ -1382,6 +1381,9 @@ function ProjectWorkspaceImpl({
         // that's already on disk ("Session ID already in use"). B is claude's
         // own id, never app-marked-new, so it already resumes correctly.
         forgetNewSession(pending.fromSid);
+        // The composer's memory follows the conversation, not the id it used to
+        // have — what was typed seconds before the fork stays undoable.
+        rekeySession(pending.fromSid, b);
         replaceProjectTab(
           project.encoded,
           chatTabId(pending.fromSid),
@@ -1795,7 +1797,8 @@ function ProjectWorkspaceImpl({
       void window.electronAPI
         .openInExternalApp(app.id, project.encoded, relPath, subPath)
         .then((r) => {
-          if (!r.ok) pushToast({ title: r.error ?? "Could not open that app." }, 4_000);
+          if (!r.ok)
+            pushToast({ title: r.error ?? "Could not open that app." }, 4_000);
         });
     };
     window.addEventListener("keydown", handler);
@@ -2227,11 +2230,7 @@ function ProjectWorkspaceImpl({
                           count={totalComments}
                           onSend={handleAddToChat}
                           sendLabel="Add to chat"
-                          shortcutEnabled={
-                            active &&
-                            activeTab?.kind === "chat" &&
-                            !chatInputFocused
-                          }
+                          shortcutEnabled={active && activeTab?.kind === "chat"}
                           onClear={handleClearComments}
                         />
                       </div>
@@ -2249,8 +2248,8 @@ function ProjectWorkspaceImpl({
                       blocked={awaitingSelection}
                       onBlocked={() => revealChatTerminal(selectedSessionId)}
                       autoFocus={isNewSession(selectedSessionId)}
-                      onFocusChange={setChatInputFocused}
                       onAddToChatUndo={handleUndoAddToChat}
+                      commentsPending={totalComments > 0}
                       canContinue={
                         stalledOnApiError && !chatWorking && !continueInFlight
                       }

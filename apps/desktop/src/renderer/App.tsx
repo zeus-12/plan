@@ -79,6 +79,7 @@ import {
 import { handleReloadRequest } from "./lib/reload-override";
 import { forgetNewSession } from "./lib/new-session-ids";
 import { removeCachedSession } from "./lib/session-cache";
+import { forgetProject } from "./lib/composer-memory";
 import { AttentionSwitcher } from "./attention-switcher";
 import type { AttentionTarget } from "./attention-switcher";
 import { pushToast } from "./lib/toast-store";
@@ -305,6 +306,7 @@ function Shell() {
   const handleSetArchived = useCallback(
     async (encoded: string, archived: boolean) => {
       await window.electronAPI.setProjectArchived(encoded, archived);
+      if (archived) forgetProject(encoded);
       // Reflect in local state immediately so the row moves between sections.
       setProjects((prev) =>
         prev.map((p) => (p.encoded === encoded ? { ...p, archived } : p)),
