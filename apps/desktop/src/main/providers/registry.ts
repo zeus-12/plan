@@ -8,7 +8,7 @@ import {
   type ChatStatus,
   type StartChatOptions,
   type StartChatResult,
-} from "../../chat-engines";
+} from "@/common/chat-engines";
 
 /**
  * The registry of chat engines — the one place that knows which engines exist

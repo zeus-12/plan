@@ -1,4 +1,4 @@
-import type { ElectronAPI } from "../ipc-contract";
+import type { ElectronAPI } from "@/common/ipc-contract";
 
 declare global {
   interface Window {

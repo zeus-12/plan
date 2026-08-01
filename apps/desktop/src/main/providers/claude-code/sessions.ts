@@ -2,7 +2,7 @@ import { readdir, stat } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import { readSessionMeta } from "./transcript";
-import type { SessionListEntry } from "../../../shared-types";
+import type { SessionListEntry } from "@/common/shared-types";
 
 /**
  * Session discovery — the one module that reads `~/.claude/projects/<encoded>`.

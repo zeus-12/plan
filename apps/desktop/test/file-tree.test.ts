@@ -3,7 +3,7 @@ import {
   ancestorDirs,
   buildFileTree,
   flattenFileTree,
-} from "../src/renderer/lib/file-tree";
+} from "@/renderer/features/files/file-tree";
 
 const id = (s: string) => s;
 

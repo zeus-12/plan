@@ -6,7 +6,7 @@ import type {
   ParsedSession,
   SessionDelta,
   SessionDeltaClient,
-} from "../../../shared-types";
+} from "@/common/shared-types";
 
 export type { MessagePart, ConversationMessage, ParsedSession };
 

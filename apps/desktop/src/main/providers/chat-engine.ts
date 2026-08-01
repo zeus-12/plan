@@ -5,7 +5,7 @@ import type {
   ChatStatus,
   StartChatOptions,
   StartChatResult,
-} from "../../chat-engines";
+} from "@/common/chat-engines";
 
 /**
  * The chat-engine SPI — what main needs from anything that can drive a Claude

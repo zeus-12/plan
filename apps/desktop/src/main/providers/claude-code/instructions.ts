@@ -7,7 +7,7 @@ import type {
   ClaudeConfigBundle,
   ClaudeConfigFile,
   ClaudeConfigScope,
-} from "../../../shared-types";
+} from "@/common/shared-types";
 
 /**
  * Resolves and edits the files that shape Claude's behaviour, the same way

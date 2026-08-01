@@ -4,8 +4,8 @@ import { Language, Parser, Query, type QueryCapture } from "web-tree-sitter";
 import {
   foldRangesFromCaptures,
   symbolsFromMatches,
-} from "../src/renderer/code-folding/extract";
-import { FOLD_REGISTRY } from "../src/renderer/code-folding/registry";
+} from "@/renderer/code-folding/extract";
+import { FOLD_REGISTRY } from "@/renderer/code-folding/registry";
 import { readFileSync as read } from "node:fs";
 
 // Vendored assets live next to the engine source.

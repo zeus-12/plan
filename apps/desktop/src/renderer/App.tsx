@@ -16,96 +16,99 @@ import {
 import { TooltipProvider } from "@plan/shared/components/ui/tooltip";
 import { lastSegment } from "@plan/shared/lib/path";
 import { sameJson } from "@plan/shared/lib/utils";
-import type { DiscoveredRepo, ProjectEntry } from "../shared-types";
-import { ProjectSidebar } from "./components/project-sidebar";
-import { WorkspaceHost, type MountTarget } from "./components/workspace-host";
+import type { DiscoveredRepo, ProjectEntry } from "@/common/shared-types";
+import { ProjectSidebar } from "@/renderer/features/projects/project-sidebar";
+import {
+  WorkspaceHost,
+  type MountTarget,
+} from "@/renderer/features/workspace/workspace-host";
 import { Toaster } from "@plan/shared/components/ui/sonner";
-import { SwitcherOverlay } from "./components/switcher-overlay";
-import type { ClaudeConfigScope, WorktreeRecord } from "../shared-types";
-import { UpdateBanner } from "./components/update-banner";
+import { SwitcherOverlay } from "@/renderer/features/workspace/switcher-overlay";
+import type { ClaudeConfigScope, WorktreeRecord } from "@/common/shared-types";
+import { UpdateBanner } from "@/renderer/features/updates/update-banner";
 
 // Modals are only mounted when opened, so lazy-load them — keeps their code
 // (and deps) out of the initial bundle and off the cold-start critical path.
 const SessionsDashboard = lazy(() =>
-  import("./components/sessions-dashboard").then((m) => ({
+  import("@/renderer/features/sessions/sessions-dashboard").then((m) => ({
     default: m.SessionsDashboard,
   })),
 );
 const SettingsModal = lazy(() =>
-  import("./components/settings-modal").then((m) => ({
+  import("@/renderer/features/settings/settings-modal").then((m) => ({
     default: m.SettingsModal,
   })),
 );
 const KeyboardShortcutsModal = lazy(() =>
-  import("./components/keyboard-shortcuts-modal").then((m) => ({
+  import("@/renderer/features/settings/keyboard-shortcuts-modal").then((m) => ({
     default: m.KeyboardShortcutsModal,
   })),
 );
 const ClaudeConfigModal = lazy(() =>
-  import("./components/claude-config-modal").then((m) => ({
+  import("@/renderer/features/settings/claude-config-modal").then((m) => ({
     default: m.ClaudeConfigModal,
   })),
 );
 const NewWorktreeModal = lazy(() =>
-  import("./components/new-worktree-modal").then((m) => ({
+  import("@/renderer/features/worktrees/new-worktree-modal").then((m) => ({
     default: m.NewWorktreeModal,
   })),
 );
 const AddReposModal = lazy(() =>
-  import("./components/add-repos-modal").then((m) => ({
+  import("@/renderer/features/worktrees/add-repos-modal").then((m) => ({
     default: m.AddReposModal,
   })),
 );
 const CreatePrModal = lazy(() =>
-  import("./components/create-pr-modal").then((m) => ({
+  import("@/renderer/features/pr/create-pr-modal").then((m) => ({
     default: m.CreatePrModal,
   })),
 );
 const MoveSessionModal = lazy(() =>
-  import("./components/move-session-modal").then((m) => ({
+  import("@/renderer/features/sessions/move-session-modal").then((m) => ({
     default: m.MoveSessionModal,
   })),
 );
 import { useConfirm } from "./components/confirm-dialog";
-import { useWorktrees } from "./lib/use-worktrees";
-import { useAllWorktrees } from "./lib/use-all-worktrees";
-import { useTabSwitcher } from "./lib/use-tab-switcher";
+import { useWorktrees } from "@/renderer/features/worktrees/use-worktrees";
+import { useAllWorktrees } from "@/renderer/features/worktrees/use-all-worktrees";
+import { useTabSwitcher } from "@/renderer/features/workspace/use-tab-switcher";
 import {
   openProjectTab,
   closeProjectTab,
   makeChatTab,
   chatTabId,
-} from "./lib/tabs-store";
+} from "@/renderer/features/workspace/tabs-store";
 import { handleReloadRequest } from "./lib/reload-override";
-import { forgetNewSession } from "./lib/new-session-ids";
-import { removeCachedSession } from "./lib/session-cache";
-import { relocateSessionUnread } from "./lib/unread-response-store";
-import { chatTerminalId } from "../terminal-ids";
-import { forgetProject } from "./lib/composer-memory";
-import { AttentionSwitcher } from "./attention-switcher";
-import type { AttentionTarget } from "./attention-switcher";
+import { forgetNewSession } from "@/renderer/features/sessions/new-session-ids";
+import { removeCachedSession } from "@/renderer/features/sessions/session-cache";
+import { relocateSessionUnread } from "@/renderer/features/sessions/unread-response-store";
+import { chatTerminalId } from "@/common/terminal-ids";
+import { forgetProject } from "@/renderer/features/chat/composer/composer-memory";
+import { AttentionSwitcher } from "@/renderer/features/sessions/attention-switcher";
+import type { AttentionTarget } from "@/renderer/features/sessions/attention-switcher";
 import { pushToast } from "./lib/toast-store";
 import {
   getMruScopeVersion,
   orderByMru,
   recordUse,
   subscribeMru,
-} from "./lib/mru-store";
+} from "@/renderer/features/workspace/mru-store";
 import {
   toggleBionicReading,
   useApplyTranscriptPrefs,
-} from "./lib/transcript-prefs";
-import { startSessionDoneNotifier } from "./lib/session-done-notifier";
-import { startSessionApprovalNotifier } from "./lib/session-approval-notifier";
-import { startAutoContinueWatcher } from "./lib/auto-continue-watcher";
-import { preloadChatEngines } from "./lib/chat-engine-settings";
-import { preloadExternalApps } from "./lib/external-apps-store";
+} from "@/renderer/features/chat/transcript/transcript-prefs";
+import { startSessionDoneNotifier } from "@/renderer/features/sessions/session-done-notifier";
+import { startSessionApprovalNotifier } from "@/renderer/features/sessions/session-approval-notifier";
+import { startAutoContinueWatcher } from "@/renderer/features/chat/session/auto-continue-watcher";
+import { preloadChatEngines } from "@/renderer/features/chat/session/chat-engine-settings";
+import { preloadExternalApps } from "@/renderer/features/external-apps/external-apps-store";
 import {
   setSessionLabelResolver,
   setSessionNavigator,
-} from "./lib/session-notify";
-import { getCachedSessions } from "./lib/session-cache";
-import { parseChatTerminalId } from "../terminal-ids";
+} from "@/renderer/features/sessions/notifications/session-notify";
+import { getCachedSessions } from "@/renderer/features/sessions/session-cache";
+import { parseChatTerminalId } from "@/common/terminal-ids";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 // The focused worktree persists alongside it so a relaunch lands back on the

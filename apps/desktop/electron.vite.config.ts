@@ -2,16 +2,21 @@ import { resolve } from "path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 
+const srcAlias = { "@": resolve(__dirname, "src") };
+
 export default defineConfig({
   main: {
+    resolve: { alias: srcAlias },
     plugins: [externalizeDepsPlugin()],
   },
   preload: {
+    resolve: { alias: srcAlias },
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
     resolve: {
       alias: {
+        ...srcAlias,
         "@plan/shared": resolve(__dirname, "../../shared"),
       },
     },

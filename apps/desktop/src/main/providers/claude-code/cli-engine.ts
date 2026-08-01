@@ -7,8 +7,8 @@ import {
   rekeyTerminal,
   sendKeys as writeKeys,
   terminalIds,
-} from "../../terminal";
-import { isChatTerminalId } from "../../../terminal-ids";
+} from "@/main/terminal/terminal";
+import { isChatTerminalId } from "@/common/terminal-ids";
 import { claudeStartCommand } from "./cli-command";
 import { submitMessage } from "./tui-input";
 import {
@@ -18,7 +18,7 @@ import {
   isAwaitingApproval,
   isBusy,
 } from "./tui-activity";
-import type { ChatStatus, StartChatResult } from "../../../chat-engines";
+import type { ChatStatus, StartChatResult } from "@/common/chat-engines";
 import type { ChatEngine, ChatEngineListener } from "../chat-engine";
 
 /**

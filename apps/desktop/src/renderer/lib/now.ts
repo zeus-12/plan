@@ -31,11 +31,14 @@ function start(): void {
   // machine back from sleep — corrects itself instead of drifting, and the
   // visibility/focus hooks pull that correction forward to the moment you look.
   repeating = false;
-  timer = window.setTimeout(() => {
-    tick();
-    repeating = true;
-    timer = window.setInterval(tick, MINUTE);
-  }, MINUTE - (Date.now() % MINUTE));
+  timer = window.setTimeout(
+    () => {
+      tick();
+      repeating = true;
+      timer = window.setInterval(tick, MINUTE);
+    },
+    MINUTE - (Date.now() % MINUTE),
+  );
   document.addEventListener("visibilitychange", tick);
   window.addEventListener("focus", tick);
 }

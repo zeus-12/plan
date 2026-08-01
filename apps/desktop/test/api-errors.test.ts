@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSessionJsonl } from "../src/main/providers/claude-code/transcript";
+import { parseSessionJsonl } from "@/main/providers/claude-code/transcript";
 import {
   isRetryableApiError,
   isSessionLimitError,
@@ -7,8 +7,8 @@ import {
   retryableApiErrorAtEnd,
   sessionLimitAtEnd,
   sessionLimitResetText,
-} from "../src/api-errors";
-import type { ConversationMessage, ParsedSession } from "../src/shared-types";
+} from "@/common/api-errors";
+import type { ConversationMessage, ParsedSession } from "@/common/shared-types";
 
 // The failures this feature exists for can't be provoked on demand, so the
 // fixtures below are the real shapes Claude writes: assistant turns with
@@ -18,12 +18,7 @@ import type { ConversationMessage, ParsedSession } from "../src/shared-types";
 
 const ts = (i: number) => `2026-07-11T10:00:${String(i).padStart(2, "0")}.000Z`;
 
-const errorLine = (
-  i: number,
-  text: string,
-  error: string,
-  status?: number,
-) =>
+const errorLine = (i: number, text: string, error: string, status?: number) =>
   JSON.stringify({
     type: "assistant",
     uuid: `e-${i}`,
@@ -103,10 +98,7 @@ describe("which failures are worth retrying", () => {
     ["API Error: Response stalled mid-stream.", "server_error"],
     ["API Error: Server error mid-response.", "server_error"],
     ["Request timed out", "server_error"],
-    [
-      "API Error: The socket connection was closed unexpectedly.",
-      "unknown",
-    ],
+    ["API Error: The socket connection was closed unexpectedly.", "unknown"],
     ["API Error: Stream idle timeout - no chunks received", "unknown"],
     ["API Error: Unable to connect to API (ConnectionRefused)", "unknown"],
   ];
@@ -122,7 +114,11 @@ describe("which failures are worth retrying", () => {
     ["You've hit your session limit · resets 4:30pm", "rate_limit", 429],
     ["Not logged in · Please run /login", "authentication_failed", undefined],
     ["Please run /login · API Error: 401", "authentication_failed", 401],
-    ["There's an issue with the selected model (fable).", "model_not_found", 404],
+    [
+      "There's an issue with the selected model (fable).",
+      "model_not_found",
+      404,
+    ],
   ];
 
   it.each(notRetryable)("never retries %s", (text, kind, status) => {
@@ -187,7 +183,10 @@ describe("session limit — manual pill only, never auto-retried", () => {
   it("flags a transcript parked on a session limit", () => {
     const s = parse(
       userLine(1, "hi") +
-        limit(2, "You've hit your session limit · resets 3:10pm (Asia/Calcutta)"),
+        limit(
+          2,
+          "You've hit your session limit · resets 3:10pm (Asia/Calcutta)",
+        ),
     );
     expect(sessionLimitAtEnd(s)).not.toBeNull();
   });
@@ -230,7 +229,10 @@ describe("re-arming after a nudge", () => {
     // error → our nudge → Claude answers → it dies again later. The second
     // failure is a NEW stuck point and deserves its own single retry.
     const s = parse(
-      cutOff(1) + userLine(2, "Please continue") + replyLine(3, "ok") + cutOff(4),
+      cutOff(1) +
+        userLine(2, "Please continue") +
+        replyLine(3, "ok") +
+        cutOff(4),
     );
     expect(recoveredAfter(s.messages, "e-1")).toBe(true);
   });
@@ -238,9 +240,7 @@ describe("re-arming after a nudge", () => {
   it("stays spent when the nudge itself died again", () => {
     // error → our nudge → straight into another failure. Retrying here would
     // ping-pong, so the pill takes over instead.
-    const s = parse(
-      cutOff(1) + userLine(2, "Please continue") + cutOff(3),
-    );
+    const s = parse(cutOff(1) + userLine(2, "Please continue") + cutOff(3));
     expect(recoveredAfter(s.messages, "e-1")).toBe(false);
   });
 

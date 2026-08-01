@@ -1,7 +1,11 @@
-import { isTerminalRunning, terminalPid, terminalScreen } from "../../terminal";
+import {
+  isTerminalRunning,
+  terminalPid,
+  terminalScreen,
+} from "@/main/terminal/terminal";
 import { agentProcessFor } from "./agent-process";
 import { classifyInputState, screenIsBusy } from "./tui-screen";
-import type { ChatActivity } from "../../../chat-engines";
+import type { ChatActivity } from "@/common/chat-engines";
 
 /**
  * Reading Claude Code's TUI: turning a rendered screen into the two facts the

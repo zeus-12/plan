@@ -4,7 +4,7 @@ import { ThemeProvider } from "@plan/shared/components/theme-provider";
 import { FoldEngineProvider } from "@plan/shared/code-folding";
 import App from "./App";
 import { treeSitterFoldEngine } from "./code-folding";
-import { THEMES } from "./lib/themes";
+import { THEMES } from "@/renderer/features/settings/themes";
 import { installTightSelectionMirror } from "./lib/live-selection-mirror";
 import "./globals.css";
 

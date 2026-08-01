@@ -39,7 +39,11 @@ export function setReloadOverride(
 export function handleReloadRequest() {
   let best: Claim | null = null;
   for (const c of claims) {
-    if (!best || c.rank > best.rank || (c.rank === best.rank && c.seq > best.seq))
+    if (
+      !best ||
+      c.rank > best.rank ||
+      (c.rank === best.rank && c.seq > best.seq)
+    )
       best = c;
   }
   if (best) best.fn();

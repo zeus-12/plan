@@ -12,6 +12,7 @@
     "jsx": "react-jsx",
     "skipLibCheck": true,
     "paths": {
+      "@/*": ["./src/*"],
       "@plan/shared/*": ["../../shared/*"]
     }
   },

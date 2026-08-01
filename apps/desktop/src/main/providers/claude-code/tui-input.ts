@@ -1,4 +1,4 @@
-import { writeTerminal } from "../../terminal";
+import { writeTerminal } from "@/main/terminal/terminal";
 
 /**
  * Writing INTO Claude Code's TUI. The pty layer moves bytes; this file knows

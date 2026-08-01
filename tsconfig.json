@@ -20,6 +20,10 @@
     // etc.) instead of an inferred project. This solution file is editor-only —
     // the per-package `tsc -p` typecheck scripts never load it, so the
     // non-composite reference is fine here (it would error under `tsc -p`).
-    { "path": "apps/desktop/tsconfig.node.json" }
+    { "path": "apps/desktop/tsconfig.node.json" },
+    // Same deal for test/**: it sits outside both src projects, so without this
+    // the editor falls back to an inferred project with no `paths` and every
+    // `@/…` import in a test reads as unresolved.
+    { "path": "apps/desktop/tsconfig.test.json" }
   ]
 }

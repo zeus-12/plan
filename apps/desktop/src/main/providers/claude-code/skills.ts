@@ -3,7 +3,7 @@ import type { Dirent } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { resolveProjectCwd } from "./projects";
-import type { SkillInfo } from "../../../shared-types";
+import type { SkillInfo } from "@/common/shared-types";
 
 const MAX_DESC = 240;
 

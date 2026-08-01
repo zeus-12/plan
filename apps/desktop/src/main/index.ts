@@ -22,8 +22,8 @@ import {
   listSessions,
   sessionFilePath,
 } from "./providers/claude-code/sessions";
-import { pathExists } from "./fs-util";
-import { resolveWorkspaceCwd } from "./workspace";
+import { pathExists } from "@/main/fs/fs-util";
+import { resolveWorkspaceCwd } from "@/main/worktrees/workspace";
 import { encodeCwd } from "./providers/claude-code/encoding";
 import {
   getManualCwds,
@@ -34,29 +34,29 @@ import {
   setSessionArchived,
   getSessionNames,
   setSessionName,
-} from "./manual-projects";
+} from "@/main/store/manual-projects";
 import {
   readClaudeConfig,
   writeClaudeConfig,
 } from "./providers/claude-code/instructions";
-import { readScratch, writeScratch } from "./scratch-store";
+import { readScratch, writeScratch } from "@/main/store/scratch-store";
 import {
   listExternalApps,
   openInExternalApp,
   resolveTargetPath,
-} from "./external-apps";
+} from "@/main/app/external-apps";
 import type {
   ProjectEntry,
   SessionEvent,
   SessionListEntry,
   SwitcherForwardedCode,
-} from "../shared-types";
+} from "@/common/shared-types";
 import type {
   IpcEventContract,
   IpcInvokeContract,
   IpcSendContract,
-} from "../ipc-contract";
-import { chatTerminalId, isChatTerminalId } from "../terminal-ids";
+} from "@/common/ipc-contract";
+import { chatTerminalId, isChatTerminalId } from "@/common/terminal-ids";
 import {
   setCallbacks,
   startWatching,
@@ -68,10 +68,10 @@ import {
   startWorktreeWatch,
   stopWorktreeWatch,
   stopAllWorktreeWatches,
-} from "./worktree-watcher";
+} from "@/main/worktrees/worktree-watcher";
 import { readSessionDelta } from "./providers/claude-code/transcript";
 import { markSessionMovedAway } from "./providers/claude-code/reaper";
-import { getFileContents, getFileView } from "./file-contents";
+import { getFileContents, getFileView } from "@/main/fs/file-contents";
 import {
   listPrs,
   getPrMeta,
@@ -79,19 +79,19 @@ import {
   getPrDiff,
   getPrHeadSha,
   getPrFileView,
-} from "./github";
-import { getFileImageDiff } from "./file-media";
+} from "@/main/git/github";
+import { getFileImageDiff } from "@/main/fs/file-media";
 import {
   invalidateFileList,
   listProjectFiles,
   readProjectFile,
   resolveProjectFilePath,
   searchProjectFiles,
-} from "./project-files";
+} from "@/main/fs/project-files";
 import { listSkills } from "./providers/claude-code/skills";
-import { getProjectIcons } from "./project-icons";
-import { checkForUpdate } from "./updates";
-import { loginShellPath } from "./shell-env";
+import { getProjectIcons } from "@/main/fs/project-icons";
+import { checkForUpdate } from "@/main/app/updates";
+import { loginShellPath } from "@/main/terminal/shell-env";
 import {
   addTerminalListener,
   openTerminal,
@@ -101,7 +101,7 @@ import {
   killTerminal,
   killAllTerminals,
   listTerminals,
-} from "./terminal";
+} from "@/main/terminal/terminal";
 import {
   approvalChatIds,
   busyChatIds,
@@ -135,13 +135,13 @@ import {
   stashAll,
   unstageAll,
   unstageFile,
-} from "./git";
+} from "@/main/git/git";
 import {
   blameContents,
   blameRev,
   getCommitDetails,
   isCommitUrl,
-} from "./git-blame";
+} from "@/main/git/git-blame";
 import {
   createWorktree,
   removeWorktree,
@@ -149,12 +149,12 @@ import {
   listAllWorktrees,
   createWorktreePr,
   addReposToWorktree,
-} from "./worktrees";
+} from "@/main/worktrees/worktrees";
 import {
   getProjectDefaults,
   setProjectDefaults,
   getWorktreeRecord,
-} from "./worktrees-store";
+} from "@/main/worktrees/worktrees-store";
 
 const isMac = process.platform === "darwin";
 

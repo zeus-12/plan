@@ -4,7 +4,7 @@ import {
   API_SEND,
   API_EVENTS,
   type ElectronAPI,
-} from "../ipc-contract";
+} from "@/common/ipc-contract";
 
 // The whole bridge is derived from the contract's name→channel maps: every
 // method is a pure forward (defaults for optional args live in main's

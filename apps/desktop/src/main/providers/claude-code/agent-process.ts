@@ -1,4 +1,4 @@
-import { getProcessTree } from "../../process-tree";
+import { getProcessTree } from "@/main/terminal/process-tree";
 
 /**
  * Agent-process probing: find the agent (claude / its node host) among a pty

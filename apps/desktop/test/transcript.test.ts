@@ -7,7 +7,7 @@ import {
   parseSessionJsonl,
   readSessionDelta,
   readSessionMeta,
-} from "../src/main/providers/claude-code/transcript";
+} from "@/main/providers/claude-code/transcript";
 
 // The incremental reader keeps module-level per-file state, so every test uses
 // its own file path.

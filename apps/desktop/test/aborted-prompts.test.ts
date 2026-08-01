@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseSessionJsonl } from "../src/main/providers/claude-code/transcript";
-import { abortedPromptUuids } from "../src/renderer/lib/message-kind";
-import type { ParsedSession } from "../src/shared-types";
+import { parseSessionJsonl } from "@/main/providers/claude-code/transcript";
+import { abortedPromptUuids } from "@/renderer/features/chat/transcript/message-kind";
+import type { ParsedSession } from "@/common/shared-types";
 
 // Shapes taken from real Claude Code transcripts: a submitted prompt is
 // followed by `attachment` lines that chain off it, so the reply's parentUuid
