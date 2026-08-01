@@ -199,6 +199,13 @@ interface Props {
    * never captures it.
    */
   blame?: DiffBlame;
+  /** An existing annotation to scroll to and open the editor on, without a
+   *  click (the comment chip's jump). `nonce` re-triggers the same target. */
+  revealAnnotation?: { id: string; nonce: number } | null;
+  /** Names the source in the comment popover's pill. The diff supplies the
+   *  line range and side itself; the caller only knows which file (and, in the
+   *  PR viewer, which pull request) this diff belongs to. */
+  commentSource?: { filePath?: string; pr?: number };
 }
 
 export interface DiffBlame {
@@ -323,6 +330,8 @@ export function InteractiveDiff({
   settingsVariant = "bar",
   settingsPortalTarget,
   blame,
+  revealAnnotation,
+  commentSource,
 }: Props) {
   const mergeEnabled = !!onMergeChange;
   const hunkActionsEnabled = !!hunkActions;
@@ -1324,6 +1333,40 @@ export function InteractiveDiff({
     [],
   );
 
+  // The comment chip's jump: scroll this annotation's mark into view and open
+  // its editor on it. A mark inside a collapsed unchanged region isn't in the
+  // DOM at all, so a first miss expands those regions and the retry finds it.
+  const revealAnnNonce = revealAnnotation?.nonce;
+  useEffect(() => {
+    if (!revealAnnotation) return;
+    const { id } = revealAnnotation;
+    let expandTried = false;
+    let frames = 0;
+    let raf = requestAnimationFrame(function find() {
+      const el = contentRef.current?.querySelector<HTMLElement>(
+        `[data-ann-id="${CSS.escape(id)}"]`,
+      );
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        handleClickAnn(id, el.getBoundingClientRect());
+        return;
+      }
+      if (!expandTried) {
+        expandTried = true;
+        const sepCount = filtered.reduce(
+          (n, it) => n + (it.type === "separator" ? 1 : 0),
+          0,
+        );
+        setExpandedSeparators(
+          new Set(Array.from({ length: sepCount }, (_, i) => i)),
+        );
+      }
+      if (frames++ < 10) raf = requestAnimationFrame(find);
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealAnnNonce]);
+
   /* ── Highlights ─────────────────────────────────────────── */
 
   // `side` is the column being rendered in split view. A context (unchanged)
@@ -2250,6 +2293,13 @@ export function InteractiveDiff({
           <CommentPopover
             position={pending.position}
             selectedText={pending.selectedText}
+            context={{
+              kind: "diff",
+              side: pending.data.side,
+              filePath: commentSource?.filePath,
+              pr: commentSource?.pr,
+              ...diffAnchorLines(dLines, pending.data),
+            }}
             onSubmit={selection.submit}
             onClose={selection.cancel}
           />,
@@ -2260,6 +2310,7 @@ export function InteractiveDiff({
           <CommentPopover
             position={editing.pos}
             selectedText={editing.annotation.selectedText}
+            context={editing.annotation.context}
             initialComment={editing.annotation.comment}
             submitLabel="Save"
             onSubmit={submitEdit}

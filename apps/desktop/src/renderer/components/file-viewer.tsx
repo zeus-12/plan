@@ -118,6 +118,9 @@ interface Props {
     /** Also drop a focused caret on the line (Cmd-P "path:line" jump). */
     focusCaret?: boolean;
   } | null;
+  /** An existing comment to scroll to and open the editor on (from the comment
+   *  chip's list). `nonce` re-triggers it when the same one is picked twice. */
+  revealAnnotation?: { id: string; nonce: number } | null;
   /**
    * When set, the viewer is an EDITABLE in-memory buffer instead of a file read
    * from disk: it never touches `path` on disk, drives its content from
@@ -319,6 +322,7 @@ function FileViewerImpl({
   onRemoveAnnotation,
   active,
   revealTarget,
+  revealAnnotation,
   buffer,
 }: Props) {
   const [data, setData] = useState<Loaded | null>(null);
@@ -368,6 +372,9 @@ function FileViewerImpl({
   // A line to drop the editor caret on after the next reveal scroll settles
   // (set by go-to-symbol so the cursor lands on the jumped-to line).
   const caretRequestRef = useRef<number | null>(null);
+  // A comment whose editor should open after the next reveal scroll settles
+  // (set by the comment chip's jump).
+  const commentRequestRef = useRef<string | null>(null);
   // Go-to-symbol palette (⌘⇧G).
   const [symbolOpen, setSymbolOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
@@ -1305,6 +1312,21 @@ function FileViewerImpl({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealNonce, status]);
 
+  // Jump to an existing comment (the chip's list): unfold + scroll to its line,
+  // then open the editor on it — the popover's position needs the settled
+  // scrollTop, so it's opened by the scroll effect below, not here.
+  const revealAnnNonce = revealAnnotation?.nonce;
+  useEffect(() => {
+    if (!revealAnnotation || status !== "ok") return;
+    const target = annotations.find((a) => a.id === revealAnnotation.id);
+    if (!target) return;
+    selection.cancel();
+    setEditorPopover(null);
+    commentRequestRef.current = target.id;
+    revealLine(lineOfOffset(target.startOffset));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealAnnNonce, status]);
+
   // Run a queued reveal scroll once `visibleLineIndices` reflects the unfold, so
   // the target row exists in the virtualizer before we scroll to it.
   useEffect(() => {
@@ -1322,6 +1344,25 @@ function FileViewerImpl({
           ta.focus({ preventScroll: true });
           ta.setSelectionRange(caret, caret);
           setEditorSel({ start: caret, end: caret });
+        }
+      }
+      // The comment chip asked to open this comment's editor. One frame later,
+      // so the anchor position is measured against the scrolled viewport.
+      const commentId = commentRequestRef.current;
+      if (commentId) {
+        commentRequestRef.current = null;
+        const target = annotations.find((a) => a.id === commentId);
+        if (target) {
+          requestAnimationFrame(() => {
+            const { top, left } = caretPopoverPos(target.startOffset);
+            setEditing({
+              id: target.id,
+              selectedText: target.selectedText,
+              comment: target.comment,
+              top: top + 8,
+              left,
+            });
+          });
         }
       }
       setPendingScrollLine(null);
@@ -1734,6 +1775,14 @@ function FileViewerImpl({
               Math.min(editorSel.start, editorSel.end),
               Math.max(editorSel.start, editorSel.end),
             ),
+            context: {
+              kind: "file" as const,
+              filePath: path,
+              startLine:
+                lineOfOffset(Math.min(editorSel.start, editorSel.end)) + 1,
+              endLine:
+                lineOfOffset(Math.max(editorSel.start, editorSel.end)) + 1,
+            },
             onSubmit: submitEditorComment,
             onClose: () => {
               setEditorPopover(null);
@@ -1748,6 +1797,12 @@ function FileViewerImpl({
         ? {
             position: pending.position,
             selectedText: pending.selectedText,
+            context: {
+              kind: "file" as const,
+              filePath: path,
+              startLine: pending.data.startLine,
+              endLine: pending.data.endLine,
+            },
             onSubmit: selection.submit,
             onClose: selection.cancel,
           }
@@ -2246,6 +2301,7 @@ function FileViewerImpl({
         <CommentPopover
           position={newCommentPopover.position}
           selectedText={newCommentPopover.selectedText}
+          context={newCommentPopover.context}
           onSubmit={newCommentPopover.onSubmit}
           onClose={newCommentPopover.onClose}
         />

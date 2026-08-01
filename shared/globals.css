@@ -125,3 +125,61 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
+
+/*
+ * Slim scrollbar for small scrolling panes (the comment popover's excerpt and
+ * its input). The global 6px thumb reads as a bar rather than a hint inside a
+ * ~100px box. Kept visible rather than hover-only so it still signals that
+ * there's more text below the fold.
+ */
+.scrollbar-minimal::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+.scrollbar-minimal::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary) 35%, transparent);
+  border-radius: 9999px;
+}
+
+.scrollbar-minimal::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
+}
+
+/*
+ * Comment popover entrance. Scales from the anchor corner (the component sets
+ * `transform-origin` to match which side of the selection it opened on) so the
+ * card reads as coming out of the highlighted text rather than appearing over
+ * it.
+ */
+@keyframes comment-popover-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes comment-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Crossfade is the baseline; the scale/translate is opt-in for anyone who
+ * hasn't asked for reduced motion. */
+.comment-popover-in {
+  animation: comment-popover-fade 120ms ease-out both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .comment-popover-in {
+    animation: comment-popover-in 150ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+}

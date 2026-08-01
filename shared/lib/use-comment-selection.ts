@@ -9,7 +9,11 @@ import { useSelectionCommit } from "./use-selection-commit";
 export interface SelectionAnchor<T> {
   data: T;
   selectedText: string;
-  position: { top: number; left: number };
+  /** `top`/`left` place the popover below the selection. `anchorTop` is the
+   *  selection's own top edge, which the popover needs to flip above it when
+   *  there's no room below — without it the flipped card would land on the last
+   *  selected line. */
+  position: { top: number; left: number; anchorTop?: number };
 }
 
 export interface UseCommentSelectionOptions<T> {
@@ -30,7 +34,7 @@ export interface UseCommentSelectionOptions<T> {
   ) => {
     data: T;
     selectedText: string;
-    position?: { top: number; left: number };
+    position?: { top: number; left: number; anchorTop?: number };
   } | null;
   /**
    * Persist a new comment for the resolved anchor. This is the single place a
@@ -76,7 +80,7 @@ export function useCommentSelection<T>(
         resolved.position ??
         (() => {
           const r = range.getBoundingClientRect();
-          return { top: r.bottom + 8, left: r.left };
+          return { top: r.bottom + 8, left: r.left, anchorTop: r.top };
         })();
       setPending({
         data: resolved.data,

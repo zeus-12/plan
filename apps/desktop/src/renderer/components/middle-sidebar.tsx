@@ -226,7 +226,9 @@ function WorkTabStrip({
         ref={scrollerRef}
         className="overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <TabsList className="w-max">
+        {/* Auto margins center it while it fits and collapse to 0 once it
+            overflows, so the first tab is never scrolled out of reach. */}
+        <TabsList className="mx-auto w-max">
           <TabsTrigger value="chat">Chat</TabsTrigger>
           <TabsTrigger value="diffs">
             {/* Shimmer rather than an icon: it's the app's existing "working"

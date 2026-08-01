@@ -26,6 +26,7 @@ import {
   type TextSegment,
 } from "@plan/shared/lib/dom-text";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
+
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
 import { useTranscriptPrefs } from "../lib/transcript-prefs";
@@ -57,12 +58,28 @@ import { ImageLightbox } from "./image-lightbox";
 import { UserMessageOverview } from "./user-message-overview";
 import { TimeAgo } from "./time-ago";
 import type { ConversationMessage, MessagePart } from "../../shared-types";
+import type { AnnotationContext } from "@plan/shared/lib/store";
 import type {
   ChatAnchor,
   ChatAnnotation,
   ChatSpan,
 } from "../lib/annotation-store";
 import { Chevron } from "./chevron";
+
+/**
+ * A chat comment's source, for the popover's pill and for the location line in
+ * the outgoing message. Chat selections have no file or line to point at, so
+ * the turn is the only anchor Claude gets besides the excerpt itself.
+ */
+function chatContext(
+  messages: ConversationMessage[],
+  messageUuid: string,
+): AnnotationContext | undefined {
+  const idx = messages.findIndex((m) => m.uuid === messageUuid);
+  if (idx === -1) return { kind: "chat" };
+  return { kind: "chat", turn: idx + 1, role: messages[idx].role };
+}
+
 
 /** How far (px) above the bottom the user must scroll before the "jump to
  *  latest" button appears. */
@@ -123,6 +140,9 @@ interface Props {
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
+  /** An existing comment to scroll to and open the editor on, without a click
+   *  (the comment chip's jump). `nonce` re-triggers the same target. */
+  revealAnnotation?: { id: string; nonce: number } | null;
   /** False while the pane is hidden (kept mounted); re-anchors on show. */
   visible?: boolean;
   /** Whether the chat's terminal is live (enables answering questions). */
@@ -1276,6 +1296,7 @@ export const MessageList = memo(function MessageList({
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
+  revealAnnotation,
   visible = true,
   terminalReady = false,
   working = false,
@@ -1806,6 +1827,45 @@ export const MessageList = memo(function MessageList({
     [],
   );
 
+  // The comment chip's jump. The transcript paints comments with the Custom
+  // Highlight API — there's no element to query — so the anchor is rebuilt from
+  // the span's own part + offsets, the same way a click resolves it. The part
+  // may not be rendered on the frame the tab opens, hence the retry.
+  const revealAnnNonce = revealAnnotation?.nonce;
+  useEffect(() => {
+    if (!revealAnnotation) return;
+    const ann = annotations.find((a) => a.id === revealAnnotation.id);
+    if (!ann) return;
+    let frames = 0;
+    let raf = requestAnimationFrame(function find() {
+      const part = parentRef.current?.querySelector<HTMLElement>(
+        `[data-part-root][data-message-uuid="${CSS.escape(
+          ann.start.messageUuid,
+        )}"][data-part-index="${ann.start.partIndex}"]`,
+      );
+      if (part) {
+        part.scrollIntoView({ block: "center" });
+        const sameSpan =
+          ann.end.messageUuid === ann.start.messageUuid &&
+          ann.end.partIndex === ann.start.partIndex;
+        const range = rangeForCover(part, {
+          start: ann.start.offset,
+          end: sameSpan ? ann.end.offset : null,
+        });
+        const rect =
+          range?.getBoundingClientRect() ?? part.getBoundingClientRect();
+        setEditing({
+          annotation: ann,
+          pos: { top: rect.bottom + 8, left: rect.left },
+        });
+        return;
+      }
+      if (frames++ < 30) raf = requestAnimationFrame(find);
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealAnnNonce]);
+
   /* ── In-view find (⌘F) ──────────────────────────────────────── */
 
   // The transcript is plain rendered DOM (not virtualized), so we search the
@@ -2168,6 +2228,7 @@ export const MessageList = memo(function MessageList({
         <CommentPopover
           position={pending.position}
           selectedText={pending.selectedText}
+          context={chatContext(messages, pending.data.start.messageUuid)}
           onSubmit={selection.submit}
           onClose={selection.cancel}
         />

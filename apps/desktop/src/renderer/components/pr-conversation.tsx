@@ -27,6 +27,8 @@ interface Props {
   /** Persist a note taken by selecting text somewhere in the conversation.
    * `label` is the human anchor ("description", "@vercel's comment", …). */
   onAdd: (label: string, selectedText: string, comment: string) => void;
+  /** Shown in the comment popover's source pill. */
+  prNumber: number;
 }
 
 /**
@@ -49,6 +51,7 @@ export const PrConversation = memo(function PrConversation({
   timelineError,
   active,
   onAdd,
+  prNumber,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -140,6 +143,7 @@ export const PrConversation = memo(function PrConversation({
         <CommentPopover
           position={pending.position}
           selectedText={pending.selectedText}
+          context={{ kind: "pr", pr: prNumber, filePath: pending.data.label }}
           submitLabel="Add note"
           onSubmit={selection.submit}
           onClose={selection.cancel}

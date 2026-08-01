@@ -43,6 +43,8 @@ interface Props {
   mode: "staged" | "unstaged";
   /** False while the diffs pane is hidden — disables the global ⌘Z handler. */
   active: boolean;
+  /** An existing comment to scroll to and open the editor on (comment chip). */
+  revealAnnotation?: { id: string; nonce: number } | null;
   onStage: () => void;
   onUnstage: () => void;
   onDiscard: () => void;
@@ -76,6 +78,7 @@ function FileDiffViewerImpl({
   file,
   mode,
   active,
+  revealAnnotation,
   onStage,
   onUnstage,
   onDiscard,
@@ -350,9 +353,17 @@ function FileDiffViewerImpl({
           startLine,
           endLine,
         },
+        // The slice key is the path alone, which can't name a tab — record the
+        // repo and stage so the comment list can reopen exactly this diff.
+        target: {
+          kind: "diff",
+          subPath,
+          path: file.path,
+          staged: mode === "staged",
+        },
       });
     },
-    [file.path, addFileAnnotation],
+    [file.path, subPath, mode, addFileAnnotation],
   );
 
   const updateAnnotation = useCallback(
@@ -542,6 +553,7 @@ function FileDiffViewerImpl({
         ) : (
           <>
             <InteractiveDiff
+              commentSource={{ filePath: file.path }}
               oldText={viewOldText}
               newText={viewNewText}
               settings={settings}
@@ -555,6 +567,7 @@ function FileDiffViewerImpl({
               onAddAnnotation={addAnnotation}
               onUpdateAnnotation={updateAnnotation}
               onRemoveAnnotation={removeAnnotation}
+              revealAnnotation={revealAnnotation}
               hunkActions={
                 parsedHunks.hunks.length > 0
                   ? {

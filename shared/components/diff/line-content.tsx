@@ -207,6 +207,9 @@ export const LineContent = memo(function LineContent({
         key={`p${s}`}
         className={classNames.join(" ") || undefined}
         style={Object.keys(style).length > 0 ? style : undefined}
+        // Lets a caller reopen this comment without a click (the comment chip's
+        // jump finds the mark by id, scrolls to it, then opens its editor).
+        data-ann-id={annId}
         onClick={
           isAnn && annId
             ? (event) => {

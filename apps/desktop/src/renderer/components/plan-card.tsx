@@ -186,6 +186,7 @@ export function PlanCard({
             </div>
           )}
           <InteractiveDiff
+            commentSource={{ filePath: planPath ?? undefined }}
             oldText={versions[baseIdx]?.text ?? ""}
             newText={current?.text ?? ""}
             settings={settings}

@@ -41,8 +41,6 @@ import { isMentionMenuOpen } from "./mention-menu-state";
 
 export interface ChatInputHandle {
   focus: () => void;
-  /** Append text to the draft (used by "Add to chat"). */
-  append: (text: string) => void;
 }
 
 interface Props {
@@ -67,12 +65,8 @@ interface Props {
   blocked?: boolean;
   /** Invoked when the user tries to send while blocked (reveals the terminal). */
   onBlocked?: () => void;
-  /** ⌘Z right after "Add to chat" (while the inserted text is untouched) undoes
-   *  the move: the composer strips the text it appended and calls this so the
-   *  parent can restore the comments it cleared. */
-  onAddToChatUndo?: () => void;
-  /** Comments are waiting in the pending-comments panel, so ⌘↵ belongs to that
-   *  panel's "Add to chat". With nothing pending, ⌘↵ sends instead. */
+  /** Comments are waiting in the chip above — they go out with this message, so
+   *  send stays available even when the draft itself is empty. */
   commentsPending?: boolean;
   /** This session's last turn died on a recoverable API error and nothing has
    *  been sent since — offer the one-click nudge. */
@@ -100,9 +94,6 @@ interface Attachment {
 
 const MIN_HEIGHT = 40;
 const MAX_HEIGHT = 260;
-// Marks the editor update that "Add to chat" performs, so the dirty-watcher can
-// tell our own insertion apart from a genuine user edit.
-const ADD_TO_CHAT_TAG = "add-to-chat";
 const draftKey = (sid: string) => `plan.draft.${sid}`;
 
 /** Validate then return a stored draft for use as Lexical's initial state. */
@@ -178,7 +169,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     autoFocus,
     blocked,
     onBlocked,
-    onAddToChatUndo,
     commentsPending,
     canContinue,
     atSessionLimit,
@@ -204,15 +194,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   // can't land a caret — the editor is read-only. We park it here and fire it
   // the moment the session starts and the editor turns editable.
   const pendingFocusRef = useRef<(() => void) | null>(null);
-  // Serialized draft from just before an "Add to chat" insertion — what ⌘Z
-  // restores. Kept only while the inserted text is untouched: the update
-  // listener in {@link CommandsPlugin} clears it the moment the user edits the
-  // composer, so a later ⌘Z falls back to Lexical's own history instead.
-  const addToChatUndoRef = useRef<{ before: string } | null>(null);
-  // Latest parent restore callback, read (not closed over) by the command
-  // handler so it never needs re-registering.
-  const onAddToChatUndoRef = useRef(onAddToChatUndo);
-  onAddToChatUndoRef.current = onAddToChatUndo;
   const commentsPendingRef = useRef(commentsPending);
   commentsPendingRef.current = commentsPending;
 
@@ -239,7 +220,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     !notReady &&
     !blocked &&
     !pendingSaves &&
-    (!isEmpty || attachments.length > 0);
+    (!isEmpty || attachments.length > 0 || !!commentsPending);
 
   // Refs the editor's command handlers read so they always see latest state
   // without re-registering on every render.
@@ -308,7 +289,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     const imagePaths = attachmentsRef.current
       .map((a) => a.path)
       .filter((p): p is string => p !== null);
-    if (!text && imagePaths.length === 0) return;
+    if (!text && imagePaths.length === 0 && !commentsPendingRef.current) return;
     // Image paths are sent separately (not folded into the text) so the
     // terminal can type them as a real path the way a direct paste does.
     onSend(text, imagePaths);
@@ -393,30 +374,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         });
         pendingFocusRef.current = unregister;
       },
-      append: (text: string) => {
-        const editor = editorRef.current;
-        if (!editor) return;
-        // Snapshot the draft as it stands now (read before the update — the
-        // post-update state isn't reliably committed yet) so ⌘Z can restore
-        // it. The insert is tagged so the dirty-watcher below knows this
-        // change is ours and not a user edit that should void the undo.
-        addToChatUndoRef.current = {
-          before: JSON.stringify(editor.getEditorState().toJSON()),
-        };
-        editor.update(
-          () => {
-            const root = $getRoot();
-            const had = root.getTextContent().length > 0;
-            root.selectEnd();
-            const sel = $getSelection();
-            if ($isRangeSelection(sel)) {
-              sel.insertText((had ? "\n\n" : "") + text);
-            }
-          },
-          { tag: ADD_TO_CHAT_TAG },
-        );
-        editor.focus();
-      },
     }),
     [],
   );
@@ -481,7 +438,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       )}
       {/* Centered to match the message column's max width (see message-list). */}
       <div
-        className={`mx-auto flex w-full max-w-[820px] flex-col rounded-2xl border bg-[var(--bg-surface)] transition-colors ${
+        className={`mx-auto flex w-full max-w-[820px] flex-col rounded-xl border bg-[var(--bg-surface)] transition-colors ${
           bashMode
             ? "border-[var(--accent)]"
             : "border-[var(--border)] focus-within:border-[var(--border-strong)]"
@@ -525,13 +482,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
               onEmptyChange={setIsEmpty}
               onBashModeChange={setBashMode}
             />
-            <CommandsPlugin
-              sendRef={sendRef}
-              sessionIdRef={sessionRef}
-              addToChatUndoRef={addToChatUndoRef}
-              onAddToChatUndoRef={onAddToChatUndoRef}
-              commentsPendingRef={commentsPendingRef}
-            />
+            <CommandsPlugin sendRef={sendRef} sessionIdRef={sessionRef} />
             <ImagePastePlugin addImageRef={addImageRef} inactive={!!inactive} />
             <FocusPlugin
               autoFocus={!!autoFocus}
@@ -765,19 +716,13 @@ function SessionMemoryPlugin({
   return <HistoryPlugin externalHistoryState={history} />;
 }
 
-/** Enter→send, Shift+Enter→newline, and ⌘Z→undo-add-to-chat / restore-last-sent. */
+/** Enter→send, Shift+Enter→newline, and ⌘Z on an empty box→restore-last-sent. */
 function CommandsPlugin({
   sendRef,
   sessionIdRef,
-  addToChatUndoRef,
-  onAddToChatUndoRef,
-  commentsPendingRef,
 }: {
   sendRef: React.MutableRefObject<() => void>;
   sessionIdRef: React.MutableRefObject<string>;
-  addToChatUndoRef: React.MutableRefObject<{ before: string } | null>;
-  onAddToChatUndoRef: React.MutableRefObject<(() => void) | undefined>;
-  commentsPendingRef: React.MutableRefObject<boolean | undefined>;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -795,14 +740,6 @@ function CommandsPlugin({
           });
           return true;
         }
-        // With comments waiting, ⌘↵ belongs to the pending-comments panel —
-        // swallow it here (so the contenteditable doesn't take it as a line
-        // break) and let it bubble to that window listener instead of sending.
-        // With nothing pending there's no panel to claim it, so it sends.
-        if ((e?.metaKey || e?.ctrlKey) && commentsPendingRef.current) {
-          e?.preventDefault();
-          return true;
-        }
         e?.preventDefault();
         sendRef.current();
         return true;
@@ -813,21 +750,6 @@ function CommandsPlugin({
     const unUndo = editor.registerCommand(
       UNDO_COMMAND,
       () => {
-        // First ⌘Z after "Add to chat" (the inserted text still untouched —
-        // the dirty-watcher below clears the snapshot once the user edits):
-        // pull the text back out and let the parent restore the comments.
-        const addUndo = addToChatUndoRef.current;
-        if (addUndo) {
-          addToChatUndoRef.current = null;
-          try {
-            editor.setEditorState(editor.parseEditorState(addUndo.before));
-            onAddToChatUndoRef.current?.();
-            return true;
-          } catch {
-            // Restoring failed — fall through to the normal undo paths.
-          }
-        }
-
         const empty = editor
           .getEditorState()
           .read(() => $getRoot().getTextContent().trim().length === 0);
@@ -846,29 +768,11 @@ function CommandsPlugin({
       COMMAND_PRIORITY_HIGH,
     );
 
-    // Void the "Add to chat" undo as soon as the user actually edits the
-    // composer. The insert itself carries ADD_TO_CHAT_TAG (skip it); a plain
-    // focus/selection change touches no leaves (skip it too) — only real text
-    // changes have dirty leaves, and those mean the snapshot is now stale.
-    const unDirty = editor.registerUpdateListener(({ tags, dirtyLeaves }) => {
-      if (!addToChatUndoRef.current) return;
-      if (tags.has(ADD_TO_CHAT_TAG)) return;
-      if (dirtyLeaves.size > 0) addToChatUndoRef.current = null;
-    });
-
     return () => {
       unEnter();
       unUndo();
-      unDirty();
     };
-  }, [
-    editor,
-    sendRef,
-    sessionIdRef,
-    addToChatUndoRef,
-    onAddToChatUndoRef,
-    commentsPendingRef,
-  ]);
+  }, [editor, sendRef, sessionIdRef]);
 
   return null;
 }

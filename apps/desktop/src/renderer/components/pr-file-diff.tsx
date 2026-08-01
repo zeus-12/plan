@@ -12,6 +12,9 @@ interface Props {
   encoded: string;
   subPath: string;
   file: FileDiff;
+  /** Shown in the comment popover's source pill, kept out of the file path so
+   *  the path can truncate without eating the number. */
+  prNumber: number;
   /** PR head commit SHA (from the PR detail) — the "new" side of the diff. */
   headSha: string | null;
   /** True while the head SHA is still being resolved — distinguishes "loading"
@@ -29,6 +32,8 @@ interface Props {
   ) => void;
   onUpdate: (id: string, comment: string) => void;
   onRemove: (id: string) => void;
+  /** An existing comment to scroll to and open the editor on (comment chip). */
+  revealAnnotation?: { id: string; nonce: number } | null;
   /** False while this file's pane is hidden — gates the diff's ⌘F handler. */
   active: boolean;
 }
@@ -49,12 +54,14 @@ export const PrFileDiff = memo(function PrFileDiff({
   encoded,
   subPath,
   file,
+  prNumber,
   headSha,
   headShaPending,
   annotations,
   onAdd,
   onUpdate,
   onRemove,
+  revealAnnotation,
   active,
 }: Props) {
   const [settings, updateSettings] = useDiffSettings();
@@ -195,6 +202,7 @@ export const PrFileDiff = memo(function PrFileDiff({
           <Placeholder>Binary file</Placeholder>
         ) : (
           <InteractiveDiff
+            commentSource={{ filePath: file.path, pr: prNumber }}
             oldText={viewOldText}
             newText={viewNewText}
             settings={settings}
@@ -208,6 +216,7 @@ export const PrFileDiff = memo(function PrFileDiff({
             onAddAnnotation={onAdd}
             onUpdateAnnotation={onUpdate}
             onRemoveAnnotation={onRemove}
+            revealAnnotation={revealAnnotation}
             blame={blame}
           />
         )}

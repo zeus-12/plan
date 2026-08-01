@@ -1,3 +1,5 @@
+import { excerpt } from "./excerpt";
+
 export interface Annotation {
   id: string;
   selectedText: string;
@@ -13,33 +15,78 @@ export interface AnnotationContext {
   filePath?: string;
   startLine?: number;
   endLine?: number;
+  /** Which surface the selection came from. Drives the glyph on the comment
+   *  popover's source pill; absent means the surface hasn't been wired yet. */
+  kind?: "file" | "diff" | "pr" | "chat";
+  /** Diff only: which version of the file the selection sits in. `left` is the
+   *  original, `right` the changed one — it is the pane you dragged in, not a
+   *  claim that those particular lines changed. */
+  side?: "left" | "right";
+  /** PR only. Kept out of `filePath` so the path can truncate from the left
+   *  without eating the number. */
+  pr?: number;
+  /** Chat only: 1-based position of the turn in the transcript. */
+  turn?: number;
+  /** Chat only: who wrote the turn the selection came from. */
+  role?: "user" | "assistant";
 }
 
-const MESSAGE_TRUNCATE_LEN = 120;
+/** Excerpt budgets for the outgoing message. A comment that carries a location
+ *  can be followed back to the source, so it needs less of the text inline; one
+ *  without a location (chat) has nothing but the excerpt to point at. */
+const ANCHORED_EXCERPT_BUDGET = 700;
+const UNANCHORED_EXCERPT_BUDGET = 1400;
 
 function locationString(ctx?: AnnotationContext): string | null {
   if (!ctx) return null;
-  const { filePath, startLine, endLine } = ctx;
+  const { filePath, startLine, endLine, pr, turn, role } = ctx;
   const lineSuffix =
     startLine != null
       ? endLine != null && endLine !== startLine
         ? `:L${startLine}-${endLine}`
         : `:L${startLine}`
       : "";
-  if (filePath) return `${filePath}${lineSuffix}`;
-  if (lineSuffix) return lineSuffix.replace(/^:/, "");
-  return null;
+
+  const base = filePath
+    ? `${filePath}${lineSuffix}`
+    : lineSuffix
+      ? lineSuffix.replace(/^:/, "")
+      : null;
+
+  // The PR number lives beside the path rather than inside it, so the popover
+  // can truncate the path without eating the number. Re-joined here.
+  if (pr != null) return base ? `PR #${pr} · ${base}` : `PR #${pr}`;
+
+  if (turn != null) {
+    return `chat · ${role === "user" ? "you" : "Claude"}, turn ${turn}`;
+  }
+  return base;
 }
 
 function formatAnnotation(a: Annotation, idx: number): string {
-  const truncated =
-    a.selectedText.length > MESSAGE_TRUNCATE_LEN
-      ? a.selectedText.slice(0, MESSAGE_TRUNCATE_LEN) + "..."
-      : a.selectedText;
   const loc = locationString(a.context);
+  const ex = excerpt(
+    a.selectedText,
+    loc ? ANCHORED_EXCERPT_BUDGET : UNANCHORED_EXCERPT_BUDGET,
+  );
+
+  // A multi-line quote interpolated into `Regarding: "…"` breaks out of the
+  // 3-space indent on every line after the first, so anything spanning lines
+  // gets a block instead, with the true size stated where the reader can act
+  // on it.
+  if (ex.text.includes("\n")) {
+    const size = `${ex.totalLines} lines, ${ex.totalChars} chars`;
+    const quoted = ex.text
+      .split("\n")
+      .map((line) => `   > ${line}`)
+      .join("\n");
+    const header = loc ? `${idx}. ${loc} — ${size}` : `${idx}. ${size}`;
+    return `${header}\n${quoted}\n   → ${a.comment}`;
+  }
+
   const header = loc
-    ? `${idx}. ${loc}\n   Regarding: "${truncated}"`
-    : `${idx}. Regarding: "${truncated}"`;
+    ? `${idx}. ${loc}\n   Regarding: "${ex.text}"`
+    : `${idx}. Regarding: "${ex.text}"`;
   return `${header}\n   → ${a.comment}`;
 }
 

@@ -22,6 +22,9 @@ interface Props {
   number: number;
   /** False while this PR tab is hidden — gates ⌘R, ⌘F and text selection. */
   active: boolean;
+  /** A comment on one of this PR's files to jump to (the comment chip's list):
+   *  switches to Files, selects that file, and opens the comment's editor. */
+  revealAnnotation?: { id: string; nonce: number; file?: string } | null;
 }
 
 type SubTab = "conversation" | "files" | "commits";
@@ -50,6 +53,7 @@ export const PrView = memo(function PrView({
   subPath,
   number,
   active,
+  revealAnnotation,
 }: Props) {
   // Four independently-loading sections. The header paints from the cached list
   // summary immediately; meta / conversation / diff / headSha each stream in and
@@ -101,6 +105,16 @@ export const PrView = memo(function PrView({
 
   const selectedFile = files.find((f) => f.path === selectedPath) ?? null;
 
+  // The comment chip's jump: route to the file the comment lives on. The diff
+  // itself does the scrolling once it's the selected file (see PrFileDiff).
+  const revealAnnNonce = revealAnnotation?.nonce;
+  useEffect(() => {
+    if (!revealAnnotation?.file) return;
+    setSub("files");
+    setSelectedPath(revealAnnotation.file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealAnnNonce]);
+
   // ── Conversation annotations ──────────────────────────────────
   // Stable callbacks so the memoized PrConversation / PrFileDiff don't re-render
   // when this view re-renders for an unrelated reason (e.g. a note added on
@@ -113,7 +127,7 @@ export const PrView = memo(function PrView({
         endOffset: selectedText.length,
         comment,
         side: "right",
-        context: { filePath: `PR #${number} · ${label}` },
+        context: { kind: "pr", pr: number, filePath: label },
       });
     },
     [subPath, number, addPrAnnotation],
@@ -138,10 +152,14 @@ export const PrView = memo(function PrView({
         comment,
         side,
         context: {
-          filePath: `${path} (PR #${number})`,
+          kind: "pr",
+          pr: number,
+          filePath: path,
+          side,
           startLine,
           endLine,
         },
+        target: { kind: "pr", subPath, number, file: path },
       });
     },
     [subPath, number, addPrAnnotation],
@@ -264,6 +282,7 @@ export const PrView = memo(function PrView({
           )}
         >
           <PrConversation
+            prNumber={number}
             description={
               m
                 ? {
@@ -310,6 +329,7 @@ export const PrView = memo(function PrView({
                     encoded={encoded}
                     subPath={subPath}
                     file={selectedFile}
+                    prNumber={number}
                     headSha={headSha.value}
                     headShaPending={headSha.loading}
                     annotations={
@@ -333,6 +353,11 @@ export const PrView = memo(function PrView({
                       updateFileNote(selectedFile.path, id, comment)
                     }
                     onRemove={(id) => removeFileNote(selectedFile.path, id)}
+                    revealAnnotation={
+                      revealAnnotation?.file === selectedFile.path
+                        ? revealAnnotation
+                        : null
+                    }
                     active={active && sub === "files"}
                   />
                 )}

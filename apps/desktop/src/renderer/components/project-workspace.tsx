@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { Annotation } from "@plan/shared/lib/store";
 import type { FileDiff } from "@plan/shared/lib/diff-parser";
-import { MessageOutput } from "@plan/shared/components/message-output";
+import { CommentChip } from "./comment-chip";
 import {
   SidebarProvider,
   useSidebar,
@@ -45,7 +45,7 @@ import {
   useProjectAnnotations,
   type ChatAnchor,
   type ChatAnnotation,
-  type ProjectAnnotations,
+  type CommentListItem,
   type ProjectFileAnnotationInput,
 } from "../lib/annotation-store";
 import { chatTerminalId, chatTerminalPrefix } from "../../terminal-ids";
@@ -293,6 +293,7 @@ const DiffTabPane = memo(function DiffTabPane({
   active,
   encoded,
   diff,
+  revealAnnotation,
   onStageFile,
   onUnstageFile,
   onDiscardFile,
@@ -303,6 +304,7 @@ const DiffTabPane = memo(function DiffTabPane({
   active: boolean;
   encoded: string;
   diff: FileDiff | null;
+  revealAnnotation: { id: string; nonce: number } | null;
   onStageFile: (path: string, subPath: string) => void;
   onUnstageFile: (path: string, subPath: string) => void;
   onDiscardFile: (path: string, subPath: string) => void;
@@ -322,6 +324,7 @@ const DiffTabPane = memo(function DiffTabPane({
           file={diff}
           mode={tab.staged ? "staged" : "unstaged"}
           active={active}
+          revealAnnotation={revealAnnotation}
           onStage={() => onStageFile(tab.path, tab.subPath)}
           onUnstage={() => onUnstageFile(tab.path, tab.subPath)}
           onDiscard={() => onDiscardFile(tab.path, tab.subPath)}
@@ -343,6 +346,7 @@ const FileTabPane = memo(function FileTabPane({
   encoded,
   annotations,
   revealTarget,
+  revealAnnotation,
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
@@ -352,6 +356,7 @@ const FileTabPane = memo(function FileTabPane({
   encoded: string;
   annotations: Annotation[];
   revealTarget: RevealTarget;
+  revealAnnotation: { id: string; nonce: number } | null;
   onAddAnnotation: (path: string, input: ProjectFileAnnotationInput) => void;
   onUpdateAnnotation: (path: string, id: string, comment: string) => void;
   onRemoveAnnotation: (path: string, id: string) => void;
@@ -376,6 +381,7 @@ const FileTabPane = memo(function FileTabPane({
         onRemoveAnnotation={(id) => onRemoveAnnotation(tab.path, id)}
         active={active}
         revealTarget={revealTarget}
+        revealAnnotation={revealAnnotation}
       />
     </div>
   );
@@ -390,6 +396,7 @@ const ChatTabPane = memo(function ChatTabPane({
   working,
   terminalReady,
   isNew,
+  revealAnnotation,
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
@@ -403,10 +410,12 @@ const ChatTabPane = memo(function ChatTabPane({
   working: boolean;
   terminalReady: boolean;
   isNew: boolean;
+  revealAnnotation: { id: string; nonce: number } | null;
   onAddAnnotation: (
     anchor: ChatAnchor,
     selectedText: string,
     comment: string,
+    sessionId: string,
   ) => void;
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
@@ -420,9 +429,12 @@ const ChatTabPane = memo(function ChatTabPane({
           sessionId={tab.sessionId}
           encoded={encoded}
           annotations={annotations}
-          onAddAnnotation={onAddAnnotation}
+          onAddAnnotation={(anchor, selectedText, comment) =>
+            onAddAnnotation(anchor, selectedText, comment, tab.sessionId)
+          }
           onUpdateAnnotation={onUpdateAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
+          revealAnnotation={revealAnnotation}
           visible={active}
           terminalReady={terminalReady}
           working={working}
@@ -549,21 +561,6 @@ function ProjectWorkspaceImpl({
     }
     return null;
   }, [repos, activeTab]);
-  // The pending-comments composer floats over file/diff content as a header-only
-  // bar (minimized) and expands on chat. Auto-minimize fires ONLY on the
-  // chat→file edge: switching between files preserves a manual expand, and
-  // returning to chat resets it to expanded for the next file visit.
-  const [composerCollapsed, setComposerCollapsed] = useState(
-    () => activeTab != null && activeTab.kind !== "chat",
-  );
-  const prevTabKindRef = useRef(activeTab?.kind);
-  useEffect(() => {
-    const kind = activeTab?.kind;
-    const prev = prevTabKindRef.current;
-    prevTabKindRef.current = kind;
-    if (kind === "chat") setComposerCollapsed(false);
-    else if (prev === "chat") setComposerCollapsed(true);
-  }, [activeTab?.kind]);
 
   // Opening a chat (sidebar click, tab switch, Ctrl+Tab) should land the caret
   // in the composer so the user can type straight away — no click required.
@@ -637,14 +634,13 @@ function ProjectWorkspaceImpl({
     annotationsByProjectFile,
     totalComments,
     composedMessage,
+    comments,
     addProjectFileAnnotation,
     updateProjectFileAnnotation,
     removeProjectFileAnnotation,
     addChatAnnotation,
     updateChatAnnotation,
     removeChatAnnotation,
-    snapshotAndClearAll,
-    restoreAll,
     clearAll,
   } = useProjectAnnotations(project.encoded);
 
@@ -1025,6 +1021,16 @@ function ProjectWorkspaceImpl({
     colEnd: number;
     nonce: number;
     focusCaret?: boolean;
+  } | null>(null);
+  // A pending "jump to this comment", keyed by the tab that owns the surface it
+  // was made on. Separate from `fileReveal`: that one highlights a text range,
+  // this one reopens an existing comment's editor.
+  const [commentReveal, setCommentReveal] = useState<{
+    tabId: string;
+    id: string;
+    nonce: number;
+    /** PR comments only: which file of the PR the comment sits on. */
+    file?: string;
   } | null>(null);
 
   const indexProjectFiles = useCallback(async () => {
@@ -1562,41 +1568,51 @@ function ProjectWorkspaceImpl({
     requestAnimationFrame(() => chatInputRef.current?.focus());
   }, [startChatFor, openChatTab]);
 
-  // Comments cleared by the last "Add to chat", kept so ⌘Z in the composer can
-  // put them back exactly where they were (see handleUndoAddToChat).
-  const addToChatUndoRef = useRef<ProjectAnnotations | null>(null);
-
-  // "Add to chat": move the composed comments into the chat composer, then
-  // clear them — they now live in the composer text.
-  const handleAddToChat = useCallback(
-    (text: string) => {
-      if (!text.trim()) return;
-      setTab("chat");
-      // Land on a chat tab so the composer exists to receive the text: keep the
-      // active chat, else focus the most recent open chat tab, else start one.
-      if (activeTab?.kind !== "chat") {
-        const lastChat = [...tabs].reverse().find((t) => t.kind === "chat");
-        if (lastChat) setActive(lastChat.id);
-        else handleNewChat();
+  // Pending comments go out WITH the message: the composer sends its own text,
+  // this appends the comment buffer and clears it. Nothing is staged into the
+  // draft first — what you type is what you see.
+  const handleSendChat = useCallback(
+    (text: string, imagePaths: string[] = []) => {
+      // `/branch` is a TUI command, not prose — sending comments glued to it
+      // would stop it being recognised, so they stay pending.
+      if (!composedMessage || text.trim() === "/branch") {
+        sendChat(text, imagePaths);
+        return;
       }
-      // Snapshot before clearing so an immediate ⌘Z can restore the comments.
-      addToChatUndoRef.current = snapshotAndClearAll();
-      requestAnimationFrame(() => {
-        chatInputRef.current?.append(text);
-        chatInputRef.current?.focus();
-      });
+      sendChat(
+        text ? `${text}\n\n${composedMessage}` : composedMessage,
+        imagePaths,
+      );
+      clearAll();
     },
-    [activeTab, tabs, setActive, handleNewChat, snapshotAndClearAll],
+    [composedMessage, sendChat, clearAll],
   );
 
-  // The composer pulled the just-added text back out (⌘Z) — restore the
-  // comments it was made from, so they reappear in the panel.
-  const handleUndoAddToChat = useCallback(() => {
-    const snap = addToChatUndoRef.current;
-    if (!snap) return;
-    addToChatUndoRef.current = null;
-    restoreAll(snap);
-  }, [restoreAll]);
+  // The chip's per-comment jump: reopen the surface the comment was made on,
+  // scroll to the comment and open its editor. Comments drafted before targets
+  // were recorded have none, and the chip hides their jump.
+  const handleOpenComment = useCallback(
+    (item: CommentListItem) => {
+      const target = item.target;
+      if (!target) return;
+      const tab =
+        target.kind === "file"
+          ? makeFileTab(target.path)
+          : target.kind === "diff"
+            ? makeDiffTab(target.subPath, target.path, target.staged)
+            : target.kind === "chat"
+              ? makeChatTab(target.sessionId)
+              : makePrTab(target.subPath, target.number);
+      openTab(tab);
+      setCommentReveal((prev) => ({
+        tabId: tab.id,
+        id: item.id,
+        nonce: (prev?.nonce ?? 0) + 1,
+        file: target.kind === "pr" ? target.file : undefined,
+      }));
+    },
+    [openTab],
+  );
 
   // "Clear" the comment buffer — discards every comment across files, diffs,
   // PRs, and chat. Gated behind a confirmation since it can't be undone.
@@ -2106,6 +2122,9 @@ function ProjectWorkspaceImpl({
                       active={active && t.id === activeId}
                       encoded={project.encoded}
                       diff={getFileDiff(t.subPath, t.path)}
+                      revealAnnotation={
+                        commentReveal?.tabId === t.id ? commentReveal : null
+                      }
                       onStageFile={handleStageFile}
                       onUnstageFile={handleUnstageFile}
                       onDiscardFile={handleDiscardFile}
@@ -2130,6 +2149,9 @@ function ProjectWorkspaceImpl({
                         fileReveal && fileReveal.path === t.path
                           ? fileReveal
                           : null
+                      }
+                      revealAnnotation={
+                        commentReveal?.tabId === t.id ? commentReveal : null
                       }
                       onAddAnnotation={addProjectFileAnnotation}
                       onUpdateAnnotation={updateProjectFileAnnotation}
@@ -2174,6 +2196,9 @@ function ProjectWorkspaceImpl({
                         subPath={t.subPath}
                         number={t.number}
                         active={active && t.id === activeId}
+                        revealAnnotation={
+                          commentReveal?.tabId === t.id ? commentReveal : null
+                        }
                       />
                     </div>
                   ) : null,
@@ -2280,6 +2305,9 @@ function ProjectWorkspaceImpl({
                           working={tabActive ? chatWorking : false}
                           terminalReady={tabActive ? chatTerminalReady : false}
                           isNew={isNewSession(t.sessionId)}
+                          revealAnnotation={
+                            commentReveal?.tabId === t.id ? commentReveal : null
+                          }
                           onAddAnnotation={addChatAnnotation}
                           onUpdateAnnotation={updateChatAnnotation}
                           onRemoveAnnotation={removeChatAnnotation}
@@ -2288,17 +2316,14 @@ function ProjectWorkspaceImpl({
                       );
                     })}
                   </div>
-                  {totalComments > 0 && (
-                    <div className="shrink-0 px-3 pb-2">
+                  {comments.length > 0 && (
+                    <div className="shrink-0 px-3 pb-1.5">
                       <div className="mx-auto w-full max-w-[820px]">
-                        <MessageOutput
-                          annotations={[]}
+                        <CommentChip
+                          comments={comments}
                           message={composedMessage}
-                          count={totalComments}
-                          onSend={handleAddToChat}
-                          sendLabel="Add to chat"
-                          shortcutEnabled={active && activeTab?.kind === "chat"}
                           onClear={handleClearComments}
+                          onOpen={handleOpenComment}
                         />
                       </div>
                     </div>
@@ -2311,11 +2336,10 @@ function ProjectWorkspaceImpl({
                       inactive={!chatTerminalReady}
                       notReady={chatTerminalReady && !agentLive}
                       onStart={connectChat}
-                      onSend={sendChat}
+                      onSend={handleSendChat}
                       blocked={awaitingSelection}
                       onBlocked={() => revealChatTerminal(selectedSessionId)}
                       autoFocus={isNewSession(selectedSessionId)}
-                      onAddToChatUndo={handleUndoAddToChat}
                       commentsPending={totalComments > 0}
                       canContinue={
                         stalledOnApiError && !chatWorking && !continueInFlight
@@ -2327,23 +2351,18 @@ function ProjectWorkspaceImpl({
                     />
                   )}
                 </div>
-                {/* Pending-comments composer. On a diff/file tab there's no chat
-                    in context to add to, so it just displays the collected
-                    comments (no "Add to chat" button). It floats as a card
-                    pinned to the bottom of the content — the code keeps its full
-                    height behind it rather than being shoved up by a docked bar.
-                    The empty side margins stay click-through so the code
-                    underneath remains selectable. */}
-                {totalComments > 0 && activeTab?.kind !== "chat" && (
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3">
-                    <div className="pointer-events-auto mx-auto w-full max-w-[820px] rounded-lg shadow-2xl">
-                      <MessageOutput
-                        annotations={[]}
+                {/* The same chip on a diff/file tab, floating over the bottom of
+                    the content: there's no chat in context to stage into, so it
+                    only tallies and navigates. The margins around it stay
+                    click-through so the code underneath is still selectable. */}
+                {activeTab?.kind !== "chat" && (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
+                    <div className="pointer-events-auto">
+                      <CommentChip
+                        comments={comments}
                         message={composedMessage}
-                        count={totalComments}
                         onClear={handleClearComments}
-                        collapsed={composerCollapsed}
-                        onToggleCollapse={() => setComposerCollapsed((v) => !v)}
+                        onOpen={handleOpenComment}
                       />
                     </div>
                   </div>
