@@ -136,11 +136,14 @@ function buildTerminalTheme(): ITheme {
 }
 
 // How many lines of output stay scrollable (and so selectable/copyable) before
-// the oldest are dropped. xterm allocates a row lazily, as `3 * cols` uint32s —
-// ~1.4 KB per 120-column line — so an idle terminal costs nothing and the cap
-// only bites on output actually produced: a run that really emits 100k lines
-// holds ~140 MB. Rendering is unaffected either way (only the viewport paints).
-const SCROLLBACK_LINES = 100_000;
+// the oldest are dropped. Raising this is NOT free, and not because of memory:
+// xterm reflows the ENTIRE buffer on every width change, so the cost of a
+// resize is linear in the lines actually held. Measured on a full buffer, per
+// step of a drag: 10k lines ≈ 6ms, 20k ≈ 13ms, 50k ≈ 52ms, 100k ≈ 97ms — and
+// that's the headless buffer alone, before the DOM renderer's share. Past a
+// frame's budget the pane visibly lags the drag and looks stuck at its old
+// width. 10k keeps a resize inside one frame even when the buffer is full.
+const SCROLLBACK_LINES = 10_000;
 
 /**
  * An embedded terminal bound to the project's pty (cwd = project dir). The pty
@@ -209,6 +212,10 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
     useEffect(() => {
       const host = hostRef.current;
       if (!host) return;
+      // A fresh Terminal starts at 80×24, so the previous one's dimensions say
+      // nothing about it. Stale values here would make the first real fit look
+      // like a no-op and skip telling the pty its size.
+      lastDims.current = { cols: 0, rows: 0 };
 
       const term = new Terminal({
         fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
@@ -389,6 +396,12 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       return () => {
         attached = false;
         if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+        // Clearing the handle is what matters, not the cancel: scheduleFit
+        // treats a non-null rafRef as "a fit is already queued" and returns.
+        // Left set, every later fit — the ResizeObserver's included — is a
+        // no-op, so the terminal keeps whatever width it had and its content
+        // is clipped and side-scrolls instead of reflowing.
+        rafRef.current = null;
         offData();
         inputSub.dispose();
         host.removeEventListener("paste", onPaste, true);
@@ -451,7 +464,16 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
         termRef.current?.scrollToBottom();
         termRef.current?.focus();
       });
-      return () => cancelAnimationFrame(raf);
+      // The ResizeObserver is the only thing watching width, so anything that
+      // stops it reaching runFit leaves the terminal stuck at its old size with
+      // no way back. Refitting on focus costs nothing when the size is right —
+      // runFit pushes only on a real change — and recovers it when it isn't.
+      const onFocus = () => runFitRef.current?.();
+      window.addEventListener("focus", onFocus);
+      return () => {
+        cancelAnimationFrame(raf);
+        window.removeEventListener("focus", onFocus);
+      };
     }, [visible, id]);
 
     // Refit when the dock is resized (height changes). Tied directly to the drag
