@@ -327,9 +327,17 @@ function messageText(m: ConversationMessage): string {
 const USER_MESSAGE_MAX_H = 390;
 
 /**
- * User-bubble body that clips past a max height and reveals a bottom-left
- * "Show more" toggle. Overflow is measured off the content's scrollHeight (the
- * full, un-clamped height), so the toggle stays correct in both states.
+ * Ramp that dissolves the clipped tail of a user bubble. A mask (not a
+ * background gradient) so it reads the same over the filled bubble and over the
+ * transparent one an aborted prompt gets.
+ */
+const USER_MESSAGE_FADE =
+  "linear-gradient(to bottom, #000 calc(100% - 72px), transparent)";
+
+/**
+ * User-bubble body that fades out past a max height and reveals a chevron
+ * toggle. Overflow is measured off the content's scrollHeight (the full,
+ * un-clamped height), so the toggle stays correct in both states.
  */
 function CollapsibleUserMessage({ children }: { children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
@@ -347,28 +355,42 @@ function CollapsibleUserMessage({ children }: { children: React.ReactNode }) {
     return () => ro.disconnect();
   }, []);
 
+  const clipped = overflowing && !expanded;
+
   return (
-    <>
+    <div className="relative flex w-full flex-col">
       <div
         ref={ref}
         className="flex flex-col gap-1.5 overflow-hidden"
-        style={{ maxHeight: expanded ? undefined : USER_MESSAGE_MAX_H }}
+        style={{
+          maxHeight: expanded ? undefined : USER_MESSAGE_MAX_H,
+          WebkitMaskImage: clipped ? USER_MESSAGE_FADE : undefined,
+          maskImage: clipped ? USER_MESSAGE_FADE : undefined,
+        }}
       >
         {children}
       </div>
       {overflowing && (
         <button
           onClick={toggleUnlessSelecting(() => setExpanded((v) => !v))}
-          className="mt-px flex items-center gap-0.5 self-start text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
+          aria-label={expanded ? "Show less" : "Show more"}
+          title={expanded ? "Show less" : "Show more"}
+          // Parked inside the ramp while clipped, so the tail dissolving into
+          // the chevron is the whole affordance and costs no extra row.
+          className={cn(
+            "flex h-6 w-6 items-center justify-center rounded-full text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]",
+            clipped
+              ? "absolute inset-x-0 bottom-0 mx-auto"
+              : "mt-0.5 self-center",
+          )}
         >
-          {expanded ? "Show less" : "Show more"}
           <ChevronDown
-            size={12}
+            size={14}
             className={cn("transition-transform", expanded && "rotate-180")}
           />
         </button>
       )}
-    </>
+    </div>
   );
 }
 
