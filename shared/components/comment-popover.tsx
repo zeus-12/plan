@@ -38,6 +38,8 @@ interface CommentPopoverProps {
  *  flash the peek open. */
 const PEEK_DELAY_MS = 160;
 const PEEK_MAX_HEIGHT = 156;
+/** The 8px gap plus a margin off the viewport edge. */
+const PEEK_CLEARANCE = 24;
 
 /** The pieces stay separate so only the path elides, and so the separators
  *  can't be reordered by the path's rtl truncation. */
@@ -185,7 +187,7 @@ function SourcePill({
   // The peek opens above the pill, but the card itself may already have flipped
   // above the selection — near the top of the window there's no room, so drop
   // it below rather than let it run off screen.
-  const [below, setBelow] = useState(false);
+  const [above, setAbove] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const timer = useRef<number | null>(null);
 
@@ -200,7 +202,17 @@ function SourcePill({
     if (timer.current != null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       const rect = wrapRef.current?.getBoundingClientRect();
-      setBelow(rect != null && rect.top < PEEK_MAX_HEIGHT + 24);
+      // Below by default: the pill sits under the input, so opening upward
+      // lands the peek on the comment you're mid-way through writing — every
+      // time, not just near an edge. Flip up only when there's no room under
+      // the pill and there is more room over it.
+      const roomBelow = rect ? window.innerHeight - rect.bottom : 0;
+      const roomAbove = rect ? rect.top : 0;
+      setAbove(
+        rect != null &&
+          roomBelow < PEEK_MAX_HEIGHT + PEEK_CLEARANCE &&
+          roomAbove > roomBelow,
+      );
       setOpen(true);
     }, PEEK_DELAY_MS);
   }
@@ -261,29 +273,15 @@ function SourcePill({
       {open && (
         <span
           role="tooltip"
-          className={`absolute left-0 z-20 flex w-[340px] max-w-[80vw] flex-col overflow-hidden rounded-[10px] bg-[var(--popover-bg)] ${below ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]"}`}
+          className={`absolute left-0 z-20 flex w-[340px] max-w-[80vw] flex-col overflow-hidden rounded-[10px] bg-[var(--popover-bg)] ${above ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"}`}
           style={{
             boxShadow:
               "0 0 0 0.5px var(--popover-border), 0 2px 4px rgb(0 0 0 / 0.18), 0 14px 34px -10px rgb(0 0 0 / 0.34)",
           }}
         >
-          <span className="flex min-w-0 items-center gap-1.5 border-b border-[var(--border)] px-[11px] py-[7px] font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-            <span className={`flex shrink-0 ${TONE_CLASS[source.tone]}`}>
-              <SourceGlyph glyph={source.glyph} size={11} />
-            </span>
-            {source.lead && <span className="shrink-0">{source.lead}</span>}
-            {source.lead && source.path && <Sep />}
-            {source.path && (
-              <span className="truncate text-left" style={{ direction: "rtl" }}>
-                <bdi>{source.path}</bdi>
-              </span>
-            )}
-            {source.lines && (
-              <span className="ml-auto shrink-0 opacity-80">
-                L{source.lines}
-              </span>
-            )}
-          </span>
+          {/* No header. It existed to un-truncate the path, but at 340px it
+              truncates too — so it only ever restated the pill sitting 8px
+              away. The peek is the payload and nothing else. */}
           <pre
             className="scrollbar-minimal m-0 select-text overflow-y-auto whitespace-pre-wrap break-words px-[11px] py-2.5 font-[family-name:var(--font-mono)] text-[10.5px] leading-[1.62] text-[var(--text-secondary)]"
             style={{ maxHeight: PEEK_MAX_HEIGHT }}
@@ -297,7 +295,7 @@ function SourcePill({
       {open && (
         <span
           aria-hidden="true"
-          className={`absolute left-0 right-0 h-2.5 ${below ? "top-full" : "bottom-full"}`}
+          className={`absolute left-0 right-0 h-2.5 ${above ? "bottom-full" : "top-full"}`}
         />
       )}
     </span>
