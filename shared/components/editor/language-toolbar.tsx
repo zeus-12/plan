@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { LANGUAGES } from "../lib/highlight";
-import { canFormat } from "../lib/format";
-import { Button } from "./ui/button";
+import { LANGUAGES } from "../../lib/syntax/highlight";
+import { canFormat } from "../../lib/format";
+import { Button } from "../ui/button";
 
 interface Props {
   language: string;

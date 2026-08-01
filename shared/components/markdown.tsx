@@ -8,15 +8,15 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { rehypeBionic } from "./bionic";
+import { rehypeBionic } from "../lib/bionic";
 import {
   highlightToHtmlLines,
   stripComments,
   SYNC_HIGHLIGHT_MAX_CHARS,
   useActiveShikiTheme,
   useShikiReady,
-} from "../lib/highlight";
-import { useDiffSettings } from "../lib/settings";
+} from "../lib/syntax/highlight";
+import { useDiffSettings } from "../lib/settings/settings";
 import { cn } from "../lib/utils";
 import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
 
@@ -176,7 +176,9 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
             onClick={() => updateSettings({ lineWrap: !wrap })}
             aria-label={wrap ? "Disable line wrap" : "Wrap long lines"}
             aria-pressed={wrap}
-            title={wrap ? "Wrapping on — click to scroll instead" : "Wrap long lines"}
+            title={
+              wrap ? "Wrapping on — click to scroll instead" : "Wrap long lines"
+            }
             className={cn(
               // Hover-only in both states, exactly like the copy buttons. When
               // it does show, the on-state is a monochrome pill (outlined,
@@ -261,7 +263,9 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
             ref={preRef}
             className={cn(
               "m-0 min-w-0 py-2.5 pl-3 pr-4",
-              wrap ? "flex-1 whitespace-pre-wrap break-words" : "whitespace-pre",
+              wrap
+                ? "flex-1 whitespace-pre-wrap break-words"
+                : "whitespace-pre",
             )}
           >
             <code>

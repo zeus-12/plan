@@ -12,8 +12,8 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
-import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
-import { useTextFind } from "@plan/shared/lib/use-text-find";
+import { useCommentSelection } from "@plan/shared/lib/comments/use-comment-selection";
+import { useTextFind } from "@plan/shared/lib/text/use-text-find";
 import {
   ancestorWithAttr,
   collectTextSegments,
@@ -24,7 +24,7 @@ import {
   selectedOffsetsWithin,
   textOf,
   type TextSegment,
-} from "@plan/shared/lib/dom-text";
+} from "@plan/shared/lib/text/dom-text";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 
 import { FindWidget } from "@plan/shared/components/find-widget";
@@ -58,7 +58,7 @@ import { ImageLightbox } from "@/renderer/components/image-lightbox";
 import { UserMessageOverview } from "./user-message-overview";
 import { TimeAgo } from "@/renderer/components/time-ago";
 import type { ConversationMessage, MessagePart } from "@/common/shared-types";
-import type { AnnotationContext } from "@plan/shared/lib/store";
+import type { AnnotationContext } from "@plan/shared/lib/comments/store";
 import type {
   ChatAnchor,
   ChatAnnotation,

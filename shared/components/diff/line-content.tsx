@@ -1,8 +1,8 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
-import type { DiffLine, WordSegment } from "../../lib/diff";
-import type { SyntaxToken } from "../../lib/highlight";
+import type { DiffLine, WordSegment } from "../../lib/diff/diff";
+import type { SyntaxToken } from "../../lib/syntax/highlight";
 
 /* ── Per-line content (memoized) ──────────────────────────────
  * One source line's rendered spans. A memoized component so the frequent

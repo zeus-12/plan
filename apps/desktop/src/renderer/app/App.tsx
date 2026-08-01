@@ -69,7 +69,7 @@ const MoveSessionModal = lazy(() =>
     default: m.MoveSessionModal,
   })),
 );
-import { useConfirm } from "./components/confirm-dialog";
+import { useConfirm } from "@/renderer/components/confirm-dialog";
 import { useWorktrees } from "@/renderer/features/worktrees/use-worktrees";
 import { useAllWorktrees } from "@/renderer/features/worktrees/use-all-worktrees";
 import { useTabSwitcher } from "@/renderer/features/workspace/use-tab-switcher";
@@ -79,7 +79,7 @@ import {
   makeChatTab,
   chatTabId,
 } from "@/renderer/features/workspace/tabs-store";
-import { handleReloadRequest } from "./lib/reload-override";
+import { handleReloadRequest } from "@/renderer/lib/reload-override";
 import { forgetNewSession } from "@/renderer/features/sessions/new-session-ids";
 import { removeCachedSession } from "@/renderer/features/sessions/session-cache";
 import { relocateSessionUnread } from "@/renderer/features/sessions/unread-response-store";
@@ -87,7 +87,7 @@ import { chatTerminalId } from "@/common/terminal-ids";
 import { forgetProject } from "@/renderer/features/chat/composer/composer-memory";
 import { AttentionSwitcher } from "@/renderer/features/sessions/attention-switcher";
 import type { AttentionTarget } from "@/renderer/features/sessions/attention-switcher";
-import { pushToast } from "./lib/toast-store";
+import { pushToast } from "@/renderer/lib/toast-store";
 import {
   getMruScopeVersion,
   orderByMru,

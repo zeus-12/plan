@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "../lib/utils";
-import type { TextFind } from "../lib/use-text-find";
+import type { TextFind } from "../lib/text/use-text-find";
 
 /**
  * VS Code-style find widget, pinned to the top-right of a content pane. Purely

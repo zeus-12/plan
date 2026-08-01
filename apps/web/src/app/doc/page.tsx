@@ -8,22 +8,25 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { CodeEditor } from "@plan/shared/components/code-editor";
-import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
-import { DocView } from "@plan/shared/components/doc-view";
-import { SettingsPopover } from "@plan/shared/components/settings-popover";
+import { CodeEditor } from "@plan/shared/components/editor/code-editor";
+import { LanguageToolbar } from "@plan/shared/components/editor/language-toolbar";
+import { DocView } from "@/features/doc/doc-view";
+import { SettingsPopover } from "@/features/doc/settings-popover";
 import { Button } from "@plan/shared/components/ui/button";
 import { Toaster, toast } from "@plan/shared/components/ui/sonner";
-import { detectLanguage } from "@plan/shared/lib/highlight";
-import { FONT_SIZE_OPTIONS, type FontSize } from "@plan/shared/lib/settings";
-import { useDocSettings } from "@plan/shared/lib/doc-settings";
+import { detectLanguage } from "@plan/shared/lib/syntax/highlight";
+import {
+  FONT_SIZE_OPTIONS,
+  type FontSize,
+} from "@plan/shared/lib/settings/settings";
+import { useDocSettings } from "@/features/doc/doc-settings";
 import {
   DOC_HASH_PREFIX as HASH_PREFIX,
   decodeDocState,
   encodeDocState,
   type DocComment,
   type DocState,
-} from "@plan/shared/lib/doc-share-url";
+} from "@plan/shared/lib/share/doc-share-url";
 import { SectionNav } from "@/components/section-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 

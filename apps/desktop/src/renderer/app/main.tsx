@@ -3,10 +3,10 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@plan/shared/components/theme-provider";
 import { FoldEngineProvider } from "@plan/shared/code-folding";
 import App from "./App";
-import { treeSitterFoldEngine } from "./code-folding";
+import { treeSitterFoldEngine } from "@/renderer/code-folding";
 import { THEMES } from "@/renderer/features/settings/themes";
-import { installTightSelectionMirror } from "./lib/live-selection-mirror";
-import "./globals.css";
+import { installTightSelectionMirror } from "./live-selection-mirror";
+import "../globals.css";
 
 // Paint drag-selection tight (text boxes only) across the chat/file/diff
 // surfaces — one document-level listener, see the module for why it's a

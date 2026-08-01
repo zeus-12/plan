@@ -1,6 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
-import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import {
+  parseUnifiedDiff,
+  type FileDiff,
+} from "@plan/shared/lib/diff/diff-parser";
 import { cn } from "@plan/shared/lib/utils";
 import {
   usePrMeta,

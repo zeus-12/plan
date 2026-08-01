@@ -1,12 +1,21 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
-import { useShikiReady, useActiveShikiTheme } from "../lib/shiki";
-import { useCommentSelection } from "../lib/use-comment-selection";
-import { ancestorWithAttr, offsetOfBoundary } from "../lib/dom-text";
-import { CommentPopover } from "./comment-popover";
-import type { DocComment } from "../lib/doc-share-url";
+import {
+  highlightPerLine,
+  type SyntaxToken,
+} from "@plan/shared/lib/syntax/highlight";
+import {
+  useShikiReady,
+  useActiveShikiTheme,
+} from "@plan/shared/lib/syntax/shiki";
+import { useCommentSelection } from "@plan/shared/lib/comments/use-comment-selection";
+import {
+  ancestorWithAttr,
+  offsetOfBoundary,
+} from "@plan/shared/lib/text/dom-text";
+import { CommentPopover } from "@plan/shared/components/comment-popover";
+import type { DocComment } from "@plan/shared/lib/share/doc-share-url";
 
 interface DocViewProps {
   text: string;

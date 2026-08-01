@@ -2,7 +2,7 @@ import { memo, useCallback, useRef } from "react";
 import type { PrComment } from "@/common/shared-types";
 import { Markdown } from "@plan/shared/components/markdown";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
-import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
+import { useCommentSelection } from "@plan/shared/lib/comments/use-comment-selection";
 import { cn } from "@plan/shared/lib/utils";
 
 /** The PR description, from the (fast) meta section. */

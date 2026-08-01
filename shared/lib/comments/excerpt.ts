@@ -73,7 +73,9 @@ export function excerpt(text: string, budget: number): Excerpt {
     if (elidedLines > 0 && keptChars <= budget) {
       return {
         ...base,
-        text: [...head, marker(plural(elidedLines, "line")), ...tail].join("\n"),
+        text: [...head, marker(plural(elidedLines, "line")), ...tail].join(
+          "\n",
+        ),
         complete: false,
         elidedLines,
         elidedChars: totalChars - keptChars,

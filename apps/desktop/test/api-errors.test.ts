@@ -7,7 +7,7 @@ import {
   retryableApiErrorAtEnd,
   sessionLimitAtEnd,
   sessionLimitResetText,
-} from "@/common/api-errors";
+} from "@/renderer/features/chat/session/api-errors";
 import type { ConversationMessage, ParsedSession } from "@/common/shared-types";
 
 // The failures this feature exists for can't be provoked on demand, so the

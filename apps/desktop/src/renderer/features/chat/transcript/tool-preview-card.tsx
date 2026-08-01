@@ -13,13 +13,13 @@ import {
   buildSplitRows,
   type DiffLine,
   type WordSegment,
-} from "@plan/shared/lib/diff";
+} from "@plan/shared/lib/diff/diff";
 import {
   highlightPerLine,
   languageFromPath,
   useShikiReady,
   type SyntaxToken,
-} from "@plan/shared/lib/highlight";
+} from "@plan/shared/lib/syntax/highlight";
 import { basename } from "@plan/shared/lib/path";
 
 /**

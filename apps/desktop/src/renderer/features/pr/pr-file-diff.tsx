@@ -1,10 +1,13 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import type { FileDiff } from "@plan/shared/lib/diff-parser";
-import type { Annotation } from "@plan/shared/lib/store";
-import { useDiffSettings } from "@plan/shared/lib/settings";
-import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
-import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
-import { reconstructOldText } from "@plan/shared/lib/diff-reconstruct";
+import type { FileDiff } from "@plan/shared/lib/diff/diff-parser";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import { useDiffSettings } from "@plan/shared/lib/settings/settings";
+import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
+import {
+  detectLanguage,
+  languageFromPath,
+} from "@plan/shared/lib/syntax/highlight";
+import { reconstructOldText } from "@plan/shared/lib/diff/diff-reconstruct";
 import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import { useDiffBlame } from "@/renderer/features/git/blame/use-diff-blame";
 

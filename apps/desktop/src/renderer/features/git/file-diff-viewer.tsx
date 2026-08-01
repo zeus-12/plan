@@ -1,12 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
-import type { FileDiff } from "@plan/shared/lib/diff-parser";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import type { FileDiff } from "@plan/shared/lib/diff/diff-parser";
 import type { FileView, FileImageDiff } from "@/common/shared-types";
 import { useProjectAnnotations } from "@/renderer/features/comments/annotation-store";
-import { useDiffSettings } from "@plan/shared/lib/settings";
-import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
+import { useDiffSettings } from "@plan/shared/lib/settings/settings";
+import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
 import { useDiffBlame } from "@/renderer/features/git/blame/use-diff-blame";
-import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
+import { LanguageToolbar } from "@plan/shared/components/editor/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
 import {
   Tooltip,
@@ -16,12 +16,15 @@ import {
 import { cn } from "@plan/shared/lib/utils";
 import { isImagePath } from "@/renderer/features/files/image-paths";
 import { useWorktreeRevision } from "@/renderer/features/worktrees/worktree-revision";
-import { detectLanguage, languageFromPath } from "@plan/shared/lib/highlight";
+import {
+  detectLanguage,
+  languageFromPath,
+} from "@plan/shared/lib/syntax/highlight";
 import {
   buildDiffLines,
   diffAnchorMatches,
   type DiffLine,
-} from "@plan/shared/lib/diff";
+} from "@plan/shared/lib/diff/diff";
 import {
   canFormat,
   formatCode,
@@ -32,7 +35,7 @@ import {
   findHunkIndexForRange,
   parseFileDiff,
   type HunkRange,
-} from "@plan/shared/lib/git-hunks";
+} from "@plan/shared/lib/diff/git-hunks";
 
 interface Props {
   encoded: string;

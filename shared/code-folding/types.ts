@@ -1,4 +1,4 @@
-import type { FoldRange } from "../lib/folding";
+import type { FoldRange } from "./folding";
 
 export type { FoldRange };
 

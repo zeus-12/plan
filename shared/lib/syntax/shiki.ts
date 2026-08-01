@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Highlighter } from "shiki";
-import type { ThemeDefinition } from "./themes";
+import type { ThemeDefinition } from "../themes";
 
 // We deliberately type as string[] rather than BundledLanguage[] — the latter
 // is a 200-element union that triggers OOM during workspace typecheck.

@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { type DiffSettings, FONT_SIZE_OPTIONS } from "../../lib/settings";
+import {
+  type DiffSettings,
+  FONT_SIZE_OPTIONS,
+} from "../../lib/settings/settings";
 
 /* ── Diff settings controls ─────────────────────────────────
  * The same widgets serve two hosts as two layouts: "bar" lays them out inline

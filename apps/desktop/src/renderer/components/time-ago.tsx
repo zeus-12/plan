@@ -1,11 +1,11 @@
-import { useMinuteTick } from "../lib/now";
+import { useMinuteTick } from "@/renderer/lib/now";
 import {
   isRelative,
   messageTime,
   relativeTime,
   toMillis,
   type TimeVariant,
-} from "../lib/time";
+} from "@/renderer/lib/time";
 
 /**
  * A relative timestamp that keeps itself current. It subscribes to the shared

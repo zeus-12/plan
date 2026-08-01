@@ -4,7 +4,10 @@ import {
   subscribeActivity,
 } from "@/renderer/features/sessions/session-activity-store";
 import { parseChatTerminalId } from "@/common/terminal-ids";
-import { isRetryableApiError, recoveredAfter } from "@/common/api-errors";
+import {
+  isRetryableApiError,
+  recoveredAfter,
+} from "@/renderer/features/chat/session/api-errors";
 import { getAutoContinueEnabled } from "./auto-continue-settings";
 
 /**

@@ -12,7 +12,7 @@ import {
   ensureHighlighter,
   registerShikiThemes,
   setActiveShikiTheme,
-} from "../lib/shiki";
+} from "../lib/syntax/shiki";
 import {
   buildThemeStylesheet,
   shikiNameFor,

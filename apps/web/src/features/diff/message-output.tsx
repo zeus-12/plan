@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import type { Annotation, MessageOptions } from "../lib/store";
-import { generateMessage } from "../lib/store";
-import { Kbd } from "./ui/kbd";
+import type {
+  Annotation,
+  MessageOptions,
+} from "@plan/shared/lib/comments/store";
+import { generateMessage } from "@plan/shared/lib/comments/store";
+import { Kbd } from "@plan/shared/components/ui/kbd";
 
 interface MessageOutputProps {
   annotations: Annotation[];

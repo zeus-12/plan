@@ -19,16 +19,16 @@ import {
   useActiveShikiTheme,
   useShikiReady,
   type SyntaxToken,
-} from "@plan/shared/lib/highlight";
+} from "@plan/shared/lib/syntax/highlight";
 import {
   collapsedRangesContaining,
   foldRangeMap,
   hiddenLineSet,
-} from "@plan/shared/lib/folding";
+} from "@plan/shared/code-folding/folding";
 import {
   bracketColorsByLine,
   type BracketMark,
-} from "@plan/shared/lib/brackets";
+} from "@plan/shared/lib/syntax/brackets";
 import {
   useFoldEngine,
   useFolds,
@@ -39,14 +39,14 @@ import {
   CommandPalette,
   type PaletteItem,
 } from "@/renderer/components/command-palette";
-import type { Annotation } from "@plan/shared/lib/store";
+import type { Annotation } from "@plan/shared/lib/comments/store";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
 import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
-import { useCommentSelection } from "@plan/shared/lib/use-comment-selection";
-import { useTextFind } from "@plan/shared/lib/use-text-find";
-import { offsetOfBoundary } from "@plan/shared/lib/dom-text";
+import { useCommentSelection } from "@plan/shared/lib/comments/use-comment-selection";
+import { useTextFind } from "@plan/shared/lib/text/use-text-find";
+import { offsetOfBoundary } from "@plan/shared/lib/text/dom-text";
 import { FindWidget } from "@plan/shared/components/find-widget";
-import { buildDocUrl } from "@plan/shared/lib/doc-share-url";
+import { buildDocUrl } from "@plan/shared/lib/share/doc-share-url";
 import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
 import { isImagePath } from "./image-paths";

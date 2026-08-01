@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { DiffBlame } from "@plan/shared/components/interactive-diff";
+import type { DiffBlame } from "@plan/shared/components/diff/interactive-diff";
 import { blameLineInfo, tagBlame, type TextBlame } from "./blame";
 import { useBlameCard } from "./use-blame-card";
 

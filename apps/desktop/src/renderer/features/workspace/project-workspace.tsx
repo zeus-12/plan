@@ -7,8 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
-import type { FileDiff } from "@plan/shared/lib/diff-parser";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import type { FileDiff } from "@plan/shared/lib/diff/diff-parser";
 import { CommentChip } from "@/renderer/features/comments/comment-chip";
 import {
   SidebarProvider,
@@ -70,7 +70,7 @@ import {
   retryableApiErrorAtEnd,
   sessionLimitAtEnd,
   sessionLimitResetText,
-} from "@/common/api-errors";
+} from "@/renderer/features/chat/session/api-errors";
 import {
   CONTINUE_TEXT,
   useAutoContinueInFlight,

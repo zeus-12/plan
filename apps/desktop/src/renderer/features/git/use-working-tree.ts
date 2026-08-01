@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseUnifiedDiff, type FileDiff } from "@plan/shared/lib/diff-parser";
+import {
+  parseUnifiedDiff,
+  type FileDiff,
+} from "@plan/shared/lib/diff/diff-parser";
 import { lastSegment } from "@plan/shared/lib/path";
 import type {
   DiscoveredRepo,

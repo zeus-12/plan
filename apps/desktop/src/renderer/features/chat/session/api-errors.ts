@@ -22,7 +22,7 @@
  * terminal-ids and ipc-contract.
  */
 
-import type { ConversationMessage, ParsedSession } from "./shared-types";
+import type { ConversationMessage, ParsedSession } from "@/common/shared-types";
 
 /** Claude's `error` values seen on real transcripts. `unknown` is its catch-all. */
 export type ApiErrorKind =

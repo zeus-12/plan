@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createTwoFilesPatch } from "diff";
-import { reconstructOldText } from "../../../shared/lib/diff-reconstruct";
-import { parseUnifiedDiff } from "../../../shared/lib/diff-parser";
+import { reconstructOldText } from "../../../shared/lib/diff/diff-reconstruct";
+import { parseUnifiedDiff } from "../../../shared/lib/diff/diff-parser";
 import {
   buildSingleHunkPatch,
   findHunkIndexForRange,
   parseFileDiff,
-} from "../../../shared/lib/git-hunks";
+} from "../../../shared/lib/diff/git-hunks";
 import {
   buildDiffLines,
   buildSplitRows,
@@ -15,12 +15,12 @@ import {
   filterUnchangedLines,
   getDiffLineForOffset,
   type Separator,
-} from "../../../shared/lib/diff";
+} from "../../../shared/lib/diff/diff";
 import {
   applyChangeLeftToRight,
   applyChangeRightToLeft,
   computeChanges,
-} from "../../../shared/lib/diff-merge";
+} from "../../../shared/lib/diff/diff-merge";
 
 /** A realistic unified diff for one file, in the shape `gh pr diff` emits. */
 function diffOf(oldText: string, newText: string): string {

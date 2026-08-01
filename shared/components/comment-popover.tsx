@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { excerpt, type Excerpt } from "../lib/excerpt";
-import type { AnnotationContext } from "../lib/store";
+import { excerpt, type Excerpt } from "../lib/comments/excerpt";
+import type { AnnotationContext } from "../lib/comments/store";
 
 const POPOVER_WIDTH = 360;
 const VIEWPORT_MARGIN = 8;
@@ -105,7 +105,13 @@ function sourceParts(ctx?: AnnotationContext): SourceParts | null {
   };
 }
 
-function SourceGlyph({ glyph, size }: { glyph: SourceParts["glyph"]; size: number }) {
+function SourceGlyph({
+  glyph,
+  size,
+}: {
+  glyph: SourceParts["glyph"];
+  size: number;
+}) {
   const common = {
     width: size,
     height: size,
@@ -183,9 +189,12 @@ function SourcePill({
   const wrapRef = useRef<HTMLSpanElement>(null);
   const timer = useRef<number | null>(null);
 
-  useEffect(() => () => {
-    if (timer.current != null) window.clearTimeout(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current != null) window.clearTimeout(timer.current);
+    },
+    [],
+  );
 
   function show() {
     if (timer.current != null) window.clearTimeout(timer.current);
@@ -265,10 +274,7 @@ function SourcePill({
             {source.lead && <span className="shrink-0">{source.lead}</span>}
             {source.lead && source.path && <Sep />}
             {source.path && (
-              <span
-                className="truncate text-left"
-                style={{ direction: "rtl" }}
-              >
+              <span className="truncate text-left" style={{ direction: "rtl" }}>
                 <bdi>{source.path}</bdi>
               </span>
             )}
@@ -434,7 +440,10 @@ export function CommentPopover({
   }
   const left = Math.max(
     VIEWPORT_MARGIN,
-    Math.min(position.left, window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN),
+    Math.min(
+      position.left,
+      window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN,
+    ),
   );
 
   const dirty = comment.trim().length > 0;
@@ -481,28 +490,28 @@ export function CommentPopover({
           <div className="flex min-w-0 items-center gap-2">
             {source && <SourcePill source={source} preview={preview} />}
             {onDelete && (
-            <button
-              onClick={onDelete}
-              aria-label="Delete comment"
-              title="Delete comment"
-              className="relative grid size-7 shrink-0 place-items-center rounded-full text-[var(--removed-text)] opacity-85 transition-[opacity,background-color,transform] duration-100 after:absolute after:-inset-1 after:content-[''] hover:bg-[color-mix(in_srgb,var(--removed-text)_14%,transparent)] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current active:scale-[0.96]"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+              <button
+                onClick={onDelete}
+                aria-label="Delete comment"
+                title="Delete comment"
+                className="relative grid size-7 shrink-0 place-items-center rounded-full text-[var(--removed-text)] opacity-85 transition-[opacity,background-color,transform] duration-100 after:absolute after:-inset-1 after:content-[''] hover:bg-[color-mix(in_srgb,var(--removed-text)_14%,transparent)] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current active:scale-[0.96]"
               >
-                <path d="M3 6h18" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            </button>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
             )}
           </div>
           {/* aria-disabled rather than disabled: it's the only control in the

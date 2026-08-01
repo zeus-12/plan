@@ -1,6 +1,6 @@
 import { useMemo, useSyncExternalStore } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
-import { generateMessage } from "@plan/shared/lib/store";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import { generateMessage } from "@plan/shared/lib/comments/store";
 
 /**
  * In-progress comments across every surface (diffs, chat, file viewer, PRs),

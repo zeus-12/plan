@@ -1,7 +1,7 @@
 "use client";
 
-import { type FontSize } from "./settings";
-import { usePersistedSettings } from "./use-persisted-settings";
+import { type FontSize } from "@plan/shared/lib/settings/settings";
+import { usePersistedSettings } from "@plan/shared/lib/settings/use-persisted-settings";
 
 const STORAGE_KEY = "plan-doc-settings";
 

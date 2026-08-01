@@ -8,23 +8,23 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
-import { formatUnifiedDiff } from "@plan/shared/lib/diff";
-import { useDiffSettings } from "@plan/shared/lib/settings";
-import { useUndoable } from "@plan/shared/lib/undoable";
-import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
-import { MessageOutput } from "@plan/shared/components/message-output";
-import { CodeEditor } from "@plan/shared/components/code-editor";
-import { LanguageToolbar } from "@plan/shared/components/language-toolbar";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import { formatUnifiedDiff } from "@plan/shared/lib/diff/diff";
+import { useDiffSettings } from "@plan/shared/lib/settings/settings";
+import { useUndoable } from "@/features/diff/undoable";
+import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
+import { MessageOutput } from "@/features/diff/message-output";
+import { CodeEditor } from "@plan/shared/components/editor/code-editor";
+import { LanguageToolbar } from "@plan/shared/components/editor/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
-import { detectLanguage } from "@plan/shared/lib/highlight";
+import { detectLanguage } from "@plan/shared/lib/syntax/highlight";
 import { canFormat } from "@plan/shared/lib/format";
-import { formatCodeAsync } from "@/lib/format-async";
+import { formatCodeAsync } from "@/features/diff/format-async";
 import {
   decodeState,
   encodeState,
   type SharedState,
-} from "@plan/shared/lib/share-url";
+} from "@/features/diff/share-url";
 import { SectionNav } from "@/components/section-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 

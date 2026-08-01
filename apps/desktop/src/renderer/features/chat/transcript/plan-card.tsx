@@ -17,9 +17,9 @@
  */
 
 import { useCallback, useState } from "react";
-import type { Annotation } from "@plan/shared/lib/store";
-import { useDiffSettings } from "@plan/shared/lib/settings";
-import { InteractiveDiff } from "@plan/shared/components/interactive-diff";
+import type { Annotation } from "@plan/shared/lib/comments/store";
+import { useDiffSettings } from "@plan/shared/lib/settings/settings";
+import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
 import { useProjectAnnotations } from "@/renderer/features/comments/annotation-store";
 
 const EMPTY_ANNOTATIONS: Annotation[] = [];

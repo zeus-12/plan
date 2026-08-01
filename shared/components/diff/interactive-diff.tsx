@@ -11,8 +11,8 @@ import {
   Fragment,
 } from "react";
 import { createPortal } from "react-dom";
-import type { Annotation } from "../lib/store";
-import type { DiffSettings } from "../lib/settings";
+import type { Annotation } from "../../lib/comments/store";
+import type { DiffSettings } from "../../lib/settings/settings";
 import {
   type DiffLine,
   type FilteredItem,
@@ -23,40 +23,35 @@ import {
   buildSplitRows,
   getDiffLineForOffset,
   diffAnchorLines,
-} from "../lib/diff";
+} from "../../lib/diff/diff";
 import {
   type Change,
   applyChangeLeftToRight,
   applyChangeRightToLeft,
   buildLineToChangeMap,
   computeChanges,
-} from "../lib/diff-merge";
-import type { GitHunk, HunkRange } from "../lib/git-hunks";
-import { highlightPerLine, type SyntaxToken } from "../lib/highlight";
+} from "../../lib/diff/diff-merge";
+import type { GitHunk, HunkRange } from "../../lib/diff/git-hunks";
+import { highlightPerLine, type SyntaxToken } from "../../lib/syntax/highlight";
 import {
   SYNC_HIGHLIGHT_MAX_CHARS,
   useActiveShikiTheme,
   useShikiReady,
-} from "../lib/shiki";
-import { computeFoldRanges } from "../lib/folding";
-import { textBoundaryAt } from "../lib/dom-text";
-import { cn, toggleInSet } from "../lib/utils";
-import { useCommentSelection } from "../lib/use-comment-selection";
-import { useTextFind } from "../lib/use-text-find";
-import { CommentPopover } from "./comment-popover";
-import { FindWidget } from "./find-widget";
-import {
-  LineContent,
-  EMPTY_TOKENS,
-  EMPTY_HLS,
-  type Hl,
-} from "./diff/line-content";
-import { MergeOverlay } from "./diff/merge-overlay";
-import { DiffSettingsControls } from "./diff/settings-controls";
-import { useReadonlyCaretHost } from "./diff/use-readonly-caret-host";
+} from "../../lib/syntax/shiki";
+import { computeFoldRanges } from "../../code-folding/folding";
+import { textBoundaryAt } from "../../lib/text/dom-text";
+import { cn, toggleInSet } from "../../lib/utils";
+import { useCommentSelection } from "../../lib/comments/use-comment-selection";
+import { useTextFind } from "../../lib/text/use-text-find";
+import { CommentPopover } from "../comment-popover";
+import { FindWidget } from "../find-widget";
+import { LineContent, EMPTY_TOKENS, EMPTY_HLS, type Hl } from "./line-content";
+import { MergeOverlay } from "./merge-overlay";
+import { DiffSettingsControls } from "./settings-controls";
+import { useReadonlyCaretHost } from "../../lib/diff/use-readonly-caret-host";
 
 /** Re-exported: HunkRange is part of the hunkActions contract below. */
-export type { HunkRange } from "../lib/git-hunks";
+export type { HunkRange } from "../../lib/diff/git-hunks";
 
 /* ── Constants ────────────────────────────────────────────── */
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
-import { CodeEditor } from "@plan/shared/components/code-editor";
+import { CodeEditor } from "@plan/shared/components/editor/code-editor";
 import { cn } from "@plan/shared/lib/utils";
 import type {
   ClaudeConfigBundle,

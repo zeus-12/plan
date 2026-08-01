@@ -2,8 +2,11 @@
 
 import { useMemo } from "react";
 import Editor from "react-simple-code-editor";
-import { highlightToHtml, SYNC_HIGHLIGHT_MAX_CHARS } from "../lib/highlight";
-import { useActiveShikiTheme, useShikiReady } from "../lib/shiki";
+import {
+  highlightToHtml,
+  SYNC_HIGHLIGHT_MAX_CHARS,
+} from "../../lib/syntax/highlight";
+import { useActiveShikiTheme, useShikiReady } from "../../lib/syntax/shiki";
 
 interface CodeEditorProps {
   value: string;

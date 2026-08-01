@@ -7,7 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
-import { usePersistentString } from "@/renderer/lib/use-persistent-string";
+import { usePersistentString } from "./use-persistent-string";
 import {
   buildFileTree,
   flattenFileTree,

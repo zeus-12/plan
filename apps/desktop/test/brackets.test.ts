@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bracketColorsByLine } from "../../../shared/lib/brackets";
-import type { BracketPos } from "../../../shared/lib/shiki";
+import { bracketColorsByLine } from "../../../shared/lib/syntax/brackets";
+import type { BracketPos } from "../../../shared/lib/syntax/shiki";
 
 // Real-bracket positions are produced by codeBracketPositions (scope-aware, so
 // string/comment/regex brackets are already excluded). These tests cover the

@@ -1,4 +1,4 @@
-import { computeFoldRanges } from "../lib/folding";
+import { computeFoldRanges } from "./folding";
 import type { FoldEngine } from "./types";
 
 /**

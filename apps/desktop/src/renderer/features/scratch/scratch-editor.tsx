@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileViewer } from "@/renderer/features/files/file-viewer";
-import type { Annotation } from "@plan/shared/lib/store";
+import type { Annotation } from "@plan/shared/lib/comments/store";
 import { LANGUAGES, prettify, detectJson } from "./scratch-languages";
 import { pushToast } from "@/renderer/lib/toast-store";
 

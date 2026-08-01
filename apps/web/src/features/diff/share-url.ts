@@ -1,4 +1,7 @@
-import { encodeVersioned, decodeVersioned } from "./url-codec";
+import {
+  encodeVersioned,
+  decodeVersioned,
+} from "@plan/shared/lib/share/url-codec";
 
 export interface SharedState {
   left: string;
