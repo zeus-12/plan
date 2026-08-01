@@ -116,7 +116,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         id: "attentionSwitcher",
         label: "Sessions needing attention",
         chords: [{ key: "Double-tap Ctrl" }],
-        when: "tap ⌃ to cycle · pause to jump · starts on your current tab, so doing nothing returns you there",
+        when: "",
       },
     ],
   },
