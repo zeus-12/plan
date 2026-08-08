@@ -109,9 +109,11 @@ function sourceParts(ctx?: AnnotationContext): SourceParts | null {
 
 function SourceGlyph({
   glyph,
+  tone,
   size,
 }: {
   glyph: SourceParts["glyph"];
+  tone: SourceParts["tone"];
   size: number;
 }) {
   const common = {
@@ -124,7 +126,7 @@ function SourceGlyph({
     strokeLinejoin: "round" as const,
     // An SVG in a flex row is shrinkable by default; without this the glyph
     // squashes before the path starts truncating.
-    className: "shrink-0",
+    className: `shrink-0 ${TONE_CLASS[tone]}`,
     "aria-hidden": true,
   };
   if (glyph === "add")
@@ -162,8 +164,10 @@ function SourceGlyph({
   );
 }
 
+/** Neutral inherits, so the glyph brightens with the label on hover. A known
+ *  side keeps its own colour through both states. */
 const TONE_CLASS: Record<SourceParts["tone"], string> = {
-  neutral: "text-[var(--text-tertiary)]",
+  neutral: "",
   new: "text-[var(--added-text)]",
   old: "text-[var(--removed-text)]",
 };
@@ -238,14 +242,10 @@ function SourcePill({
         aria-expanded={open}
         onFocus={show}
         onBlur={hide}
-        className={`flex h-[22px] w-full min-w-0 cursor-default items-center gap-1.5 rounded-md bg-[var(--highlight-bg)] px-2 font-[family-name:var(--font-mono)] text-[10.5px] tabular-nums transition-colors duration-100 hover:bg-[var(--bg-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${TONE_CLASS[source.tone]}`}
+        className="flex h-[22px] w-full min-w-0 cursor-default items-center gap-1.5 rounded-md bg-[var(--highlight-bg)] px-2 font-[family-name:var(--font-mono)] text-[10.5px] tabular-nums text-[var(--text-tertiary)] transition-colors duration-100 hover:bg-[color-mix(in_srgb,var(--highlight-bg-hover)_50%,var(--highlight-bg))] hover:text-[var(--text-secondary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
-        <SourceGlyph glyph={source.glyph} size={12} />
-        {source.lead && (
-          <span className="shrink-0 text-[var(--text-tertiary)]">
-            {source.lead}
-          </span>
-        )}
+        <SourceGlyph glyph={source.glyph} tone={source.tone} size={12} />
+        {source.lead && <span className="shrink-0">{source.lead}</span>}
         {source.path && (
           <>
             {source.lead && <Sep />}
@@ -253,7 +253,7 @@ function SourcePill({
                 directories don't. <bdi> keeps the path itself in logical order
                 inside the rtl box. */}
             <span
-              className="truncate text-left text-[var(--text-tertiary)]"
+              className="truncate text-left"
               style={{ direction: "rtl" }}
             >
               <bdi>{source.path}</bdi>
@@ -263,9 +263,7 @@ function SourcePill({
         {source.lines && (
           <>
             {(source.lead || source.path) && <Sep />}
-            <span className="shrink-0 text-[var(--text-tertiary)]">
-              {source.lines}
-            </span>
+            <span className="shrink-0">{source.lines}</span>
           </>
         )}
       </button>
@@ -484,8 +482,10 @@ export function CommentPopover({
 
         {/* Always mounted. Revealing it on the first keystroke moved everything
             below it by a row mid-typing. */}
-        <div className="mt-1 flex items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-2">
+        {/* Bottom-aligned, not centred: the 28px buttons set the row height, so
+            centring the shorter pill left it 15px off the card's 12px floor. */}
+        <div className="mt-1 flex items-end justify-between gap-4">
+          <div className="flex min-w-0 items-end gap-2">
             {source && <SourcePill source={source} preview={preview} />}
             {onDelete && (
               <button
