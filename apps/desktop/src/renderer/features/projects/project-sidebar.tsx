@@ -497,7 +497,7 @@ export function ProjectSidebar({
         {archivedView && (
           <button
             onClick={() => setArchivedView(false)}
-            className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+            className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)]"
             title="Back to projects"
           >
             <ChevronLeft />

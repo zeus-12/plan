@@ -28,6 +28,19 @@ export interface ShikiThemeJson {
   [key: string]: unknown;
 }
 
+/**
+ * Picker sections, in display order. Themes are bucketed by how deep their
+ * background sits so neighbouring entries in the list look alike; `light` is
+ * last because it's the one people reach for least.
+ */
+export const THEME_GROUPS = [
+  { id: "dark", label: "Dark" },
+  { id: "darker", label: "Darker" },
+  { id: "light", label: "Light" },
+] as const;
+
+export type ThemeGroupId = (typeof THEME_GROUPS)[number]["id"];
+
 export interface ThemeDefinition {
   /** Stable id; also the persisted value and the `theme-<id>` body class. */
   id: string;
@@ -49,6 +62,11 @@ export interface ThemeDefinition {
    * toggle falls back to the first theme of opposite darkness.
    */
   toggleTo?: string;
+  /**
+   * Which picker section the theme is listed under. Omitting it files the theme
+   * by `dark` alone, so a new JSON still lands somewhere sensible.
+   */
+  group?: ThemeGroupId;
 }
 
 /** The shiki theme id a definition tokenizes with. */
@@ -59,6 +77,26 @@ export function shikiNameFor(t: ThemeDefinition): string {
 /** The preview swatch is simply the theme's background. */
 export function swatchFor(t: ThemeDefinition): string {
   return t.colors.bg ?? "transparent";
+}
+
+export interface ThemeGroup {
+  id: ThemeGroupId;
+  label: string;
+  themes: ThemeDefinition[];
+}
+
+/**
+ * Split themes into {@link THEME_GROUPS} order for the picker, keeping the
+ * caller's ordering within each section and dropping sections nothing fell in.
+ */
+export function groupThemes(themes: ThemeDefinition[]): ThemeGroup[] {
+  return THEME_GROUPS.map(({ id, label }) => ({
+    id,
+    label,
+    themes: themes.filter(
+      (t) => (t.group ?? (t.dark ? "dark" : "light")) === id,
+    ),
+  })).filter((g) => g.themes.length > 0);
 }
 
 /**

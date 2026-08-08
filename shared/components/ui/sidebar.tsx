@@ -174,7 +174,7 @@ export function Sidebar({
       data-state={open ? "expanded" : "collapsed"}
       data-side={side}
       className={cn(
-        "relative flex h-full shrink-0 flex-col overflow-hidden border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text)] ease-out",
+        "relative flex h-full shrink-0 flex-col overflow-hidden border-[var(--border)] bg-[var(--bg-chrome,var(--bg-surface))] text-[var(--text)] ease-out",
         // No width transition while dragging (it would lag the handle).
         !resizing && "transition-[width] duration-200",
         !resizable && "data-[state=collapsed]:w-0",
@@ -288,7 +288,7 @@ export function SidebarTrigger({
         onClick?.(e);
       }}
       className={cn(
-        "inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]",
+        "inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text-secondary)]",
         className,
       )}
       aria-label="Toggle sidebar"

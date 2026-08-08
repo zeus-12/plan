@@ -265,10 +265,10 @@ function WorkTabStrip({
         </TabsList>
       </div>
       {edges.start && (
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[var(--bg-surface)] to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[var(--bg-chrome,var(--bg-surface))] to-transparent" />
       )}
       {edges.end && (
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[var(--bg-surface)] to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[var(--bg-chrome,var(--bg-surface))] to-transparent" />
       )}
     </div>
   );
@@ -465,7 +465,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               onClick={onOpenScratch}
               title="Open scratchpad"
               aria-label="Open scratchpad"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
             >
               <NotebookPen size={15} />
             </button>
@@ -524,7 +524,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     key={t.subPath || "/"}
                     onClick={() => onPush(t.subPath)}
                     disabled={t.pushing || (t.hasUpstream && t.ahead === 0)}
-                    className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-surface)]"
+                    className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-chrome,var(--bg-surface))] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-chrome,var(--bg-surface))]"
                   >
                     <span className="flex min-w-0 items-center gap-1.5">
                       <UploadIcon />
@@ -620,7 +620,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               aria-label={
                 paneCollapsed ? "Expand terminal" : "Minimise terminal"
               }
-              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
             >
               <ChevronIcon up={paneCollapsed} />
             </button>
@@ -675,7 +675,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               }}
               title="New terminal (⌘⇧T)"
               aria-label="New terminal"
-              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
             >
               <PlusIcon />
             </button>

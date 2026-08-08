@@ -2,6 +2,7 @@
   "id": "pierre-dark-soft",
   "label": "Pierre Dark Soft",
   "dark": true,
+  "group": "dark",
   "toggleTo": "soft-light",
   "colors": {
     "bg": "#101010",

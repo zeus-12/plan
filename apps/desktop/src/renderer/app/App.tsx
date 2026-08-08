@@ -799,7 +799,7 @@ function Shell() {
   );
 
   return (
-    <div className="flex h-screen w-full flex-row overflow-hidden bg-[var(--bg-surface)] text-[var(--text)]">
+    <div className="flex h-screen w-full flex-row overflow-hidden bg-[var(--bg-chrome,var(--bg-surface))] text-[var(--text)]">
       {/* App-root toast host — always mounted, so notifications show regardless
           of which project/view is active. */}
       <Toaster position="bottom-right" closeButton />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@plan/shared/components/theme-provider";
-import { swatchFor } from "@plan/shared/lib/themes";
+import { groupThemes, swatchFor } from "@plan/shared/lib/themes";
 import { Button } from "@plan/shared/components/ui/button";
 import { cn } from "@plan/shared/lib/utils";
 
@@ -94,29 +94,41 @@ export function ThemeMenu() {
       </Button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-[var(--popover-border)] bg-[var(--popover-bg)] p-1 shadow-lg">
-          {themes.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => {
-                setTheme(t.id);
-                setOpen(false);
-              }}
+          {groupThemes(themes).map((group, i) => (
+            <div
+              key={group.id}
               className={cn(
-                "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--bg-surface-hover)]",
-                t.id === theme
-                  ? "text-[var(--text)]"
-                  : "text-[var(--text-secondary)]",
+                i > 0 && "mt-1 border-t border-[var(--border)] pt-1",
               )}
             >
-              <span className="flex items-center gap-2">
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full border border-[var(--border-strong)]"
-                  style={{ background: swatchFor(t) }}
-                />
-                {t.label}
-              </span>
-              {t.id === theme && <CheckIcon />}
-            </button>
+              <div className="px-2 py-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+                {group.label}
+              </div>
+              {group.themes.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setTheme(t.id);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--bg-surface-hover)]",
+                    t.id === theme
+                      ? "text-[var(--text)]"
+                      : "text-[var(--text-secondary)]",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full border border-[var(--border-strong)]"
+                      style={{ background: swatchFor(t) }}
+                    />
+                    {t.label}
+                  </span>
+                  {t.id === theme && <CheckIcon />}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}

@@ -2,7 +2,8 @@
   "id": "soft-light",
   "label": "Soft Light",
   "dark": false,
-  "toggleTo": "soft-dark",
+  "group": "light",
+  "toggleTo": "pierre-dark",
   "syntax": "github-light",
   "colors": {
     "bg": "#f3f1ec",
