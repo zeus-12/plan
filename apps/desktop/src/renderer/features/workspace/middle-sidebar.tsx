@@ -105,12 +105,22 @@ interface Props {
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
   /** Run (always) + Build (worktree only) are first and non-closable; rest are shells. */
-  terminals: { id: string; label: string; kind: "run" | "build" | "shell" }[];
+  terminals: {
+    id: string;
+    label: string;
+    kind: "run" | "build" | "shell";
+    /** Runs once, when this shell's pty is created (a chat code block's run
+     *  button spawns the shell already carrying its command). */
+    initialCommand?: string;
+  }[];
   /** The shell shown in the embedded pane below the tab strip. */
   activeTerminalId: string | null;
   onNewTerminal: () => void;
   onSelectTerminal: (id: string) => void;
   onCloseTerminal: (id: string) => void;
+  /** Bumped when a shell was spawned from outside this sidebar — reveals the
+   *  terminal pane so the new shell is actually on screen. */
+  terminalRevealTick: number;
   /** Project-level Run command list (shared across worktrees). */
   runEntries: CommandEntry[];
   /** Project-level Build command list (surfaced only in a worktree). */
@@ -308,6 +318,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   onNewTerminal,
   onSelectTerminal,
   onCloseTerminal,
+  terminalRevealTick,
   runEntries,
   buildEntries,
   onConfigureRun,
@@ -410,6 +421,18 @@ export const MiddleSidebar = memo(function MiddleSidebar({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [sidebar, terminals.length, onNewTerminal]);
+
+  // A shell spawned elsewhere (the run button on a chat code block) has no way
+  // to open this pane itself. Compared against the tick we last acted on rather
+  // than firing on mount, so a workspace remount doesn't pop the pane open for
+  // a shell that was spawned long ago.
+  const lastRevealTick = useRef(terminalRevealTick);
+  useEffect(() => {
+    if (terminalRevealTick === lastRevealTick.current) return;
+    lastRevealTick.current = terminalRevealTick;
+    sidebar.setOpen(true);
+    setPaneCollapsed(false);
+  }, [terminalRevealTick, sidebar]);
 
   const multiRepo = repos.length > 1;
   // Commit drafts live here, keyed by repo subPath, so a draft survives its
@@ -702,6 +725,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     <TerminalPanel
                       id={t.id}
                       encoded={encoded}
+                      initialCommand={t.initialCommand}
                       showHeader={false}
                       visible={active && !paneCollapsed && sidebar.open}
                       fitSignal={fitSignal}

@@ -8,6 +8,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useCodeRunner } from "./code-runner";
 import {
   highlightToHtmlLines,
   stripComments,
@@ -24,6 +25,12 @@ import type { ComponentPropsWithoutRef, ElementType, ReactNode } from "react";
 // arithmetic and only measure when wrapping actually stacks a line into rows.
 const CODE_FONT_SIZE = 12;
 const CODE_LINE_HEIGHT = 20;
+
+// Fences we're willing to hand to a shell. An unlabelled fence counts (agents
+// write plenty of them for commands); `console`/`shellsession` deliberately do
+// not — those carry `$ ` prompts and program output, so running them verbatim
+// would execute the transcript rather than the command.
+const SHELL_LANGS = new Set(["", "bash", "sh", "shell", "shellscript", "zsh"]);
 
 /** Pull the raw code text out of react-markdown's <code> child node. */
 function codeText(node: ReactNode): string {
@@ -53,6 +60,8 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   const lineRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const [copied, setCopied] = useState(false);
   const [copiedLine, setCopiedLine] = useState(false);
+  const [ran, setRan] = useState(false);
+  const runCommand = useCodeRunner();
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
   const [settings, updateSettings] = useDiffSettings();
@@ -152,6 +161,27 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
     setTimeout(() => setCopiedLine(false), 1500);
   };
 
+  const runnable = runCommand != null && SHELL_LANGS.has(lang);
+
+  // Hand the block to a fresh terminal as-is, minus comments and blank lines —
+  // line structure is kept, so multi-line constructs (a `for` loop, a `case`)
+  // still run. An unlabelled fence is stripped with the bash grammar: the run
+  // button only offers itself for shell-ish fences, so that's the language it
+  // is about to be executed as, not a guess about what it might be.
+  const run = () => {
+    const text = preRef.current?.textContent ?? "";
+    if (!text) return;
+    const command = (stripComments(text, lang || "bash") ?? text)
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim())
+      .join("\n");
+    if (!command) return;
+    runCommand?.(command);
+    setRan(true);
+    setTimeout(() => setRan(false), 1500);
+  };
+
   // Gutter is border-box, so its width must cover the digits (`${digits}ch`,
   // tabular so each is exactly 1ch) PLUS its own padding — otherwise the number
   // overflows its content area and wraps (a two-line "1"/"0"). Keep the padding
@@ -190,6 +220,23 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
           >
             <WrapIcon />
           </button>
+          {runnable && (
+            <button
+              type="button"
+              onClick={run}
+              aria-label={
+                ran ? "Sent to a new terminal" : "Run in new terminal"
+              }
+              title={
+                ran
+                  ? "Sent to a new terminal"
+                  : "Run in a new terminal for this project — strips comments, then runs it"
+              }
+              className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              {ran ? <CheckIcon /> : <RunIcon />}
+            </button>
+          )}
           <button
             type="button"
             onClick={copyOneLine}
@@ -343,6 +390,24 @@ function CopyOneLineIcon() {
     </svg>
   );
 }
+function RunIcon() {
+  // A shell prompt: chevron over a caret line — "type this at a terminal".
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="5 7 10 12 5 17" />
+      <line x1="13" y1="17" x2="19" y2="17" />
+    </svg>
+  );
+}
 function CheckIcon() {
   return (
     <svg
@@ -390,10 +455,7 @@ export const Markdown = memo(function Markdown({
         color: "var(--prose-fg, var(--text))",
       }}
     >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={COMPONENTS}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>

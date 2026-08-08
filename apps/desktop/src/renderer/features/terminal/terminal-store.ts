@@ -17,6 +17,14 @@ interface TerminalState {
   shells: string[];
   /** Shell shown in the sidebar's embedded terminal pane. */
   activeShellId: string | null;
+  /** Command a shell was spawned to run, by shell id. Read once, when its pane
+   *  creates the pty. Shell numbering reuses gaps after a close, so an entry
+   *  MUST die with its shell — otherwise the next shell to take that id would
+   *  re-run a command the user never asked for again. */
+  shellCommands: Record<string, string>;
+  /** Bumped when a shell is spawned from outside the sidebar (a chat code
+   *  block's run button), which has no other way to reveal the pane. */
+  revealTick: number;
 }
 
 const DEFAULT: TerminalState = {
@@ -24,6 +32,8 @@ const DEFAULT: TerminalState = {
   open: false,
   shells: [],
   activeShellId: null,
+  shellCommands: {},
+  revealTick: 0,
 };
 
 const store = new Map<string, TerminalState>();
@@ -60,15 +70,56 @@ function makeSetter<K extends keyof TerminalState>(
   };
 }
 
+/**
+ * Add a scratch shell and select it — in ONE update, because a pane reads its
+ * `initialCommand` when it mounts and creates the pty. Landing the shell and
+ * its command in separate updates would let the pane mount against a state
+ * where the command isn't there yet, and the shell would come up empty.
+ */
+export function spawnShell(encoded: string, id: string, command?: string) {
+  const cur = get(encoded);
+  store.set(encoded, {
+    ...cur,
+    shells: cur.shells.includes(id) ? cur.shells : [...cur.shells, id],
+    activeShellId: id,
+    shellCommands: command
+      ? { ...cur.shellCommands, [id]: command }
+      : cur.shellCommands,
+    revealTick: command ? cur.revealTick + 1 : cur.revealTick,
+  });
+  emit();
+}
+
+/** Drop a shell from the sidebar (its pty is the caller's business), forgetting
+ *  the command it was spawned with and falling back to the newest remaining
+ *  shell if the one shown is the one leaving. */
+export function forgetShell(encoded: string, id: string) {
+  const cur = get(encoded);
+  if (!cur.shells.includes(id)) return;
+  const remaining = cur.shells.filter((x) => x !== id);
+  const { [id]: _dropped, ...shellCommands } = cur.shellCommands;
+  store.set(encoded, {
+    ...cur,
+    shells: remaining,
+    shellCommands,
+    activeShellId:
+      cur.activeShellId === id
+        ? (remaining[remaining.length - 1] ?? null)
+        : cur.activeShellId,
+  });
+  emit();
+}
+
 export function useProjectTerminals(encoded: string): {
   openedIds: string[];
   setOpenedIds: Dispatch<SetStateAction<string[]>>;
   terminalOpen: boolean;
   setTerminalOpen: Dispatch<SetStateAction<boolean>>;
   shells: string[];
-  setShells: Dispatch<SetStateAction<string[]>>;
   activeShellId: string | null;
   setActiveShellId: Dispatch<SetStateAction<string | null>>;
+  shellCommands: Record<string, string>;
+  revealTick: number;
 } {
   const snapshot = useSyncExternalStore(
     subscribe,
@@ -78,7 +129,6 @@ export function useProjectTerminals(encoded: string): {
 
   const setOpenedIds = useCallback(makeSetter(encoded, "openedIds"), [encoded]);
   const setTerminalOpen = useCallback(makeSetter(encoded, "open"), [encoded]);
-  const setShells = useCallback(makeSetter(encoded, "shells"), [encoded]);
   const setActiveShellId = useCallback(makeSetter(encoded, "activeShellId"), [
     encoded,
   ]);
@@ -89,9 +139,10 @@ export function useProjectTerminals(encoded: string): {
     terminalOpen: snapshot.open,
     setTerminalOpen,
     shells: snapshot.shells,
-    setShells,
     activeShellId: snapshot.activeShellId,
     setActiveShellId,
+    shellCommands: snapshot.shellCommands,
+    revealTick: snapshot.revealTick,
   };
 }
 

@@ -15,6 +15,7 @@ import {
   useSidebar,
 } from "@plan/shared/components/ui/sidebar";
 import { Button } from "@plan/shared/components/ui/button";
+import { CodeRunnerProvider } from "@plan/shared/components/code-runner";
 import { Kbd } from "@plan/shared/components/ui/kbd";
 import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import {
@@ -1400,7 +1401,10 @@ function ProjectWorkspaceImpl({
     ensureOpened,
     rekeyChatTerminal,
     shellNumber,
+    shellCommands,
+    revealTick,
     newShell,
+    runInNewShell,
     selectShell,
     closeShell,
   } = useTerminalRegistry(project.encoded, (tid) => {
@@ -1696,9 +1700,10 @@ function ProjectWorkspaceImpl({
         id,
         label: `Terminal ${shellNumber(id)}`,
         kind: "shell" as const,
+        initialCommand: shellCommands[id],
       })),
     ],
-    [project.encoded, isWorktree, shells, shellNumber],
+    [project.encoded, isWorktree, shells, shellNumber, shellCommands],
   );
 
   // While the dock is open, keep the active chat terminal mounted. If there's
@@ -2004,356 +2009,409 @@ function ProjectWorkspaceImpl({
   });
 
   return (
-    <SidebarProvider
-      defaultOpen={true}
-      storageKey="plan.middleSidebar.open"
-      // ⌘E toggles this sidebar via a global listener — only wire it for the
-      // visible workspace so a background one doesn't also toggle.
-      shortcut={active ? MIDDLE_SIDEBAR_SHORTCUT : undefined}
-    >
-      {confirmDialog}
-      {pushDialog && (
-        <PushModal
-          preview={pushDialog.preview}
-          repoLabel={
-            repos.length > 1
-              ? (syncTargets.find((t) => t.subPath === pushDialog.subPath)
-                  ?.repoName ?? null)
-              : null
-          }
-          onPush={() => handlePush(pushDialog.subPath)}
-          onRefreshPreview={() =>
-            window.electronAPI.pushPreview(project.encoded, pushDialog.subPath)
-          }
-          onClose={() => setPushDialog(null)}
-        />
-      )}
-      {runConfigOpen && (
-        <CommandsConfigModal
-          title="Run"
-          description="Shared across every worktree and session of this project."
-          entries={runEntries}
-          repos={repos}
-          onSave={onSaveRun}
-          onClose={() => setRunConfigOpen(false)}
-        />
-      )}
-      {buildConfigOpen && (
-        <CommandsConfigModal
-          title="Build"
-          description="Shared across every worktree and session of this project."
-          entries={buildEntries}
-          repos={repos}
-          onSave={onSaveBuild}
-          onClose={() => setBuildConfigOpen(false)}
-        />
-      )}
-      {/* Toast host lives at the app root (App.tsx) so it's always mounted. */}
-      <CommandPalette
-        open={paletteMode === "files"}
-        placeholder="Search files in this project…"
-        query={paletteQuery}
-        onQueryChange={setPaletteQuery}
-        items={fileItems}
-        onClose={closePalette}
-        emptyLabel={projectFilesLoading ? "Indexing…" : "No files"}
-      />
-      <CommandPalette
-        open={paletteMode === "switch"}
-        placeholder="Switch to a project or chat…"
-        query={paletteQuery}
-        onQueryChange={setPaletteQuery}
-        items={switchItems}
-        onClose={closePalette}
-      />
-      {tabSwitcher.active && (
-        <SwitcherOverlay
-          title="Tabs & chats"
-          index={tabSwitcher.index}
-          items={switcherEntries.map((e) => {
-            if (e.type === "session") {
-              return {
-                key: e.id,
-                label: e.title,
-                sub: "Chat",
-                divider: hasOpenTabs && e.id === firstSessionSwitcherId,
-                dividerLabel: "Recent chats",
-              };
-            }
-            const t = e.tab;
-            return {
-              key: e.id,
-              label: titleForTab(t),
-              sub:
-                t.kind === "chat"
-                  ? "Chat"
-                  : t.kind === "scratch"
-                    ? "Scratchpad"
-                    : t.kind === "diff"
-                      ? t.staged
-                        ? "Diff · staged"
-                        : "Diff"
-                      : t.kind === "pr"
-                        ? `PR #${t.number}`
-                        : t.path,
-            };
-          })}
-        />
-      )}
-      {renaming && (
-        <RenameSessionDialog
-          initialName={renaming.name}
-          onSave={(name) => void handleRenameSave(renaming.sessionId, name)}
-          onClose={() => setRenaming(null)}
-        />
-      )}
-      <div className="flex h-full w-full flex-row">
-        <div
-          className={cn(
-            "content-card flex min-w-0 flex-1 flex-col",
-            // Project sidebar collapsed → the card is flush to the window edge,
-            // so drop its left divider (it'd otherwise be a stray line there).
-            !projectsSidebarOpen && "content-card--flush-left",
-          )}
-        >
-          <WorkspaceHeader
-            project={project}
-            projectsSidebarOpen={projectsSidebarOpen}
-            branch={headerRepo?.branch ?? null}
+    <CodeRunnerProvider run={runInNewShell}>
+      <SidebarProvider
+        defaultOpen={true}
+        storageKey="plan.middleSidebar.open"
+        // ⌘E toggles this sidebar via a global listener — only wire it for the
+        // visible workspace so a background one doesn't also toggle.
+        shortcut={active ? MIDDLE_SIDEBAR_SHORTCUT : undefined}
+      >
+        {confirmDialog}
+        {pushDialog && (
+          <PushModal
+            preview={pushDialog.preview}
             repoLabel={
-              headerRepo && repos.length > 1
-                ? repoDisplayName(headerRepo, project.cwd)
+              repos.length > 1
+                ? (syncTargets.find((t) => t.subPath === pushDialog.subPath)
+                    ?.repoName ?? null)
                 : null
             }
-            activeTab={activeTab}
+            onPush={() => handlePush(pushDialog.subPath)}
+            onRefreshPreview={() =>
+              window.electronAPI.pushPreview(
+                project.encoded,
+                pushDialog.subPath,
+              )
+            }
+            onClose={() => setPushDialog(null)}
           />
-          <div className="flex min-h-0 flex-1 flex-col">
+        )}
+        {runConfigOpen && (
+          <CommandsConfigModal
+            title="Run"
+            description="Shared across every worktree and session of this project."
+            entries={runEntries}
+            repos={repos}
+            onSave={onSaveRun}
+            onClose={() => setRunConfigOpen(false)}
+          />
+        )}
+        {buildConfigOpen && (
+          <CommandsConfigModal
+            title="Build"
+            description="Shared across every worktree and session of this project."
+            entries={buildEntries}
+            repos={repos}
+            onSave={onSaveBuild}
+            onClose={() => setBuildConfigOpen(false)}
+          />
+        )}
+        {/* Toast host lives at the app root (App.tsx) so it's always mounted. */}
+        <CommandPalette
+          open={paletteMode === "files"}
+          placeholder="Search files in this project…"
+          query={paletteQuery}
+          onQueryChange={setPaletteQuery}
+          items={fileItems}
+          onClose={closePalette}
+          emptyLabel={projectFilesLoading ? "Indexing…" : "No files"}
+        />
+        <CommandPalette
+          open={paletteMode === "switch"}
+          placeholder="Switch to a project or chat…"
+          query={paletteQuery}
+          onQueryChange={setPaletteQuery}
+          items={switchItems}
+          onClose={closePalette}
+        />
+        {tabSwitcher.active && (
+          <SwitcherOverlay
+            title="Tabs & chats"
+            index={tabSwitcher.index}
+            items={switcherEntries.map((e) => {
+              if (e.type === "session") {
+                return {
+                  key: e.id,
+                  label: e.title,
+                  sub: "Chat",
+                  divider: hasOpenTabs && e.id === firstSessionSwitcherId,
+                  dividerLabel: "Recent chats",
+                };
+              }
+              const t = e.tab;
+              return {
+                key: e.id,
+                label: titleForTab(t),
+                sub:
+                  t.kind === "chat"
+                    ? "Chat"
+                    : t.kind === "scratch"
+                      ? "Scratchpad"
+                      : t.kind === "diff"
+                        ? t.staged
+                          ? "Diff · staged"
+                          : "Diff"
+                        : t.kind === "pr"
+                          ? `PR #${t.number}`
+                          : t.path,
+              };
+            })}
+          />
+        )}
+        {renaming && (
+          <RenameSessionDialog
+            initialName={renaming.name}
+            onSave={(name) => void handleRenameSave(renaming.sessionId, name)}
+            onClose={() => setRenaming(null)}
+          />
+        )}
+        <div className="flex h-full w-full flex-row">
+          <div
+            className={cn(
+              "content-card flex min-w-0 flex-1 flex-col",
+              // Project sidebar collapsed → the card is flush to the window edge,
+              // so drop its left divider (it'd otherwise be a stray line there).
+              !projectsSidebarOpen && "content-card--flush-left",
+            )}
+          >
+            <WorkspaceHeader
+              project={project}
+              projectsSidebarOpen={projectsSidebarOpen}
+              branch={headerRepo?.branch ?? null}
+              repoLabel={
+                headerRepo && repos.length > 1
+                  ? repoDisplayName(headerRepo, project.cwd)
+                  : null
+              }
+              activeTab={activeTab}
+            />
             <div className="flex min-h-0 flex-1 flex-col">
-              <TabBar
-                tabs={tabs}
-                activeId={activeId}
-                titleFor={titleForTab}
-                termIdFor={termIdForTab}
-                onActivate={setActive}
-                onClose={closeTab}
-              />
-              {/* Each open tab keeps its own MOUNTED view, hidden via CSS when
+              <div className="flex min-h-0 flex-1 flex-col">
+                <TabBar
+                  tabs={tabs}
+                  activeId={activeId}
+                  titleFor={titleForTab}
+                  termIdFor={termIdForTab}
+                  onActivate={setActive}
+                  onClose={closeTab}
+                />
+                {/* Each open tab keeps its own MOUNTED view, hidden via CSS when
                   inactive — so scroll position, expanded diffs and parsed
                   transcripts survive switching tabs. */}
-              <div className="relative min-h-0 flex-1">
-                {tabs.length === 0 && (
-                  <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                    No tabs open — pick a chat, diff, or file from the sidebar.
-                  </div>
-                )}
-
-                {/* Diff tabs — each pane is memoized (see DiffTabPane) so an
-                    unrelated re-render doesn't touch every mounted diff. */}
-                {tabs.map((t) =>
-                  t.kind === "diff" && paneMounted(t.id) ? (
-                    <DiffTabPane
-                      key={t.id}
-                      tab={t}
-                      active={active && t.id === activeId}
-                      encoded={project.encoded}
-                      diff={getFileDiff(t.subPath, t.path)}
-                      revealAnnotation={
-                        commentReveal?.tabId === t.id ? commentReveal : null
-                      }
-                      onStageFile={handleStageFile}
-                      onUnstageFile={handleUnstageFile}
-                      onDiscardFile={handleDiscardFile}
-                      onChanged={refreshDiff}
-                      confirm={confirm}
-                    />
-                  ) : null,
-                )}
-
-                {/* File tabs */}
-                {tabs.map((t) =>
-                  t.kind === "file" && paneMounted(t.id) ? (
-                    <FileTabPane
-                      key={t.id}
-                      tab={t}
-                      active={active && t.id === activeId}
-                      encoded={project.encoded}
-                      annotations={
-                        annotationsByProjectFile[t.path] ?? EMPTY_ANN
-                      }
-                      revealTarget={
-                        fileReveal && fileReveal.path === t.path
-                          ? fileReveal
-                          : null
-                      }
-                      revealAnnotation={
-                        commentReveal?.tabId === t.id ? commentReveal : null
-                      }
-                      onAddAnnotation={addProjectFileAnnotation}
-                      onUpdateAnnotation={updateProjectFileAnnotation}
-                      onRemoveAnnotation={removeProjectFileAnnotation}
-                    />
-                  ) : null,
-                )}
-
-                {/* Scratchpad — a per-worktree singleton tab. Kept mounted (like
-                    the others) so its undo history and cursor survive switching
-                    away and back. */}
-                {tabs.map((t) =>
-                  t.kind === "scratch" && paneMounted(t.id) ? (
-                    <div
-                      key={t.id}
-                      className={cn(
-                        "absolute inset-0 min-h-0",
-                        t.id !== activeId && "hidden",
-                      )}
-                    >
-                      <ScratchEditor
-                        encoded={project.encoded}
-                        active={active && t.id === activeId}
-                      />
+                <div className="relative min-h-0 flex-1">
+                  {tabs.length === 0 && (
+                    <div className="flex h-full items-center justify-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                      No tabs open — pick a chat, diff, or file from the
+                      sidebar.
                     </div>
-                  ) : null,
-                )}
+                  )}
 
-                {/* PR tabs — each mounted, hidden when inactive so sub-tab and
-                    scroll state survive switching. */}
-                {tabs.map((t) =>
-                  t.kind === "pr" && paneMounted(t.id) ? (
-                    <div
-                      key={t.id}
-                      className={cn(
-                        "absolute inset-0",
-                        t.id !== activeId && "hidden",
-                      )}
-                    >
-                      <PrView
-                        encoded={project.encoded}
-                        subPath={t.subPath}
-                        number={t.number}
+                  {/* Diff tabs — each pane is memoized (see DiffTabPane) so an
+                    unrelated re-render doesn't touch every mounted diff. */}
+                  {tabs.map((t) =>
+                    t.kind === "diff" && paneMounted(t.id) ? (
+                      <DiffTabPane
+                        key={t.id}
+                        tab={t}
                         active={active && t.id === activeId}
+                        encoded={project.encoded}
+                        diff={getFileDiff(t.subPath, t.path)}
                         revealAnnotation={
                           commentReveal?.tabId === t.id ? commentReveal : null
                         }
+                        onStageFile={handleStageFile}
+                        onUnstageFile={handleUnstageFile}
+                        onDiscardFile={handleDiscardFile}
+                        onChanged={refreshDiff}
+                        confirm={confirm}
                       />
-                    </div>
-                  ) : null,
-                )}
-
-                {/* Chat tabs: each keeps a mounted MessageList (transcript scroll
-                    survives switching); the header + composer bind to the ACTIVE
-                    chat, since you only type into one chat at a time. */}
-                <div
-                  className={cn(
-                    "absolute inset-0 flex min-h-0 flex-col",
-                    activeTab?.kind !== "chat" && "hidden",
+                    ) : null,
                   )}
-                >
-                  <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                    <span className="truncate text-[var(--text-secondary)]">
-                      {sessions.find((s) => s.sessionId === selectedSessionId)
-                        ?.title ??
-                        session?.meta.title ??
-                        selectedSessionId ??
-                        "No session"}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span>
-                        {session
-                          ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
-                          : ""}
-                      </span>
-                      {selectedSessionId &&
-                        (chatTerminalReady ? (
-                          <span
-                            className={cn(
-                              "flex items-center gap-1.5 rounded-md border px-2 py-1",
-                              awaitingSelection
-                                ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
-                                : "border-[var(--border)]",
-                            )}
-                            title={
-                              awaitingSelection
-                                ? "Claude may be waiting on a menu selection (no text box) — ⌘J to respond"
-                                : !agentLive
-                                  ? "Terminal is open, but no Claude process detected — ⌘J to view"
-                                  : chatWorking
-                                    ? "Claude is working in this chat — ⌘J to view"
-                                    : "Claude is connected and idle in this chat — ⌘J to view"
-                            }
-                          >
-                            <span
-                              className={cn(
-                                "h-1.5 w-1.5 rounded-full",
-                                awaitingSelection
-                                  ? "animate-pulse bg-amber-500"
-                                  : !agentLive
-                                    ? "bg-[var(--text-tertiary)]"
-                                    : chatWorking
-                                      ? "animate-pulse bg-emerald-500"
-                                      : "bg-emerald-500",
-                              )}
-                            />
-                            {!awaitingSelection && agentLive && chatWorking ? (
-                              <TextShimmer duration={2.4}>Working</TextShimmer>
-                            ) : (
-                              <span>
-                                {awaitingSelection
-                                  ? "Needs input"
-                                  : !agentLive
-                                    ? "Terminal"
-                                    : "Claude"}
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={connectAndShowChat}
-                            title="Connect this chat to Claude (runs claude --resume) and open the terminal"
-                            className="flex items-center gap-1.5"
-                          >
-                            <span>Connect</span>
-                            <Kbd keys={["⌘", "J"]} />
-                          </Button>
-                        ))}
-                    </div>
-                  </div>
-                  <div className="relative min-h-0 flex-1">
-                    {tabs.map((t) => {
-                      if (t.kind !== "chat" || !paneMounted(t.id)) return null;
-                      // Active only when this workspace is the visible one AND
-                      // this is its active tab — so a hidden (keep-alive) chat
-                      // stops driving its terminal/working signals.
-                      const tabActive = active && t.id === activeId;
-                      // Active-only signals (working/terminalReady) are passed as
-                      // `false` to inactive panes, so a working-state flip on the
-                      // live chat re-renders only that one transcript — not all.
-                      return (
-                        <ChatTabPane
-                          key={t.id}
-                          tab={t}
-                          active={tabActive}
+
+                  {/* File tabs */}
+                  {tabs.map((t) =>
+                    t.kind === "file" && paneMounted(t.id) ? (
+                      <FileTabPane
+                        key={t.id}
+                        tab={t}
+                        active={active && t.id === activeId}
+                        encoded={project.encoded}
+                        annotations={
+                          annotationsByProjectFile[t.path] ?? EMPTY_ANN
+                        }
+                        revealTarget={
+                          fileReveal && fileReveal.path === t.path
+                            ? fileReveal
+                            : null
+                        }
+                        revealAnnotation={
+                          commentReveal?.tabId === t.id ? commentReveal : null
+                        }
+                        onAddAnnotation={addProjectFileAnnotation}
+                        onUpdateAnnotation={updateProjectFileAnnotation}
+                        onRemoveAnnotation={removeProjectFileAnnotation}
+                      />
+                    ) : null,
+                  )}
+
+                  {/* Scratchpad — a per-worktree singleton tab. Kept mounted (like
+                    the others) so its undo history and cursor survive switching
+                    away and back. */}
+                  {tabs.map((t) =>
+                    t.kind === "scratch" && paneMounted(t.id) ? (
+                      <div
+                        key={t.id}
+                        className={cn(
+                          "absolute inset-0 min-h-0",
+                          t.id !== activeId && "hidden",
+                        )}
+                      >
+                        <ScratchEditor
                           encoded={project.encoded}
-                          transcript={transcripts.get(t.sessionId)}
-                          annotations={chatAnnotations}
-                          working={tabActive ? chatWorking : false}
-                          terminalReady={tabActive ? chatTerminalReady : false}
-                          isNew={isNewSession(t.sessionId)}
+                          active={active && t.id === activeId}
+                        />
+                      </div>
+                    ) : null,
+                  )}
+
+                  {/* PR tabs — each mounted, hidden when inactive so sub-tab and
+                    scroll state survive switching. */}
+                  {tabs.map((t) =>
+                    t.kind === "pr" && paneMounted(t.id) ? (
+                      <div
+                        key={t.id}
+                        className={cn(
+                          "absolute inset-0",
+                          t.id !== activeId && "hidden",
+                        )}
+                      >
+                        <PrView
+                          encoded={project.encoded}
+                          subPath={t.subPath}
+                          number={t.number}
+                          active={active && t.id === activeId}
                           revealAnnotation={
                             commentReveal?.tabId === t.id ? commentReveal : null
                           }
-                          onAddAnnotation={addChatAnnotation}
-                          onUpdateAnnotation={updateChatAnnotation}
-                          onRemoveAnnotation={removeChatAnnotation}
-                          onSendKeys={sendKeysToChat}
                         />
-                      );
-                    })}
+                      </div>
+                    ) : null,
+                  )}
+
+                  {/* Chat tabs: each keeps a mounted MessageList (transcript scroll
+                    survives switching); the header + composer bind to the ACTIVE
+                    chat, since you only type into one chat at a time. */}
+                  <div
+                    className={cn(
+                      "absolute inset-0 flex min-h-0 flex-col",
+                      activeTab?.kind !== "chat" && "hidden",
+                    )}
+                  >
+                    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+                      <span className="truncate text-[var(--text-secondary)]">
+                        {sessions.find((s) => s.sessionId === selectedSessionId)
+                          ?.title ??
+                          session?.meta.title ??
+                          selectedSessionId ??
+                          "No session"}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span>
+                          {session
+                            ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
+                            : ""}
+                        </span>
+                        {selectedSessionId &&
+                          (chatTerminalReady ? (
+                            <span
+                              className={cn(
+                                "flex items-center gap-1.5 rounded-md border px-2 py-1",
+                                awaitingSelection
+                                  ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
+                                  : "border-[var(--border)]",
+                              )}
+                              title={
+                                awaitingSelection
+                                  ? "Claude may be waiting on a menu selection (no text box) — ⌘J to respond"
+                                  : !agentLive
+                                    ? "Terminal is open, but no Claude process detected — ⌘J to view"
+                                    : chatWorking
+                                      ? "Claude is working in this chat — ⌘J to view"
+                                      : "Claude is connected and idle in this chat — ⌘J to view"
+                              }
+                            >
+                              <span
+                                className={cn(
+                                  "h-1.5 w-1.5 rounded-full",
+                                  awaitingSelection
+                                    ? "animate-pulse bg-amber-500"
+                                    : !agentLive
+                                      ? "bg-[var(--text-tertiary)]"
+                                      : chatWorking
+                                        ? "animate-pulse bg-emerald-500"
+                                        : "bg-emerald-500",
+                                )}
+                              />
+                              {!awaitingSelection &&
+                              agentLive &&
+                              chatWorking ? (
+                                <TextShimmer duration={2.4}>
+                                  Working
+                                </TextShimmer>
+                              ) : (
+                                <span>
+                                  {awaitingSelection
+                                    ? "Needs input"
+                                    : !agentLive
+                                      ? "Terminal"
+                                      : "Claude"}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={connectAndShowChat}
+                              title="Connect this chat to Claude (runs claude --resume) and open the terminal"
+                              className="flex items-center gap-1.5"
+                            >
+                              <span>Connect</span>
+                              <Kbd keys={["⌘", "J"]} />
+                            </Button>
+                          ))}
+                      </div>
+                    </div>
+                    <div className="relative min-h-0 flex-1">
+                      {tabs.map((t) => {
+                        if (t.kind !== "chat" || !paneMounted(t.id))
+                          return null;
+                        // Active only when this workspace is the visible one AND
+                        // this is its active tab — so a hidden (keep-alive) chat
+                        // stops driving its terminal/working signals.
+                        const tabActive = active && t.id === activeId;
+                        // Active-only signals (working/terminalReady) are passed as
+                        // `false` to inactive panes, so a working-state flip on the
+                        // live chat re-renders only that one transcript — not all.
+                        return (
+                          <ChatTabPane
+                            key={t.id}
+                            tab={t}
+                            active={tabActive}
+                            encoded={project.encoded}
+                            transcript={transcripts.get(t.sessionId)}
+                            annotations={chatAnnotations}
+                            working={tabActive ? chatWorking : false}
+                            terminalReady={
+                              tabActive ? chatTerminalReady : false
+                            }
+                            isNew={isNewSession(t.sessionId)}
+                            revealAnnotation={
+                              commentReveal?.tabId === t.id
+                                ? commentReveal
+                                : null
+                            }
+                            onAddAnnotation={addChatAnnotation}
+                            onUpdateAnnotation={updateChatAnnotation}
+                            onRemoveAnnotation={removeChatAnnotation}
+                            onSendKeys={sendKeysToChat}
+                          />
+                        );
+                      })}
+                    </div>
+                    {comments.length > 0 && (
+                      <div className="shrink-0 px-3 pb-1.5">
+                        <div className="mx-auto w-full max-w-[820px]">
+                          <CommentChip
+                            comments={comments}
+                            message={composedMessage}
+                            onClear={handleClearComments}
+                            onOpen={handleOpenComment}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {activeTab?.kind === "chat" && selectedSessionId && (
+                      <ChatInput
+                        ref={chatInputRef}
+                        sessionId={selectedSessionId}
+                        projectEncoded={project.encoded}
+                        inactive={!chatTerminalReady}
+                        notReady={chatTerminalReady && !agentLive}
+                        onStart={connectChat}
+                        onSend={handleSendChat}
+                        blocked={awaitingSelection}
+                        onBlocked={() => revealChatTerminal(selectedSessionId)}
+                        autoFocus={isNewSession(selectedSessionId)}
+                        commentsPending={totalComments > 0}
+                        canContinue={
+                          stalledOnApiError && !chatWorking && !continueInFlight
+                        }
+                        atSessionLimit={!!sessionLimitReset && !chatWorking}
+                        sessionLimitReset={sessionLimitReset?.text ?? null}
+                        continueStarting={continueStarting}
+                        onContinue={handleContinue}
+                      />
+                    )}
                   </div>
-                  {comments.length > 0 && (
-                    <div className="shrink-0 px-3 pb-1.5">
-                      <div className="mx-auto w-full max-w-[820px]">
+                  {/* The same chip on a diff/file tab, floating over the bottom of
+                    the content: there's no chat in context to stage into, so it
+                    only tallies and navigates. The margins around it stay
+                    click-through so the code underneath is still selectable. */}
+                  {activeTab?.kind !== "chat" && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
+                      <div className="pointer-events-auto">
                         <CommentChip
                           comments={comments}
                           message={composedMessage}
@@ -2363,151 +2421,114 @@ function ProjectWorkspaceImpl({
                       </div>
                     </div>
                   )}
-                  {activeTab?.kind === "chat" && selectedSessionId && (
-                    <ChatInput
-                      ref={chatInputRef}
-                      sessionId={selectedSessionId}
-                      projectEncoded={project.encoded}
-                      inactive={!chatTerminalReady}
-                      notReady={chatTerminalReady && !agentLive}
-                      onStart={connectChat}
-                      onSend={handleSendChat}
-                      blocked={awaitingSelection}
-                      onBlocked={() => revealChatTerminal(selectedSessionId)}
-                      autoFocus={isNewSession(selectedSessionId)}
-                      commentsPending={totalComments > 0}
-                      canContinue={
-                        stalledOnApiError && !chatWorking && !continueInFlight
-                      }
-                      atSessionLimit={!!sessionLimitReset && !chatWorking}
-                      sessionLimitReset={sessionLimitReset?.text ?? null}
-                      continueStarting={continueStarting}
-                      onContinue={handleContinue}
-                    />
-                  )}
                 </div>
-                {/* The same chip on a diff/file tab, floating over the bottom of
-                    the content: there's no chat in context to stage into, so it
-                    only tallies and navigates. The margins around it stay
-                    click-through so the code underneath is still selectable. */}
-                {activeTab?.kind !== "chat" && (
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
-                    <div className="pointer-events-auto">
-                      <CommentChip
-                        comments={comments}
-                        message={composedMessage}
-                        onClear={handleClearComments}
-                        onOpen={handleOpenComment}
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
-            </div>
 
-            {/* Resizable docked terminal (⌘J). Kept mounted once opened so
+              {/* Resizable docked terminal (⌘J). Kept mounted once opened so
                 scrollback survives toggles; hidden (height 0) when closed. */}
-            {terminalMounted && (
-              <div
-                className={cn(
-                  "flex shrink-0 flex-col overflow-hidden border-t border-[var(--border)]",
-                  !terminalOpen && "hidden",
-                )}
-                style={{ height: terminalOpen ? terminalHeight : 0 }}
-              >
+              {terminalMounted && (
                 <div
-                  onPointerDown={startTerminalResize}
-                  className="h-1.5 shrink-0 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
-                />
-                <div className="relative min-h-0 flex-1 overflow-hidden">
-                  {openedIds.map((tid) => {
-                    const termActive = tid === activeTerminalId;
-                    return (
-                      <div
-                        key={tid}
-                        className={cn(
-                          "absolute inset-0 overflow-hidden",
-                          !termActive && "hidden",
-                        )}
-                      >
-                        <TerminalPanel
-                          id={tid}
-                          encoded={project.encoded}
-                          label={
-                            tid.startsWith(chatPrefix) ? "Claude" : "Terminal"
-                          }
-                          // No initial command: a chat pane attaches to a pty
-                          // its engine already started (and already ran Claude
-                          // in). See main/agents/cli-engine.
-                          // Also gated on the workspace being visible so a
-                          // background (keep-alive) terminal buffers its pty
-                          // output instead of parsing it on the main thread.
-                          visible={active && terminalOpen && termActive}
-                          fitSignal={terminalHeight}
-                          onClose={() => setTerminalOpen(false)}
-                        />
-                      </div>
-                    );
-                  })}
+                  className={cn(
+                    "flex shrink-0 flex-col overflow-hidden border-t border-[var(--border)]",
+                    !terminalOpen && "hidden",
+                  )}
+                  style={{ height: terminalOpen ? terminalHeight : 0 }}
+                >
+                  <div
+                    onPointerDown={startTerminalResize}
+                    className="h-1.5 shrink-0 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
+                  />
+                  <div className="relative min-h-0 flex-1 overflow-hidden">
+                    {openedIds.map((tid) => {
+                      const termActive = tid === activeTerminalId;
+                      return (
+                        <div
+                          key={tid}
+                          className={cn(
+                            "absolute inset-0 overflow-hidden",
+                            !termActive && "hidden",
+                          )}
+                        >
+                          <TerminalPanel
+                            id={tid}
+                            encoded={project.encoded}
+                            label={
+                              tid.startsWith(chatPrefix) ? "Claude" : "Terminal"
+                            }
+                            // No initial command: a chat pane attaches to a pty
+                            // its engine already started (and already ran Claude
+                            // in). See main/agents/cli-engine.
+                            // Also gated on the workspace being visible so a
+                            // background (keep-alive) terminal buffers its pty
+                            // output instead of parsing it on the main thread.
+                            visible={active && terminalOpen && termActive}
+                            fitSignal={terminalHeight}
+                            onClose={() => setTerminalOpen(false)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+          <MiddleSidebar
+            tab={tab}
+            onTabChange={setTab}
+            repos={repos}
+            repoGroups={repoGroups}
+            selectedFile={openKind === "diffs" ? selectedFile : null}
+            activeFilePath={activeFilePath}
+            onSelectFile={handleSelectFile}
+            onStageFile={handleStageFile}
+            onUnstageFile={handleUnstageFile}
+            onDiscardFile={handleDiscardFile}
+            onStageAll={handleStageAll}
+            onUnstageAll={handleUnstageAll}
+            onDiscardAll={handleDiscardAll}
+            onStashAll={handleStashAll}
+            syncTargets={syncTargets}
+            onPush={openPushDialog}
+            onCommit={handleCommit}
+            filesLoading={filesLoading}
+            diffAvailable={repos.length > 0}
+            diffsRefreshing={diffsRefreshing}
+            sessions={sessions}
+            selectedSession={openKind === "chat" ? selectedSessionId : null}
+            onSelectSession={handleSelectSession}
+            onSetSessionArchived={handleSetSessionArchived}
+            onRenameSession={handleRenameRequest}
+            onMoveSession={onMoveSession}
+            onNewChat={handleNewChat}
+            sessionsLoading={sessionsLoading}
+            projectFiles={projectFiles}
+            projectFilesLoading={projectFilesLoading}
+            selectedProjectFile={
+              openKind === "files" ? selectedProjectFile : null
+            }
+            onSelectProjectFile={handleSelectProjectFile}
+            onOpenSearchResult={handleOpenSearchResult}
+            activePr={activePr}
+            onOpenPr={handleOpenPr}
+            repoName={prRepoName}
+            encoded={project.encoded}
+            terminals={sidebarTerminals}
+            // Default to the always-present Run tab when no shell is selected.
+            activeTerminalId={activeShellId ?? `run:${project.encoded}`}
+            onNewTerminal={newShell}
+            onSelectTerminal={selectShell}
+            onCloseTerminal={closeShell}
+            terminalRevealTick={revealTick}
+            runEntries={runEntries}
+            buildEntries={buildEntries}
+            onConfigureRun={() => setRunConfigOpen(true)}
+            onConfigureBuild={() => setBuildConfigOpen(true)}
+            onOpenScratch={() => openTab(makeScratchTab())}
+          />
         </div>
-        <MiddleSidebar
-          tab={tab}
-          onTabChange={setTab}
-          repos={repos}
-          repoGroups={repoGroups}
-          selectedFile={openKind === "diffs" ? selectedFile : null}
-          activeFilePath={activeFilePath}
-          onSelectFile={handleSelectFile}
-          onStageFile={handleStageFile}
-          onUnstageFile={handleUnstageFile}
-          onDiscardFile={handleDiscardFile}
-          onStageAll={handleStageAll}
-          onUnstageAll={handleUnstageAll}
-          onDiscardAll={handleDiscardAll}
-          onStashAll={handleStashAll}
-          syncTargets={syncTargets}
-          onPush={openPushDialog}
-          onCommit={handleCommit}
-          filesLoading={filesLoading}
-          diffAvailable={repos.length > 0}
-          diffsRefreshing={diffsRefreshing}
-          sessions={sessions}
-          selectedSession={openKind === "chat" ? selectedSessionId : null}
-          onSelectSession={handleSelectSession}
-          onSetSessionArchived={handleSetSessionArchived}
-          onRenameSession={handleRenameRequest}
-          onMoveSession={onMoveSession}
-          onNewChat={handleNewChat}
-          sessionsLoading={sessionsLoading}
-          projectFiles={projectFiles}
-          projectFilesLoading={projectFilesLoading}
-          selectedProjectFile={
-            openKind === "files" ? selectedProjectFile : null
-          }
-          onSelectProjectFile={handleSelectProjectFile}
-          onOpenSearchResult={handleOpenSearchResult}
-          activePr={activePr}
-          onOpenPr={handleOpenPr}
-          repoName={prRepoName}
-          encoded={project.encoded}
-          terminals={sidebarTerminals}
-          // Default to the always-present Run tab when no shell is selected.
-          activeTerminalId={activeShellId ?? `run:${project.encoded}`}
-          onNewTerminal={newShell}
-          onSelectTerminal={selectShell}
-          onCloseTerminal={closeShell}
-          runEntries={runEntries}
-          buildEntries={buildEntries}
-          onConfigureRun={() => setRunConfigOpen(true)}
-          onConfigureBuild={() => setBuildConfigOpen(true)}
-          onOpenScratch={() => openTab(makeScratchTab())}
-        />
-      </div>
-    </SidebarProvider>
+      </SidebarProvider>
+    </CodeRunnerProvider>
   );
 }
 

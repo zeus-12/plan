@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { useProjectTerminals } from "./terminal-store";
+import { forgetShell, spawnShell, useProjectTerminals } from "./terminal-store";
 import { rekeyChat } from "@/renderer/features/chat/session/chat-driver-store";
 import { relocateSessionUnread } from "@/renderer/features/sessions/unread-response-store";
 import {
@@ -44,7 +44,15 @@ export function useTerminalRegistry(
   rekeyChatTerminal: (oldTid: string, newTid: string) => Promise<boolean>;
   /** A scratch shell's display number (from its pty id). */
   shellNumber: (id: string) => number;
+  /** Commands the open shells were spawned to run, by shell id. */
+  shellCommands: Record<string, string>;
+  /** Bumped when a shell was spawned from outside the sidebar — the sidebar
+   *  watches it to reveal the terminal pane. */
+  revealTick: number;
   newShell: () => void;
+  /** Open a new shell in this project (worktree included — the cwd follows
+   *  `encoded`) and run `command` in it. */
+  runInNewShell: (command: string) => void;
   selectShell: (id: string) => void;
   /** Kill the pty and drop the shell from the sidebar. */
   closeShell: (id: string) => void;
@@ -55,9 +63,10 @@ export function useTerminalRegistry(
     terminalOpen,
     setTerminalOpen,
     shells,
-    setShells,
     activeShellId,
     setActiveShellId,
+    shellCommands,
+    revealTick,
   } = useProjectTerminals(encoded);
 
   const chatPrefix = chatTerminalPrefix(encoded);
@@ -94,13 +103,23 @@ export function useTerminalRegistry(
     [shellPrefix],
   );
 
-  const newShell = useCallback(() => {
-    // Numbering reuses gaps after closes; the pty behind a reused id is fresh.
-    const n = shells.reduce((m, id) => Math.max(m, shellNumber(id)), 0) + 1;
-    const id = shellTerminalId(encoded, n);
-    setShells((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setActiveShellId(id);
-  }, [shells, shellNumber, encoded, setShells, setActiveShellId]);
+  const openShell = useCallback(
+    (command?: string) => {
+      // Numbering reuses gaps after closes; the pty behind a reused id is fresh.
+      const n = shells.reduce((m, id) => Math.max(m, shellNumber(id)), 0) + 1;
+      spawnShell(encoded, shellTerminalId(encoded, n), command);
+    },
+    [shells, shellNumber, encoded],
+  );
+
+  const newShell = useCallback(() => openShell(), [openShell]);
+
+  const runInNewShell = useCallback(
+    // A pty takes CR for "Enter", so every line of a multi-line snippet has to
+    // end in one to actually be submitted — main appends the last.
+    (command: string) => openShell(command.replace(/\n/g, "\r")),
+    [openShell],
+  );
 
   const selectShell = useCallback(
     (id: string) => {
@@ -110,15 +129,8 @@ export function useTerminalRegistry(
   );
 
   const removeShell = useCallback(
-    (id: string) => {
-      const remaining = shells.filter((x) => x !== id);
-      setShells(remaining);
-      // Closing the shown shell falls back to the most recent remaining one.
-      setActiveShellId((cur) =>
-        cur === id ? (remaining[remaining.length - 1] ?? null) : cur,
-      );
-    },
-    [shells, setShells, setActiveShellId],
+    (id: string) => forgetShell(encoded, id),
+    [encoded],
   );
 
   const closeShell = useCallback(
@@ -164,7 +176,10 @@ export function useTerminalRegistry(
     ensureOpened,
     rekeyChatTerminal,
     shellNumber,
+    shellCommands,
+    revealTick,
     newShell,
+    runInNewShell,
     selectShell,
     closeShell,
   };
