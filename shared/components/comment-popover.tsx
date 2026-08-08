@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { excerpt, type Excerpt } from "../lib/comments/excerpt";
+import { excerpt } from "../lib/comments/excerpt";
 import type { AnnotationContext } from "../lib/comments/store";
 
 const POPOVER_WIDTH = 360;
@@ -181,7 +181,7 @@ function SourcePill({
   preview,
 }: {
   source: SourceParts;
-  preview: Excerpt;
+  preview: string;
 }) {
   const [open, setOpen] = useState(false);
   // The peek opens above the pill, but the card itself may already have flipped
@@ -286,7 +286,7 @@ function SourcePill({
             className="scrollbar-minimal m-0 select-text overflow-y-auto whitespace-pre-wrap break-words px-[11px] py-2.5 font-[family-name:var(--font-mono)] text-[10.5px] leading-[1.62] text-[var(--text-secondary)]"
             style={{ maxHeight: PEEK_MAX_HEIGHT }}
           >
-            {preview.text}
+            {preview}
           </pre>
         </span>
       )}

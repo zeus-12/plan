@@ -6,42 +6,24 @@
  * the payload, character for character.
  */
 
-export interface Excerpt {
-  /** Exactly what gets sent, elision marker included. */
-  text: string;
-  /** `text` is the whole selection, untouched. */
-  complete: boolean;
-  /** Whole lines dropped from the middle; 0 when the cut landed inside a line. */
-  elidedLines: number;
-  /** Characters dropped from the middle. */
-  elidedChars: number;
-  totalChars: number;
-  totalLines: number;
-}
-
 /** Openings matter more than endings for orienting a reader, so the head keeps
  *  the larger share of the budget. */
 const HEAD_SHARE = 0.6;
 
-/** Goes into the sent text verbatim, in place of what was dropped — so it has
- *  to read plainly to whoever receives the message, not just in the UI. */
-function marker(label: string): string {
-  return `… ${label} omitted …`;
+/** These go into the sent text verbatim, in place of what was dropped — so they
+ *  have to read plainly to whoever receives the message, not just in the UI. */
+const CUT = "… omitted …";
+
+function linesCut(n: number): string {
+  return `… ${n} line${n === 1 ? "" : "s"} omitted …`;
 }
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-export function excerpt(text: string, budget: number): Excerpt {
+export function excerpt(text: string, budget: number): string {
   const totalChars = text.length;
   const lines = text.split("\n");
   const totalLines = lines.length;
-  const base = { totalChars, totalLines };
 
-  if (totalChars <= budget) {
-    return { ...base, text, complete: true, elidedLines: 0, elidedChars: 0 };
-  }
+  if (totalChars <= budget) return text;
 
   const headBudget = Math.floor(budget * HEAD_SHARE);
   const tailBudget = budget - headBudget;
@@ -71,27 +53,11 @@ export function excerpt(text: string, budget: number): Excerpt {
     // A single line longer than its own budget would blow past it whole, so
     // fall through to the character cut rather than emit an oversized excerpt.
     if (elidedLines > 0 && keptChars <= budget) {
-      return {
-        ...base,
-        text: [...head, marker(plural(elidedLines, "line")), ...tail].join(
-          "\n",
-        ),
-        complete: false,
-        elidedLines,
-        elidedChars: totalChars - keptChars,
-      };
+      return [...head, linesCut(elidedLines), ...tail].join("\n");
     }
   }
 
-  const elidedChars = totalChars - headBudget - tailBudget;
-  return {
-    ...base,
-    text:
-      text.slice(0, headBudget) +
-      marker(plural(elidedChars, "char")) +
-      text.slice(totalChars - tailBudget),
-    complete: false,
-    elidedLines: 0,
-    elidedChars,
-  };
+  return (
+    text.slice(0, headBudget) + CUT + text.slice(totalChars - tailBudget)
+  );
 }

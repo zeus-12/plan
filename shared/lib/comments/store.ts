@@ -63,31 +63,28 @@ function locationString(ctx?: AnnotationContext): string | null {
   return base;
 }
 
+/** Keeps a continuation line inside its numbered item under markdown. */
+function indent(line: string): string {
+  return `   ${line}`;
+}
+
 function formatAnnotation(a: Annotation, idx: number): string {
   const loc = locationString(a.context);
-  const ex = excerpt(
+  const text = excerpt(
     a.selectedText,
     loc ? ANCHORED_EXCERPT_BUDGET : UNANCHORED_EXCERPT_BUDGET,
   );
 
-  // A multi-line quote interpolated into `Regarding: "…"` breaks out of the
-  // 3-space indent on every line after the first, so anything spanning lines
-  // gets a block instead, with the true size stated where the reader can act
-  // on it.
-  if (ex.text.includes("\n")) {
-    const size = `${ex.totalLines} lines, ${ex.totalChars} chars`;
-    const quoted = ex.text
-      .split("\n")
-      .map((line) => `   > ${line}`)
-      .join("\n");
-    const header = loc ? `${idx}. ${loc} — ${size}` : `${idx}. ${size}`;
-    return `${header}\n${quoted}\n   → ${a.comment}`;
-  }
+  const quote = text.split("\n").map((line) => `> ${line}`);
+  const lead = loc ? `${idx}. ${loc}` : `${idx}. ${quote.shift()}`;
+  const lines = [lead, ...quote.map(indent)];
 
-  const header = loc
-    ? `${idx}. ${loc}\n   Regarding: "${ex.text}"`
-    : `${idx}. Regarding: "${ex.text}"`;
-  return `${header}\n   → ${a.comment}`;
+  // The blank line is what keeps the comment out of the quote: without it
+  // markdown reads it as a lazy continuation and folds it into the block.
+  const comment = a.comment.trim();
+  if (comment) lines.push("", ...comment.split("\n").map(indent));
+
+  return lines.join("\n");
 }
 
 export interface MessageOptions {
