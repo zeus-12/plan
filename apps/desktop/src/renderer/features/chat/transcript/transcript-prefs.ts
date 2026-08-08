@@ -9,7 +9,7 @@ import { createPersistedValue } from "@/renderer/lib/external-value";
  * choice follows the reader across every transcript without prop-drilling.
  */
 
-export type ProseFontId = "inter" | "system" | "charter" | "georgia" | "mono";
+export type ProseFontId = "inter" | "system" | "charter" | "mono";
 export type ProseBrightnessId = "normal" | "soft" | "softer";
 
 export interface ProseFontOption {
@@ -31,11 +31,6 @@ export const PROSE_FONTS: ProseFontOption[] = [
     id: "charter",
     label: "Charter (serif)",
     stack: 'Charter, "Iowan Old Style", Georgia, serif',
-  },
-  {
-    id: "georgia",
-    label: "Georgia (serif)",
-    stack: 'Georgia, "Times New Roman", serif',
   },
   {
     id: "mono",
@@ -70,15 +65,12 @@ export interface TranscriptPrefs {
   fontFamily: ProseFontId;
   fontSize: number;
   brightness: ProseBrightnessId;
-  /** Bionic reading: bold each word's leading letters in the chat transcript. */
-  bionic: boolean;
 }
 
 const DEFAULTS: TranscriptPrefs = {
   fontFamily: "inter",
   fontSize: 14,
   brightness: "soft",
-  bionic: false,
 };
 
 const store = createPersistedValue<TranscriptPrefs>(
@@ -96,7 +88,6 @@ const store = createPersistedValue<TranscriptPrefs>(
       brightness: PROSE_BRIGHTNESS.some((b) => b.id === r.brightness)
         ? (r.brightness as ProseBrightnessId)
         : DEFAULTS.brightness,
-      bionic: typeof r.bionic === "boolean" ? r.bionic : DEFAULTS.bionic,
     };
   },
 );
@@ -121,15 +112,6 @@ export function setTranscriptPrefs(patch: Partial<TranscriptPrefs>) {
   const next = { ...store.get(), ...patch };
   store.set(next);
   applyTranscriptPrefs(next);
-}
-
-/**
- * Flip bionic reading on/off. Bound to ⌘⇧B (App.tsx) and the Settings toggle.
- * Unlike font/size/brightness this isn't a `--prose-*` variable — it's read by
- * the chat renderer as a prop — so there's nothing to re-apply on <html>.
- */
-export function toggleBionicReading() {
-  setTranscriptPrefs({ bionic: !store.get().bionic });
 }
 
 /** React binding for the Settings UI. */

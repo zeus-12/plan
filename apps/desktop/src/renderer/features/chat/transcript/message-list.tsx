@@ -29,7 +29,6 @@ import { CommentPopover } from "@plan/shared/components/comment-popover";
 
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
-import { useTranscriptPrefs } from "./transcript-prefs";
 import {
   chatScrollKey,
   getChatScroll,
@@ -675,12 +674,9 @@ function rangeForCover(root: HTMLElement, cover: PartCover): Range | null {
  * the renderer.
  */
 function MarkdownText({ text }: { text: string }) {
-  // Bionic reading is a chat-only reading pref — the shared Markdown is also
-  // used for PR transcripts, so we opt in here and leave those untouched.
-  const [{ bionic }] = useTranscriptPrefs();
   return (
     <div className="[cursor:text]">
-      <Markdown content={text} bionic={bionic} />
+      <Markdown content={text} />
     </div>
   );
 }

@@ -94,10 +94,7 @@ import {
   recordUse,
   subscribeMru,
 } from "@/renderer/features/workspace/mru-store";
-import {
-  toggleBionicReading,
-  useApplyTranscriptPrefs,
-} from "@/renderer/features/chat/transcript/transcript-prefs";
+import { useApplyTranscriptPrefs } from "@/renderer/features/chat/transcript/transcript-prefs";
 import { startSessionDoneNotifier } from "@/renderer/features/sessions/session-done-notifier";
 import { startSessionApprovalNotifier } from "@/renderer/features/sessions/session-approval-notifier";
 import { startAutoContinueWatcher } from "@/renderer/features/chat/session/auto-continue-watcher";
@@ -537,24 +534,6 @@ function Shell() {
         e.preventDefault();
         setShortcutsOpen(true);
         return;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // ⌘⇧B → toggle bionic reading. Global so it's reachable while reading
-  // anywhere; kept separate because the ⌘,/⌘/ handler above bails on Shift.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === "b"
-      ) {
-        e.preventDefault();
-        toggleBionicReading();
       }
     };
     window.addEventListener("keydown", onKey);

@@ -92,11 +92,6 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         chords: [{ mods: ["meta", "shift"], key: "S" }],
       },
       {
-        id: "toggleBionic",
-        label: "Toggle bionic reading",
-        chords: [{ mods: ["meta", "shift"], key: "B" }],
-      },
-      {
         id: "cycleTabs",
         label: "Cycle open tabs (next / prev)",
         chords: [
