@@ -1200,9 +1200,9 @@ function FileViewerImpl({
   }, [status, isImage, data]);
 
   // Empty, line-number-free space under the last line so you can scroll it up to
-  // the top of the viewport. It renders nothing (just extends the scroll extent),
-  // so the file section's own background shows through — no separate surface.
-  const scrollBeyondEnd = Math.max(0, viewportH - LINE_HEIGHT);
+  // the middle of the viewport. It renders nothing (just extends the scroll
+  // extent), so the file section's own background shows through.
+  const scrollBeyondEnd = Math.max(0, Math.round(viewportH / 2));
 
   // A small breathing margin above the first line — but only for the editable
   // buffer (the scratchpad), not files. `paddingStart` offsets every row, so the
