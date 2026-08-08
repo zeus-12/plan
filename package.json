@@ -16,6 +16,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "electron",
       "node-pty"
     ]
   }
