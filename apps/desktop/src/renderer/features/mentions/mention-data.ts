@@ -25,6 +25,11 @@ interface SkillIndex {
 // The project file list is large and rarely changes mid-session; cache it per
 // project but refresh past a short TTL so newly created files still show up.
 const TTL_MS = 10_000;
+
+/** Rows handed to the menu. A fuzzy search over a 20k-file project returns far
+ *  more than anyone scrolls, and every extra row is a re-rendered icon per
+ *  keystroke — past this you refine the query instead. */
+const RESULT_LIMIT = 20;
 const fileCache = new Map<string, FileIndex>();
 const filePending = new Map<string, Promise<FileIndex>>();
 const skillCache = new Map<string, SkillIndex>();
@@ -62,9 +67,7 @@ async function buildFileIndex(encoded: string): Promise<FileIndex> {
   return { entries, fuse, at: Date.now() };
 }
 
-export function loadFileIndex(encoded: string): Promise<FileIndex> {
-  const cached = fileCache.get(encoded);
-  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached);
+function refreshFileIndex(encoded: string): Promise<FileIndex> {
   let pending = filePending.get(encoded);
   if (!pending) {
     pending = buildFileIndex(encoded)
@@ -78,10 +81,20 @@ export function loadFileIndex(encoded: string): Promise<FileIndex> {
   return pending;
 }
 
+export function loadFileIndex(encoded: string): Promise<FileIndex> {
+  const cached = fileCache.get(encoded);
+  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached);
+  const pending = refreshFileIndex(encoded);
+  // Stale-while-revalidate. Awaiting the rebuild made one keystroke every 10s
+  // pay for a full project walk plus a fresh Fuse index; the stale list is a
+  // few seconds out of date at worst, and the next keystroke gets the new one.
+  return cached ? Promise.resolve(cached) : pending;
+}
+
 export function searchFiles(
   idx: FileIndex,
   query: string,
-  limit = 40,
+  limit = RESULT_LIMIT,
 ): FileEntry[] {
   if (!query) {
     // No query yet: files first, then folders, alphabetical — a sane default.
@@ -110,9 +123,7 @@ async function buildSkillIndex(encoded: string): Promise<SkillIndex> {
   return { skills, fuse, at: Date.now() };
 }
 
-export function loadSkillIndex(encoded: string): Promise<SkillIndex> {
-  const cached = skillCache.get(encoded);
-  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached);
+function refreshSkillIndex(encoded: string): Promise<SkillIndex> {
   let pending = skillPending.get(encoded);
   if (!pending) {
     pending = buildSkillIndex(encoded)
@@ -126,10 +137,17 @@ export function loadSkillIndex(encoded: string): Promise<SkillIndex> {
   return pending;
 }
 
+export function loadSkillIndex(encoded: string): Promise<SkillIndex> {
+  const cached = skillCache.get(encoded);
+  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached);
+  const pending = refreshSkillIndex(encoded);
+  return cached ? Promise.resolve(cached) : pending;
+}
+
 export function searchSkills(
   idx: SkillIndex,
   query: string,
-  limit = 40,
+  limit = RESULT_LIMIT,
 ): SkillInfo[] {
   if (!query) return idx.skills.slice(0, limit);
   return idx.fuse.search(query, { limit }).map((r) => r.item);

@@ -35,9 +35,12 @@ import {
   takeHistory,
   writeLastSent,
 } from "./composer-memory";
-import { ReferenceNode } from "./reference-node";
-import { FileMentionPlugin, SkillMentionPlugin } from "./mention-plugins";
-import { isMentionMenuOpen } from "./mention-menu-state";
+import { ReferenceNode } from "@/renderer/features/mentions/reference-node";
+import {
+  FileMentionPlugin,
+  SkillMentionPlugin,
+} from "@/renderer/features/mentions/mention-plugins";
+import { isMentionMenuOpen } from "@/renderer/features/mentions/mention-menu-state";
 
 export interface ChatInputHandle {
   focus: () => void;

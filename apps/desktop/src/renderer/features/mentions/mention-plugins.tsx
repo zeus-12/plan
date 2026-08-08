@@ -24,8 +24,11 @@ import {
   searchFiles,
   searchSkills,
   type FileEntry,
-} from "./mention-data";
-import { searchBuiltinCommands, type BuiltinCommand } from "./builtin-commands";
+} from "@/renderer/features/mentions/mention-data";
+import {
+  searchBuiltinCommands,
+  type BuiltinCommand,
+} from "@/renderer/features/mentions/builtin-commands";
 import type { SkillInfo } from "@/common/shared-types";
 
 class FileOption extends MenuOption {
@@ -51,6 +54,31 @@ type SlashOption = CommandOption | SkillOption;
 
 const MENU_MAX_H = 280;
 const MENU_GAP = 6;
+
+/** Fuzzy-matching a large project costs 30–140ms per call at 10–20k entries, so
+ *  running it per keystroke stutters the caret. One search per typing pause
+ *  instead — the first character still opens the menu immediately. */
+const SEARCH_DEBOUNCE_MS = 70;
+
+function useDebouncedQuery(query: string | null): string | null {
+  const [settled, setSettled] = useState(query);
+
+  useEffect(() => {
+    // Opening the menu and closing it are not searches — only a growing query
+    // waits, so `@` still lists the project the instant it's typed.
+    if (query === null || query === "") {
+      setSettled(query);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setSettled(query),
+      SEARCH_DEBOUNCE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  return settled;
+}
 
 /**
  * Reads the caret's viewport rect — the live source of truth for where the menu
@@ -147,6 +175,10 @@ function MenuShell({ children }: { children: ReactNode }) {
   // otherwise reposition the anchor from *our* menu's size — a feedback loop.
   return createPortal(
     <ul
+      // The comment popover dismisses itself on any mousedown outside its card;
+      // this menu is outside it by DOM containment but part of it by intent, so
+      // the popover looks for this attribute to tell them apart.
+      data-mention-menu=""
       style={style}
       className="z-[70] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-1 shadow-xl"
     >
@@ -222,22 +254,23 @@ export function FileMentionPlugin({
 }) {
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
+  const settled = useDebouncedQuery(query);
   const [options, setOptions] = useState<FileOption[]>([]);
 
   useEffect(() => {
-    if (query === null) {
+    if (settled === null) {
       setOptions([]);
       return;
     }
     let alive = true;
     void loadFileIndex(projectEncoded).then((idx) => {
       if (alive)
-        setOptions(searchFiles(idx, query).map((e) => new FileOption(e)));
+        setOptions(searchFiles(idx, settled).map((e) => new FileOption(e)));
     });
     return () => {
       alive = false;
     };
-  }, [query, projectEncoded]);
+  }, [settled, projectEncoded]);
 
   const triggerFn = useCallback((text: string): MenuTextMatch | null => {
     const m = /(^|\s)@([\w./-]*)$/.exec(text);
@@ -319,30 +352,31 @@ export function SkillMentionPlugin({
 }) {
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
+  const settled = useDebouncedQuery(query);
   const [options, setOptions] = useState<SlashOption[]>([]);
 
   useEffect(() => {
-    if (query === null) {
+    if (settled === null) {
       setOptions([]);
       return;
     }
     let alive = true;
     // Native commands (e.g. `/branch`) rank above skills so they're one keystroke
     // away, then the fuzzy skill matches fill the rest.
-    const commands = searchBuiltinCommands(query).map(
+    const commands = searchBuiltinCommands(settled).map(
       (c) => new CommandOption(c),
     );
     void loadSkillIndex(projectEncoded).then((idx) => {
       if (alive)
         setOptions([
           ...commands,
-          ...searchSkills(idx, query).map((s) => new SkillOption(s)),
+          ...searchSkills(idx, settled).map((s) => new SkillOption(s)),
         ]);
     });
     return () => {
       alive = false;
     };
-  }, [query, projectEncoded]);
+  }, [settled, projectEncoded]);
 
   const triggerFn = useCallback((text: string): MenuTextMatch | null => {
     const m = /(^|\s)\/([\w:-]*)$/.exec(text);

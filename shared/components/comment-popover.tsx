@@ -1,8 +1,16 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from "react";
 import { excerpt } from "../lib/comments/excerpt";
 import type { AnnotationContext } from "../lib/comments/store";
+import { useCommentInput, type CommentInputHandle } from "./comment-input";
 
 const POPOVER_WIDTH = 360;
 const VIEWPORT_MARGIN = 8;
@@ -252,10 +260,7 @@ function SourcePill({
             {/* Elide from the left — the filename identifies it, the leading
                 directories don't. <bdi> keeps the path itself in logical order
                 inside the rtl box. */}
-            <span
-              className="truncate text-left"
-              style={{ direction: "rtl" }}
-            >
+            <span className="truncate text-left" style={{ direction: "rtl" }}>
               <bdi>{source.path}</bdi>
             </span>
           </>
@@ -318,6 +323,8 @@ export function CommentPopover({
   const [height, setHeight] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const CommentInput = useCommentInput();
+  const inputRef = useRef<CommentInputHandle>(null);
 
   const source = sourceParts(context);
   const anchored = source != null;
@@ -333,15 +340,17 @@ export function CommentPopover({
   // Focus only once the card has been measured and is no longer hidden. A
   // `visibility: hidden` element is not focusable, so focusing during the
   // pre-measure pass silently did nothing and left you clicking into the box.
+  // The injected editor gets the same signal through its `autoFocus` prop.
+  const measured = height != null;
   const focusedRef = useRef(false);
   useLayoutEffect(() => {
-    if (focusedRef.current || height == null) return;
+    if (focusedRef.current || !measured) return;
     const el = textareaRef.current;
     if (!el) return;
     focusedRef.current = true;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
-  }, [height]);
+  }, [measured]);
 
   // Both of these run after EVERY render, deliberately. Keying them to
   // `comment` missed any resize that didn't come from a keystroke — a paste
@@ -365,27 +374,40 @@ export function CommentPopover({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      // The completion menu is portaled to <body>, so it is outside the card by
+      // DOM containment while being part of it by intent — picking a file from
+      // it must not dismiss the comment being written.
       if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
+        target instanceof Element &&
+        target.closest("[data-mention-menu]") != null
       ) {
+        return;
+      }
+      if (popoverRef.current && !popoverRef.current.contains(target)) {
         onClose();
       }
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        // Escape dismisses one layer at a time. This runs in the capture phase
+        // precisely so it can ask *before* the editor's own handler closes the
+        // menu — by the bubble phase the menu already reads as closed and the
+        // card would go with it.
+        if (inputRef.current?.isMenuOpen()) return;
         onClose();
         return;
       }
-      // Auto-focusing the textarea collapses the document selection the user
-      // made, so a plain cmd/ctrl+C would copy the empty textarea instead of
-      // the highlighted text. When the textarea has no selection of its own,
-      // honour the gesture by copying the originally-selected text. If the user
-      // has selected text inside the textarea, let the native copy through.
+      // Auto-focusing the input collapses the document selection the user made,
+      // so a plain cmd/ctrl+C would copy the empty box instead of the
+      // highlighted text. When the input has no selection of its own, honour the
+      // gesture by copying the originally-selected text. If it does, let the
+      // native copy through.
       if ((e.metaKey || e.ctrlKey) && (e.key === "c" || e.key === "C")) {
         const el = textareaRef.current;
         const hasOwnSelection =
-          el != null && el.selectionStart !== el.selectionEnd;
+          inputRef.current?.hasSelection() ??
+          (el != null && el.selectionStart !== el.selectionEnd);
         if (!hasOwnSelection && selectedText) {
           e.preventDefault();
           void navigator.clipboard.writeText(selectedText);
@@ -395,19 +417,25 @@ export function CommentPopover({
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", handleClickOutside);
     }, CLICK_OUTSIDE_DELAY_MS);
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       clearTimeout(timer);
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [onClose, selectedText]);
 
-  function handleSubmit() {
-    const trimmed = comment.trim();
+  // Ref-backed so the editor's ⌘↵ command registration stays stable across
+  // keystrokes while still submitting the text as it stands.
+  const commentRef = useRef(comment);
+  commentRef.current = comment;
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
+  const handleSubmit = useCallback(() => {
+    const trimmed = commentRef.current.trim();
     if (!trimmed) return;
-    onSubmit(trimmed);
-  }
+    onSubmitRef.current(trimmed);
+  }, []);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -464,21 +492,34 @@ export function CommentPopover({
       }}
     >
       <div className="flex flex-col gap-2 p-3">
-        <textarea
-          ref={textareaRef}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Add a comment"
-          aria-label="Comment"
-          rows={2}
-          className="scrollbar-minimal block w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-[13.5px] text-[var(--text)] placeholder:text-[var(--text-tertiary)] focus:outline-none"
-          style={{
-            lineHeight: `${INPUT_LINE_HEIGHT}px`,
-            minHeight: INPUT_MIN_HEIGHT,
-            maxHeight: INPUT_MAX_HEIGHT,
-          }}
-        />
+        {CommentInput ? (
+          <CommentInput
+            ref={inputRef}
+            initialValue={initialComment}
+            onChange={setComment}
+            onSubmit={handleSubmit}
+            autoFocus={measured}
+            placeholder="Add a comment"
+            minHeight={INPUT_MIN_HEIGHT}
+            maxHeight={INPUT_MAX_HEIGHT}
+          />
+        ) : (
+          <textarea
+            ref={textareaRef}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Add a comment"
+            aria-label="Comment"
+            rows={2}
+            className="scrollbar-minimal block w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-[13.5px] text-[var(--text)] placeholder:text-[var(--text-tertiary)] focus:outline-none"
+            style={{
+              lineHeight: `${INPUT_LINE_HEIGHT}px`,
+              minHeight: INPUT_MIN_HEIGHT,
+              maxHeight: INPUT_MAX_HEIGHT,
+            }}
+          />
+        )}
 
         {/* Always mounted. Revealing it on the first keystroke moved everything
             below it by a row mid-typing. */}
