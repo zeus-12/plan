@@ -450,7 +450,10 @@ export function FileList({
     setCollapsedFolders((prev) => toggleInSet(prev, key));
 
   return (
-    <div ref={parentRef} className="h-full min-h-0 overflow-auto">
+    <div
+      ref={parentRef}
+      className="h-full min-h-0 overflow-auto [scrollbar-gutter:stable]"
+    >
       <div
         className="relative w-full"
         style={{ height: virtualizer.getTotalSize() }}
@@ -686,7 +689,10 @@ export function FileList({
               >
                 {displayLetter(file.letter)}
               </span>
-              <div className="flex items-center gap-0.5 pl-1.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
+              {/* Fixed width, right-aligned: a staged row has one button and an
+                  unstaged row two, so without it staging a file would rewiden
+                  the name column and stagger the two sections' action columns. */}
+              <div className="flex w-[56px] shrink-0 items-center justify-end gap-0.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
                 {file.staged ? (
                   <ActionButton
                     icon={<MinusIcon />}
