@@ -103,21 +103,37 @@ export function useTerminalRegistry(
     [shellPrefix],
   );
 
+  // Numbering must clear main's LIVE ptys, not just the shells this sidebar is
+  // showing. The two diverge on any renderer reload — main keeps its ptys while
+  // this store starts empty — and reusing a live id makes `openTerminal` attach
+  // to the old pty instead of spawning: the pane comes up blank (no scrollback
+  // is replayed) and an `initialCommand` is silently dropped on the floor.
   const openShell = useCallback(
-    (command?: string) => {
-      // Numbering reuses gaps after closes; the pty behind a reused id is fresh.
-      const n = shells.reduce((m, id) => Math.max(m, shellNumber(id)), 0) + 1;
+    async (command?: string) => {
+      let taken = shells;
+      try {
+        const ptys = await window.electronAPI.terminalList();
+        taken = [...shells, ...ptys.map((p) => p.id)];
+      } catch {
+        // Couldn't ask — fall back to the sidebar's own numbering.
+      }
+      const n =
+        taken.reduce(
+          (m, id) =>
+            id.startsWith(shellPrefix) ? Math.max(m, shellNumber(id)) : m,
+          0,
+        ) + 1;
       spawnShell(encoded, shellTerminalId(encoded, n), command);
     },
-    [shells, shellNumber, encoded],
+    [shells, shellNumber, shellPrefix, encoded],
   );
 
-  const newShell = useCallback(() => openShell(), [openShell]);
+  const newShell = useCallback(() => void openShell(), [openShell]);
 
   const runInNewShell = useCallback(
     // A pty takes CR for "Enter", so every line of a multi-line snippet has to
     // end in one to actually be submitted — main appends the last.
-    (command: string) => openShell(command.replace(/\n/g, "\r")),
+    (command: string) => void openShell(command.replace(/\n/g, "\r")),
     [openShell],
   );
 

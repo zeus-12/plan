@@ -8,7 +8,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useCodeRunner } from "./code-runner";
+import { useSendToTerminal } from "./send-to-terminal";
 import {
   highlightToHtmlLines,
   stripComments,
@@ -61,7 +61,7 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   const [copied, setCopied] = useState(false);
   const [copiedLine, setCopiedLine] = useState(false);
   const [ran, setRan] = useState(false);
-  const runCommand = useCodeRunner();
+  const runCommand = useSendToTerminal();
   const shikiReady = useShikiReady();
   const shikiTheme = useActiveShikiTheme();
   const [settings, updateSettings] = useDiffSettings();
@@ -168,7 +168,7 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
   // still run. An unlabelled fence is stripped with the bash grammar: the run
   // button only offers itself for shell-ish fences, so that's the language it
   // is about to be executed as, not a guess about what it might be.
-  const run = () => {
+  const run = async () => {
     const text = preRef.current?.textContent ?? "";
     if (!text) return;
     const command = (stripComments(text, lang || "bash") ?? text)
@@ -177,7 +177,9 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
       .filter((line) => line.trim())
       .join("\n");
     if (!command) return;
-    runCommand?.(command);
+    // The host confirms before anything reaches a pty, so the tick waits for
+    // its answer — a cancelled run must not look like it happened.
+    if (!(await runCommand?.(command))) return;
     setRan(true);
     setTimeout(() => setRan(false), 1500);
   };
@@ -223,14 +225,12 @@ function CodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
           {runnable && (
             <button
               type="button"
-              onClick={run}
-              aria-label={
-                ran ? "Sent to a new terminal" : "Run in new terminal"
-              }
+              onClick={() => void run()}
+              aria-label={ran ? "Running in a new terminal" : "Run in terminal"}
               title={
                 ran
-                  ? "Sent to a new terminal"
-                  : "Run in a new terminal for this project — strips comments, then runs it"
+                  ? "Running in a new terminal"
+                  : "Run in a new terminal for this project — strips comments, then asks before running"
               }
               className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-all hover:bg-[var(--bg)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100"
             >

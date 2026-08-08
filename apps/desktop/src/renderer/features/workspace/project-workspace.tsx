@@ -15,7 +15,7 @@ import {
   useSidebar,
 } from "@plan/shared/components/ui/sidebar";
 import { Button } from "@plan/shared/components/ui/button";
-import { CodeRunnerProvider } from "@plan/shared/components/code-runner";
+import { SendToTerminalProvider } from "@plan/shared/components/send-to-terminal";
 import { CommentInputProvider } from "@plan/shared/components/comment-input";
 import { makeCommentInput } from "@/renderer/features/mentions/comment-editor";
 import { Kbd } from "@plan/shared/components/ui/kbd";
@@ -1426,6 +1426,22 @@ function ProjectWorkspaceImpl({
   // The dock is mounted whenever there's at least one opened terminal.
   const terminalMounted = openedIds.length > 0;
 
+  // The run button on a chat code block executes a snippet an agent wrote, so
+  // it always goes through a confirmation showing the exact text first — Enter
+  // and the Run button both go through (see `useConfirm`).
+  const confirmAndRunInNewShell = useCallback(
+    async (command: string) => {
+      const ok = await confirm({
+        title: "Run in a new terminal?",
+        confirmLabel: "Run",
+        code: command,
+      });
+      if (ok) runInNewShell(command);
+      return ok;
+    },
+    [confirm, runInNewShell],
+  );
+
   const chatPrefix = chatTerminalPrefix(project.encoded);
   // Drives each chat tab's working icon: the terminal id of its agent, or null
   // for non-chat tabs (which have no agent to be busy).
@@ -2018,7 +2034,7 @@ function ProjectWorkspaceImpl({
   });
 
   return (
-    <CodeRunnerProvider run={runInNewShell}>
+    <SendToTerminalProvider send={confirmAndRunInNewShell}>
       <CommentInputProvider input={commentInput}>
         <SidebarProvider
           defaultOpen={true}
@@ -2548,7 +2564,7 @@ function ProjectWorkspaceImpl({
           </div>
         </SidebarProvider>
       </CommentInputProvider>
-    </CodeRunnerProvider>
+    </SendToTerminalProvider>
   );
 }
 
