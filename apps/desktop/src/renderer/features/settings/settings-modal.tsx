@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { cn } from "@plan/shared/lib/utils";
-import { Slider } from "@plan/shared/components/ui/slider";
+import { RangeSlider } from "@plan/shared/components/ui/range-slider";
 import { Switch } from "@plan/shared/components/ui/switch";
 import {
   Select,
@@ -135,14 +135,14 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                   {prose.fontSize}px
                 </span>
               </div>
-              <Slider
-                aria-label="Text size"
-                value={[prose.fontSize]}
-                onValueChange={([size]) => setProse({ fontSize: size })}
+              <RangeSlider
+                label="Text size"
+                value={prose.fontSize}
+                onValueChange={(size) => setProse({ fontSize: size })}
                 min={PROSE_SIZE_MIN}
                 max={PROSE_SIZE_MAX}
                 step={1}
-                showSteps
+                formatValue={(size) => `${size}px`}
               />
             </div>
 
