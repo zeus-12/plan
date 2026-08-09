@@ -22,6 +22,7 @@ import {
 } from "@/renderer/features/chat/session/chat-engine-settings";
 import type { ChatEngineId } from "@/common/chat-engines";
 import { useAutoContinueEnabled } from "@/renderer/features/chat/session/auto-continue-settings";
+import { useDebugMode } from "@/renderer/features/debug/debug-mode";
 import {
   PROSE_BRIGHTNESS,
   PROSE_FONTS,
@@ -50,6 +51,7 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [autoMode, setAutoMode] = useAutoModeEnabled();
   const [autoContinue, setAutoContinue] = useAutoContinueEnabled();
   const [prose, setProse] = useTranscriptPrefs();
+  const [debugMode, setDebugMode] = useDebugMode();
 
   useEffect(() => {
     if (!open) return;
@@ -313,6 +315,26 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               >
                 Show
               </button>
+            </div>
+          </section>
+
+          <section className="mt-6 flex flex-col gap-3">
+            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+              Debug
+            </h3>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-[12px] text-[var(--text)]">
+                  Debug mode
+                </span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Adds a Debug menu to the header for copying internal state
+                  (like what the terminal actually has on screen) to share when
+                  something looks wrong. Turns itself off when you quit the app.
+                </span>
+              </div>
+              <Switch checked={debugMode} onCheckedChange={setDebugMode} />
             </div>
           </section>
         </div>

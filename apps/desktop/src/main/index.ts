@@ -102,6 +102,7 @@ import {
   killAllTerminals,
   listTerminals,
 } from "@/main/terminal/terminal";
+import { terminalDebugFrame } from "@/main/debug/terminal-frame";
 import {
   approvalChatIds,
   busyChatIds,
@@ -627,6 +628,8 @@ const invokeHandlers: {
   // Does a path still exist on disk? Used to verify a restored draft's pasted
   // images are still present before showing/sending them (the OS can purge tmp).
   "terminal:fileExists": (_e, path) => pathExists(path),
+
+  "terminal:debugFrame": (_e, id) => terminalDebugFrame(id),
 
   // Update notifier: report whether a newer release exists, and open the
   // download page in the user's browser. We never install — the app is unsigned.

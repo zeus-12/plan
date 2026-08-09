@@ -434,6 +434,15 @@ export function terminalScreen(id: string): string[] {
   return out;
 }
 
+/** The size the headless emulator (and therefore the pty) currently believes it
+ *  is. Null when no pty is running under `id`. */
+export function terminalDims(
+  id: string,
+): { cols: number; rows: number } | null {
+  const s = sessions.get(id);
+  return s ? { cols: s.screen.cols, rows: s.screen.rows } : null;
+}
+
 /** Every live pty id. */
 export function terminalIds(): string[] {
   return [...sessions.keys()];

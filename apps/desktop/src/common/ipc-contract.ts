@@ -60,6 +60,7 @@ import type {
   SessionListEntry,
   SkillInfo,
   TerminalChunk,
+  TerminalDebugFrame,
   TerminalInfo,
   UpdateInfo,
   WorktreeRecord,
@@ -370,6 +371,12 @@ export interface IpcInvokeContract {
   };
   /** Does a path still exist on disk? (Restored drafts verify pasted images.) */
   "terminal:fileExists": { args: [path: string]; result: boolean };
+  /** Debug menu: what main's emulator has on screen for this pty, plus how the
+   *  Claude-TUI heuristics classify it. See main/debug/terminal-frame.ts. */
+  "terminal:debugFrame": {
+    args: [id: string];
+    result: TerminalDebugFrame;
+  };
 
   // Updates (notify-only — see main/updates.ts)
   /** Resolves to a newer release, or null when up to date / offline. */
@@ -510,6 +517,7 @@ export const API_INVOKE = {
   terminalList: "terminal:list",
   saveTempImage: "terminal:saveTempImage",
   fileExists: "terminal:fileExists",
+  terminalDebugFrame: "terminal:debugFrame",
 
   checkForUpdate: "updates:check",
   openUpdateDownload: "updates:openDownload",

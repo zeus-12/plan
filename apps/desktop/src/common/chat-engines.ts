@@ -22,6 +22,17 @@
  * that id and stays engine-agnostic for free.
  */
 
+/**
+ * What the bottom of a TUI-driven chat's screen looks like right now.
+ * EXPERIMENTAL and heuristic — see main/providers/claude-code/tui-screen.ts,
+ * which derives it. Named here because both programs report and read it.
+ *
+ *   "input"     — a free-text input box is present and ready (safe to type/send)
+ *   "selection" — a numbered menu is up (tool approval / plan accept / question)
+ *   "unknown"   — couldn't classify (plain shell, mid-render, clipped frame…)
+ */
+export type TerminalInputState = "input" | "selection" | "unknown";
+
 /** Engines that can drive a chat. Registered in main/agents/engine-registry. */
 export const CHAT_ENGINE_IDS = ["claude-cli"] as const;
 

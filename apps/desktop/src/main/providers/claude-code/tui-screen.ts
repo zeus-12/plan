@@ -1,14 +1,4 @@
-/**
- * What the bottom of Claude's screen looks like right now. EXPERIMENTAL and
- * heuristic — derived by scanning the rendered grid for the TUI's signatures,
- * not from any real protocol. Worded as a guess everywhere it's used.
- *
- *   "input"     — a free-text input box is present and ready (safe to type/send)
- *   "selection" — a numbered menu is up (tool approval / plan accept / question);
- *                 sending free text + Enter here would mis-navigate the menu
- *   "unknown"   — couldn't classify (plain shell, Claude mid-render, etc.)
- */
-export type TerminalInputState = "input" | "selection" | "unknown";
+import type { TerminalInputState } from "@/common/chat-engines";
 
 /**
  * Claude Code TUI screen heuristics — pure functions over rendered screen rows

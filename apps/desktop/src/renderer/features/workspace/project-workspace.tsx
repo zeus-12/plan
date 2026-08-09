@@ -111,6 +111,8 @@ import {
 import { PushModal } from "@/renderer/features/git/push-modal";
 import { ThemeMenu } from "@/renderer/features/settings/theme-menu";
 import { OpenInMenu } from "@/renderer/features/external-apps/open-in-menu";
+import { DebugMenu } from "@/renderer/features/debug/debug-menu";
+import { useDebugModeEnabled } from "@/renderer/features/debug/debug-mode";
 import { getDefaultExternalApp } from "@/renderer/features/external-apps/external-apps-store";
 import { SwitcherOverlay } from "./switcher-overlay";
 import { useTabSwitcher } from "./use-tab-switcher";
@@ -257,6 +259,7 @@ function WorkspaceHeader({
   repoLabel,
   activeTab,
   chatStatus,
+  activeTerminalId,
   onToggleChatTerminal,
 }: {
   project: ProjectEntry;
@@ -268,11 +271,14 @@ function WorkspaceHeader({
   activeTab: Tab | null | undefined;
   /** The selected chat's Claude status; null hides the dot entirely. */
   chatStatus: ChatStatus | null;
+  /** The selected chat's pty — what the debug menu reads. */
+  activeTerminalId: string | null;
   onToggleChatTerminal: () => void;
 }) {
   const target = openTarget(activeTab);
   const middle = useSidebar();
   const shortName = lastSegment(project.cwd);
+  const debugMode = useDebugModeEnabled();
 
   return (
     <header
@@ -303,6 +309,7 @@ function WorkspaceHeader({
         )}
       </div>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
+        {debugMode && <DebugMenu terminalId={activeTerminalId} />}
         <OpenInMenu
           encoded={project.encoded}
           relPath={target.relPath}
@@ -2236,6 +2243,7 @@ function ProjectWorkspaceImpl({
                 }
                 activeTab={activeTab}
                 chatStatus={chatStatus}
+                activeTerminalId={activeTerminalId}
                 onToggleChatTerminal={toggleChatTerminal}
               />
               <div className="flex min-h-0 flex-1 flex-col">

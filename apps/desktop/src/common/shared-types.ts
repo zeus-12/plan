@@ -1,5 +1,7 @@
 /** Types shared between main and renderer. No runtime imports allowed here. */
 
+import type { TerminalInputState } from "./chat-engines";
+
 export type MessagePart =
   | { kind: "text"; text: string }
   | { kind: "thinking"; text: string }
@@ -593,6 +595,30 @@ export interface TerminalInfo {
   id: string;
   cwd: string;
   pid: number;
+}
+
+/**
+ * What main sees on one terminal's screen right now — the debug menu's "copy
+ * terminal frame". Everything here is read off the headless emulator main keeps
+ * for every pty, which is the same screen the composer's gating reads, so a
+ * copied frame says exactly why send was enabled or disabled at that moment.
+ */
+export interface TerminalDebugFrame {
+  id: string;
+  /** False when no pty is running under `id` — every other field is then empty. */
+  running: boolean;
+  /** The size main's emulator (and the pty) believe they have. */
+  cols: number;
+  rows: number;
+  /** The rendered screen as plain text rows. */
+  screen: string[];
+  inputState: TerminalInputState;
+  /** The non-empty lines the classifier actually looked at. */
+  matchedLines: string[];
+  /** An agent process is alive under this pty. */
+  agentLive: boolean;
+  /** Claude's "esc to interrupt" hint is on screen. */
+  busy: boolean;
 }
 
 /** A worktree's scratchpad payload (durable notepad, persisted to ~/.plan). */

@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { useTheme } from "@plan/shared/components/theme-provider";
+import { registerTerminalMetrics } from "./terminal-metrics";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalHandle {
@@ -483,6 +484,30 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
       const raf = requestAnimationFrame(() => runFitRef.current?.());
       return () => cancelAnimationFrame(raf);
     }, [fitSignal, visible, id]);
+
+    // Publish this pane's real pixel geometry for the debug menu — see
+    // terminal-metrics.ts for why main's numbers alone can't show a clip.
+    useEffect(() => {
+      return registerTerminalMetrics(id, () => {
+        const term = termRef.current;
+        const host = hostRef.current;
+        if (!term || !host) return null;
+        const rendered = term.element;
+        const renderedHeight = rendered?.clientHeight ?? 0;
+        const rowHeight = term.rows > 0 ? renderedHeight / term.rows : 0;
+        return {
+          cols: term.cols,
+          rows: term.rows,
+          hostWidth: host.clientWidth,
+          hostHeight: host.clientHeight,
+          renderedWidth: rendered?.clientWidth ?? 0,
+          renderedHeight,
+          visibleRows:
+            rowHeight > 0 ? Math.floor(host.clientHeight / rowHeight) : 0,
+          visible: visibleRef.current,
+        };
+      });
+    }, [id]);
 
     return (
       <div className="flex h-full w-full flex-col bg-[var(--bg)]">
