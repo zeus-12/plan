@@ -195,12 +195,66 @@ function openTarget(tab: Tab | null | undefined): {
   return { relPath: null, subPath: "" };
 }
 
+/**
+ * The selected chat's connection to Claude, collapsed to the one thing the
+ * header dot shows. `null` when no chat is selected (nothing to report).
+ */
+type ChatStatus =
+  "disconnected" | "needsInput" | "terminal" | "working" | "idle";
+
+const CHAT_STATUS: Record<ChatStatus, { dot: string; label: string }> = {
+  disconnected: {
+    dot: "border border-[var(--text-tertiary)]",
+    label: "Connect this chat to Claude",
+  },
+  needsInput: {
+    dot: "animate-pulse bg-amber-500",
+    label: "Claude may be waiting on a menu selection",
+  },
+  terminal: {
+    dot: "bg-[var(--text-tertiary)]",
+    label: "Terminal is open — no Claude process detected",
+  },
+  working: { dot: "animate-pulse bg-emerald-500", label: "Claude is working" },
+  idle: { dot: "bg-emerald-500", label: "Claude is connected and idle" },
+};
+
+function ChatStatusDot({
+  status,
+  onClick,
+}: {
+  status: ChatStatus;
+  onClick: () => void;
+}) {
+  const { dot, label } = CHAT_STATUS[status];
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClick}
+          aria-label={label}
+        >
+          <span className={cn("h-[7px] w-[7px] rounded-full", dot)} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="flex items-center gap-1.5">
+        <span>{label}</span>
+        <Kbd keys={["⌘", "J"]} />
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function WorkspaceHeader({
   project,
   projectsSidebarOpen,
   branch,
   repoLabel,
   activeTab,
+  chatStatus,
+  onToggleChatTerminal,
 }: {
   project: ProjectEntry;
   projectsSidebarOpen: boolean;
@@ -209,6 +263,9 @@ function WorkspaceHeader({
   repoLabel: string | null;
   /** Decides whether "Open in…" targets a file or the whole project. */
   activeTab: Tab | null | undefined;
+  /** The selected chat's Claude status; null hides the dot entirely. */
+  chatStatus: ChatStatus | null;
+  onToggleChatTerminal: () => void;
 }) {
   const target = openTarget(activeTab);
   const middle = useSidebar();
@@ -249,6 +306,9 @@ function WorkspaceHeader({
           subPath={target.subPath}
         />
         <ThemeMenu />
+        {chatStatus && (
+          <ChatStatusDot status={chatStatus} onClick={onToggleChatTerminal} />
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1536,7 +1596,6 @@ function ProjectWorkspaceImpl({
     agentLive,
     chatWorking,
     awaitingSelection,
-    turnCount,
   } = useChatSession({
     encoded: project.encoded,
     selectedSessionId,
@@ -1702,6 +1761,39 @@ function ProjectWorkspaceImpl({
       if (shown) setTerminalOpen(true);
     });
   }, [connectChat, setTerminalOpen]);
+
+  // ⌘J itself: connect when the selected chat has no Claude yet, otherwise
+  // toggle the dock (closing hands focus back to the composer). Shared with the
+  // header status dot so clicking it and the shortcut can't drift.
+  const toggleChatTerminal = useCallback(() => {
+    if (!selectedSessionId) return;
+    if (!chatTerminalReady) {
+      connectAndShowChat();
+    } else if (terminalOpen) {
+      setTerminalOpen(false);
+      requestAnimationFrame(() => chatInputRef.current?.focus());
+    } else {
+      setTerminalOpen(true);
+    }
+  }, [
+    selectedSessionId,
+    chatTerminalReady,
+    connectAndShowChat,
+    terminalOpen,
+    setTerminalOpen,
+  ]);
+
+  const chatStatus: ChatStatus | null = !selectedSessionId
+    ? null
+    : !chatTerminalReady
+      ? "disconnected"
+      : awaitingSelection
+        ? "needsInput"
+        : !agentLive
+          ? "terminal"
+          : chatWorking
+            ? "working"
+            : "idle";
 
   const [runConfigOpen, setRunConfigOpen] = useState(false);
   const [buildConfigOpen, setBuildConfigOpen] = useState(false);
@@ -1983,20 +2075,10 @@ function ProjectWorkspaceImpl({
       const meta = e.metaKey || e.ctrlKey;
       if (meta && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        // The dock only ever shows the selected chat's Claude. No chat selected
-        // → nothing to show, so do nothing (never open a bare shell).
-        if (!selectedSessionId) return;
-        // Selected chat not connected to Claude yet → connect it and reveal the
-        // dock (works from any tab — Diffs/Files included). Already connected →
-        // toggle; closing it hands focus back to the composer.
-        if (!chatTerminalReady) {
-          connectAndShowChat();
-        } else if (terminalOpen) {
-          setTerminalOpen(false);
-          requestAnimationFrame(() => chatInputRef.current?.focus());
-        } else {
-          setTerminalOpen(true);
-        }
+        // The dock only ever shows the selected chat's Claude — and it works
+        // from any tab (Diffs/Files included). No chat selected → nothing to
+        // show, so do nothing (never open a bare shell).
+        toggleChatTerminal();
       } else if (meta && e.shiftKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         newShell();
@@ -2006,14 +2088,7 @@ function ProjectWorkspaceImpl({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [
-    terminalOpen,
-    setTerminalOpen,
-    newShell,
-    selectedSessionId,
-    chatTerminalReady,
-    connectAndShowChat,
-  ]);
+  }, [terminalOpen, setTerminalOpen, newShell, toggleChatTerminal]);
 
   const tabSwitcher = useTabSwitcher({
     // Per-worktree id: under the keep-alive pool several workspaces are mounted
@@ -2162,6 +2237,8 @@ function ProjectWorkspaceImpl({
                     : null
                 }
                 activeTab={activeTab}
+                chatStatus={chatStatus}
+                onToggleChatTerminal={toggleChatTerminal}
               />
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="flex min-h-0 flex-1 flex-col">
@@ -2279,90 +2356,14 @@ function ProjectWorkspaceImpl({
                     )}
 
                     {/* Chat tabs: each keeps a mounted MessageList (transcript scroll
-                    survives switching); the header + composer bind to the ACTIVE
-                    chat, since you only type into one chat at a time. */}
+                    survives switching); the composer binds to the ACTIVE chat,
+                    since you only type into one chat at a time. */}
                     <div
                       className={cn(
                         "absolute inset-0 flex min-h-0 flex-col",
                         activeTab?.kind !== "chat" && "hidden",
                       )}
                     >
-                      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-                        <span className="truncate text-[var(--text-secondary)]">
-                          {sessions.find(
-                            (s) => s.sessionId === selectedSessionId,
-                          )?.title ??
-                            session?.meta.title ??
-                            selectedSessionId ??
-                            "No session"}
-                        </span>
-                        <div className="flex shrink-0 items-center gap-3">
-                          <span>
-                            {session
-                              ? `${turnCount} turn${turnCount === 1 ? "" : "s"}`
-                              : ""}
-                          </span>
-                          {selectedSessionId &&
-                            (chatTerminalReady ? (
-                              <span
-                                className={cn(
-                                  "flex items-center gap-1.5 rounded-md border px-2 py-1",
-                                  awaitingSelection
-                                    ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
-                                    : "border-[var(--border)]",
-                                )}
-                                title={
-                                  awaitingSelection
-                                    ? "Claude may be waiting on a menu selection (no text box) — ⌘J to respond"
-                                    : !agentLive
-                                      ? "Terminal is open, but no Claude process detected — ⌘J to view"
-                                      : chatWorking
-                                        ? "Claude is working in this chat — ⌘J to view"
-                                        : "Claude is connected and idle in this chat — ⌘J to view"
-                                }
-                              >
-                                <span
-                                  className={cn(
-                                    "h-1.5 w-1.5 rounded-full",
-                                    awaitingSelection
-                                      ? "animate-pulse bg-amber-500"
-                                      : !agentLive
-                                        ? "bg-[var(--text-tertiary)]"
-                                        : chatWorking
-                                          ? "animate-pulse bg-emerald-500"
-                                          : "bg-emerald-500",
-                                  )}
-                                />
-                                {!awaitingSelection &&
-                                agentLive &&
-                                chatWorking ? (
-                                  <TextShimmer duration={2.4}>
-                                    Working
-                                  </TextShimmer>
-                                ) : (
-                                  <span>
-                                    {awaitingSelection
-                                      ? "Needs input"
-                                      : !agentLive
-                                        ? "Terminal"
-                                        : "Claude"}
-                                  </span>
-                                )}
-                              </span>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={connectAndShowChat}
-                                title="Connect this chat to Claude (runs claude --resume) and open the terminal"
-                                className="flex items-center gap-1.5"
-                              >
-                                <span>Connect</span>
-                                <Kbd keys={["⌘", "J"]} />
-                              </Button>
-                            ))}
-                        </div>
-                      </div>
                       <div className="relative min-h-0 flex-1">
                         {tabs.map((t) => {
                           if (t.kind !== "chat" || !paneMounted(t.id))

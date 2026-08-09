@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ParsedSession } from "@/common/shared-types";
 import type { ChatEngineId } from "@/common/chat-engines";
 import { chatTerminalId } from "@/common/terminal-ids";
@@ -298,20 +298,6 @@ export function useChatSession(opts: {
     }
   }, [awaitingSelection, selectedSessionId, capabilities, revealChatTerminal]);
 
-  // Conversation turns (user messages that aren't tool results) — far more
-  // meaningful than raw transcript entry count, and free to compute.
-  const turnCount = useMemo(
-    () =>
-      session
-        ? session.messages.filter(
-            (m) =>
-              m.role === "user" &&
-              m.parts.some((p) => p.kind !== "tool_result"),
-          ).length
-        : 0,
-    [session],
-  );
-
   return {
     chatTerminalReady,
     activeTerminalId,
@@ -324,6 +310,5 @@ export function useChatSession(opts: {
     agentLive,
     chatWorking,
     awaitingSelection,
-    turnCount,
   };
 }
