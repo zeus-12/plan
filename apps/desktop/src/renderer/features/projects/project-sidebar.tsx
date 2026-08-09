@@ -9,11 +9,7 @@ import {
   SidebarHeader,
   useSidebar,
 } from "@plan/shared/components/ui/sidebar";
-import {
-  LIST_FOOTER_PAD,
-  ListFooter,
-  ListFooterIcon,
-} from "@/renderer/components/list-footer";
+import { ListFooter, ListFooterIcon } from "@/renderer/components/list-footer";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
 import { usePersistentNumber } from "@/renderer/lib/use-persistent-number";
@@ -497,7 +493,7 @@ export function ProjectSidebar({
           </Tooltip>
         </div>
       </SidebarHeader>
-      <SidebarContent className="relative">
+      <SidebarContent>
         {archivedView && (
           <button
             onClick={() => setArchivedView(false)}
@@ -516,11 +512,7 @@ export function ProjectSidebar({
             No projects yet
           </div>
         ) : (
-          <div
-            ref={parentRef}
-            className="min-h-0 flex-1 overflow-auto"
-            style={{ paddingBottom: LIST_FOOTER_PAD }}
-          >
+          <div ref={parentRef} className="min-h-0 flex-1 overflow-auto">
             <div
               className="relative w-full"
               style={{ height: virtualizer.getTotalSize() }}

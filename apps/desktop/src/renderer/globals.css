@@ -76,6 +76,27 @@ textarea {
 }
 
 /*
+ * A sidebar footer's action (see ListFooter). Mixed off the panel's OWN ground
+ * rather than set to --bg-surface: only some themes define --bg-chrome, and
+ * where it's missing the panel falls back to --bg-surface itself, which would
+ * leave the button the same colour as the panel behind it.
+ */
+.list-footer-action {
+  background: color-mix(
+    in srgb,
+    var(--text) 7%,
+    var(--bg-chrome, var(--bg-surface))
+  );
+}
+.list-footer-action:hover {
+  background: color-mix(
+    in srgb,
+    var(--text) 13%,
+    var(--bg-chrome, var(--bg-surface))
+  );
+}
+
+/*
  * Horizontal scroll strips (e.g. the content-pane tab bar). No scrollbar: it
  * would land on the strip's bottom edge, i.e. right on the divider against the
  * content below it. "There's more" is signalled by the strip's edge fade

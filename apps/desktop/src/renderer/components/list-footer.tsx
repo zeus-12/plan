@@ -1,21 +1,17 @@
 import type { ReactNode } from "react";
 import { cn } from "@plan/shared/lib/utils";
 
-/** Bottom padding a scroll area needs so its last row clears {@link ListFooter}. */
-export const LIST_FOOTER_PAD = 64;
-
-const RAMP = "linear-gradient(to top, #000 calc(100% - 18px), transparent)";
+/** The panel's own ground (see Sidebar) — the footer sits on it, and the fade
+ *  above resolves to it, so neither one draws an edge of its own. */
+const PANEL = "var(--bg-chrome, var(--bg-surface))";
 
 /**
- * A sidebar's one action, floating over the bottom of its list rather than
- * sitting in a ruled band below it. The tint and the blur both ramp out across
- * the bar's top 18px, so rows dissolve as they pass under instead of meeting an
- * edge — same idea as the transcript's fade under the composer, except masking
- * the bar itself keeps the blur and the tint ramping together.
- *
- * The bar doesn't take pointer events; only its controls do. Without that, the
- * ramp — invisible but still hit-testable — would swallow clicks on the row
- * beneath it. Give the scroll area {@link LIST_FOOTER_PAD} of bottom padding.
+ * A sidebar's one action. The footer itself is plain: the panel's ground, the
+ * button, nothing else. The only treated area is the 16px directly ABOVE it,
+ * where the list's last rows dissolve — the same relationship the transcript has
+ * with the composer (message-list.tsx). Nothing is laid over the button, and the
+ * top padding keeps a strip of untouched ground between the fade and the button
+ * so a half-faded row can't read as the button's own content.
  */
 export function ListFooter({
   label,
@@ -29,21 +25,29 @@ export function ListFooter({
 }) {
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 px-2.5 pt-6 pb-3 backdrop-blur-md"
-      style={{
-        background:
-          "linear-gradient(to top, color-mix(in srgb, var(--bg) 84%, transparent), color-mix(in srgb, var(--bg) 62%, transparent))",
-        maskImage: RAMP,
-        WebkitMaskImage: RAMP,
-      }}
+      className="relative flex shrink-0 items-center gap-1.5 px-2.5 pb-2.5"
+      style={{ background: PANEL }}
     >
+      {/* 1px of blur, not a frosting: the job is to soften where the rows are
+          cut off, not to push them behind glass. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 -top-4 h-4 backdrop-blur-[1px]"
+        style={{
+          background: `linear-gradient(to top, ${PANEL}, transparent)`,
+          maskImage: "linear-gradient(to top, black, transparent)",
+          WebkitMaskImage: "linear-gradient(to top, black, transparent)",
+        }}
+      />
       <button
         onClick={onClick}
-        className="pointer-events-auto flex h-7 flex-1 items-center justify-center rounded-lg bg-[var(--bg-surface)] font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+        className="list-footer-action flex h-8 flex-1 items-center justify-center rounded-lg font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
       >
         {label}
       </button>
-      {trailing}
+      {/* No slot when there's no control, so the action spans the panel. Both
+          callers reveal one only once something is archived, so the label does
+          shift a little the first time that happens. */}
+      {trailing && <div className="h-8 w-8 shrink-0">{trailing}</div>}
     </div>
   );
 }
@@ -65,7 +69,7 @@ export function ListFooterIcon({
       onClick={onClick}
       aria-label={label}
       className={cn(
-        "pointer-events-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--bg-surface)] hover:text-[var(--text)]",
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]",
         active ? "text-[var(--accent)]" : "text-[var(--text-tertiary)]",
       )}
     >

@@ -26,11 +26,7 @@ import {
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
 import { ChevronLeft } from "@/renderer/components/chevron";
-import {
-  LIST_FOOTER_PAD,
-  ListFooter,
-  ListFooterIcon,
-} from "@/renderer/components/list-footer";
+import { ListFooter, ListFooterIcon } from "@/renderer/components/list-footer";
 
 export interface SessionListItem {
   sessionId: string;
@@ -119,74 +115,70 @@ export function SessionList({
           />
         </div>
       )}
-      <div className="relative min-h-0 flex-1">
-        <div
-          className="h-full overflow-auto"
-          style={{ paddingBottom: LIST_FOOTER_PAD }}
-        >
-          {loading && sessions.length === 0 ? (
-            <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-              Loading…
-            </div>
-          ) : shown.length === 0 ? (
-            <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-              {archivedView
-                ? archivedSearch.trim()
-                  ? "No matching chats"
-                  : "No archived chats"
-                : "No sessions"}
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              {shown.map((s) => (
-                <SessionRow
-                  key={s.sessionId}
-                  session={s}
-                  isSelected={s.sessionId === selected}
-                  termId={chatTerminalId(encoded, s.sessionId)}
-                  onSelect={onSelect}
-                  onRename={onRename}
-                  onSetArchived={onSetArchived}
-                  onMoveSession={onMoveSession}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        {/* Pinned over the list, not in a band below it (mirrors the first
-            sidebar's "Add project" footer). */}
-        <ListFooter
-          label="New chat"
-          onClick={onNewChat}
-          trailing={
-            archived.length > 0 ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <ListFooterIcon
-                    label="Archived chats"
-                    active={archivedView}
-                    onClick={() => setArchivedView((v) => !v)}
-                  >
-                    <TrashIcon />
-                  </ListFooterIcon>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {archivedView ? "Back to sessions" : "Archived chats"}
-                </TooltipContent>
-              </Tooltip>
-            ) : null
-          }
-        />
+      <div className="min-h-0 flex-1 overflow-auto">
+        {loading && sessions.length === 0 ? (
+          <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+            Loading…
+          </div>
+        ) : shown.length === 0 ? (
+          <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+            {archivedView
+              ? archivedSearch.trim()
+                ? "No matching chats"
+                : "No archived chats"
+              : "No sessions"}
+          </div>
+        ) : (
+          <div className="flex flex-col">
+            {shown.map((s) => (
+              <SessionRow
+                key={s.sessionId}
+                session={s}
+                isSelected={s.sessionId === selected}
+                termId={chatTerminalId(encoded, s.sessionId)}
+                onSelect={onSelect}
+                onRename={onRename}
+                onSetArchived={onSetArchived}
+                onMoveSession={onMoveSession}
+              />
+            ))}
+          </div>
+        )}
       </div>
+      {/* The fade lives above it, never on it (mirrors the first sidebar's
+          "Add project" footer). */}
+      <ListFooter
+        label="New chat"
+        onClick={onNewChat}
+        trailing={
+          archived.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <ListFooterIcon
+                  label="Archived chats"
+                  active={archivedView}
+                  onClick={() => setArchivedView((v) => !v)}
+                >
+                  <TrashIcon />
+                </ListFooterIcon>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {archivedView ? "Back to sessions" : "Archived chats"}
+              </TooltipContent>
+            </Tooltip>
+          ) : null
+        }
+      />
     </div>
   );
 }
 
 /**
  * One row in the session list. Split out so each can subscribe to its own
- * agent's working-state (a hook). While busy, an animated icon appears at the
- * trailing edge of the title — the title's left edge never moves, so working and
- * idle rows stay perfectly aligned and nothing shifts when it toggles.
+ * agent's working-state (a hook). The status indicator sits in a fixed 14px slot
+ * at the trailing edge — the three states are different sizes (8px dots, 14px
+ * spinner), so without it the title's truncation point would jump every time one
+ * appeared, swapped, or cleared.
  */
 // Memoized: the list re-renders when `selected` or the sessions array changes,
 // but only the rows whose own props actually changed need to re-render (each
