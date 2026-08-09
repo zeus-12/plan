@@ -25,8 +25,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
-import { Button } from "@plan/shared/components/ui/button";
 import { ChevronLeft } from "@/renderer/components/chevron";
+import {
+  LIST_FOOTER_PAD,
+  ListFooter,
+  ListFooterIcon,
+} from "@/renderer/components/list-footer";
 
 export interface SessionListItem {
   sessionId: string;
@@ -115,73 +119,64 @@ export function SessionList({
           />
         </div>
       )}
-      {!archivedView && (
-        <div className="flex shrink-0 items-center border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-          Recent sessions
-        </div>
-      )}
-      <div className="min-h-0 flex-1 overflow-auto">
-        {loading && sessions.length === 0 ? (
-          <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-            Loading…
-          </div>
-        ) : shown.length === 0 ? (
-          <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-            {archivedView
-              ? archivedSearch.trim()
-                ? "No matching chats"
-                : "No archived chats"
-              : "No sessions"}
-          </div>
-        ) : (
-          <div className="flex flex-col">
-            {shown.map((s) => (
-              <SessionRow
-                key={s.sessionId}
-                session={s}
-                isSelected={s.sessionId === selected}
-                termId={chatTerminalId(encoded, s.sessionId)}
-                onSelect={onSelect}
-                onRename={onRename}
-                onSetArchived={onSetArchived}
-                onMoveSession={onMoveSession}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-      {/* Footer: full-width New chat with the archive toggle on the same row
-          (mirrors the first sidebar's "Add project" footer). */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-[var(--border)] p-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 flex-1 justify-center"
-          onClick={onNewChat}
+      <div className="relative min-h-0 flex-1">
+        <div
+          className="h-full overflow-auto"
+          style={{ paddingBottom: LIST_FOOTER_PAD }}
         >
-          + New chat
-        </Button>
-        {archived.length > 0 && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Archived chats"
-                onClick={() => setArchivedView((v) => !v)}
-                className={cn(
-                  "size-9 shrink-0",
-                  archivedView && "border-[var(--accent)] text-[var(--accent)]",
-                )}
-              >
-                <TrashIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {archivedView ? "Back to sessions" : "Archived chats"}
-            </TooltipContent>
-          </Tooltip>
-        )}
+          {loading && sessions.length === 0 ? (
+            <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+              Loading…
+            </div>
+          ) : shown.length === 0 ? (
+            <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+              {archivedView
+                ? archivedSearch.trim()
+                  ? "No matching chats"
+                  : "No archived chats"
+                : "No sessions"}
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {shown.map((s) => (
+                <SessionRow
+                  key={s.sessionId}
+                  session={s}
+                  isSelected={s.sessionId === selected}
+                  termId={chatTerminalId(encoded, s.sessionId)}
+                  onSelect={onSelect}
+                  onRename={onRename}
+                  onSetArchived={onSetArchived}
+                  onMoveSession={onMoveSession}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {/* Pinned over the list, not in a band below it (mirrors the first
+            sidebar's "Add project" footer). */}
+        <ListFooter
+          label="New chat"
+          onClick={onNewChat}
+          trailing={
+            archived.length > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ListFooterIcon
+                    label="Archived chats"
+                    active={archivedView}
+                    onClick={() => setArchivedView((v) => !v)}
+                  >
+                    <TrashIcon />
+                  </ListFooterIcon>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {archivedView ? "Back to sessions" : "Archived chats"}
+                </TooltipContent>
+              </Tooltip>
+            ) : null
+          }
+        />
       </div>
     </div>
   );

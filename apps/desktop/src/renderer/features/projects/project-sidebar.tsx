@@ -6,10 +6,14 @@ import { lastSegment } from "@plan/shared/lib/path";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
   useSidebar,
 } from "@plan/shared/components/ui/sidebar";
+import {
+  LIST_FOOTER_PAD,
+  ListFooter,
+  ListFooterIcon,
+} from "@/renderer/components/list-footer";
 import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
 import { usePersistentNumber } from "@/renderer/lib/use-persistent-number";
@@ -493,7 +497,7 @@ export function ProjectSidebar({
           </Tooltip>
         </div>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="relative">
         {archivedView && (
           <button
             onClick={() => setArchivedView(false)}
@@ -512,7 +516,11 @@ export function ProjectSidebar({
             No projects yet
           </div>
         ) : (
-          <div ref={parentRef} className="min-h-0 flex-1 overflow-auto">
+          <div
+            ref={parentRef}
+            className="min-h-0 flex-1 overflow-auto"
+            style={{ paddingBottom: LIST_FOOTER_PAD }}
+          >
             <div
               className="relative w-full"
               style={{ height: virtualizer.getTotalSize() }}
@@ -860,38 +868,29 @@ export function ProjectSidebar({
             </div>
           </div>
         )}
-      </SidebarContent>
-      <SidebarFooter>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 flex-1 justify-center"
+        <ListFooter
+          label="Add project"
           onClick={onAddProject}
-        >
-          + Add project
-        </Button>
-        {archived.length > 0 && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Archived projects"
-                onClick={() => setArchivedView((v) => !v)}
-                className={cn(
-                  "size-9 shrink-0",
-                  archivedView && "border-[var(--accent)] text-[var(--accent)]",
-                )}
-              >
-                <TrashIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {archivedView ? "Back to projects" : "Archived projects"}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </SidebarFooter>
+          trailing={
+            archived.length > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ListFooterIcon
+                    label="Archived projects"
+                    active={archivedView}
+                    onClick={() => setArchivedView((v) => !v)}
+                  >
+                    <TrashIcon />
+                  </ListFooterIcon>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {archivedView ? "Back to projects" : "Archived projects"}
+                </TooltipContent>
+              </Tooltip>
+            ) : null
+          }
+        />
+      </SidebarContent>
 
       <AlertDialog
         open={confirmTarget !== null}
