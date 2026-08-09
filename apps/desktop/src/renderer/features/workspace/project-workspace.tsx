@@ -104,7 +104,10 @@ import {
   type ChatInputHandle,
 } from "@/renderer/features/chat/composer/chat-input";
 import { RenameSessionDialog } from "@/renderer/features/sessions/rename-session-dialog";
-import { CommandsConfigModal } from "@/renderer/features/terminal/commands-config-modal";
+import {
+  CommandsSettingsModal,
+  type CommandSection,
+} from "@/renderer/features/terminal/commands-settings-modal";
 import { PushModal } from "@/renderer/features/git/push-modal";
 import { ThemeMenu } from "@/renderer/features/settings/theme-menu";
 import { OpenInMenu } from "@/renderer/features/external-apps/open-in-menu";
@@ -1795,8 +1798,11 @@ function ProjectWorkspaceImpl({
             ? "working"
             : "idle";
 
-  const [runConfigOpen, setRunConfigOpen] = useState(false);
-  const [buildConfigOpen, setBuildConfigOpen] = useState(false);
+  // The terminal strip's single gear — null when closed, otherwise the section
+  // it opened on.
+  const [commandSettings, setCommandSettings] = useState<CommandSection | null>(
+    null,
+  );
 
   // Build comes first, but only inside a worktree (that's where a per-branch
   // build makes sense); Run follows and is always present and non-closable.
@@ -2139,24 +2145,16 @@ function ProjectWorkspaceImpl({
               onClose={() => setPushDialog(null)}
             />
           )}
-          {runConfigOpen && (
-            <CommandsConfigModal
-              title="Run"
-              description="Shared across every worktree and session of this project."
-              entries={runEntries}
+          {commandSettings && (
+            <CommandsSettingsModal
+              section={commandSettings}
+              runEntries={runEntries}
+              buildEntries={buildEntries}
               repos={repos}
-              onSave={onSaveRun}
-              onClose={() => setRunConfigOpen(false)}
-            />
-          )}
-          {buildConfigOpen && (
-            <CommandsConfigModal
-              title="Build"
-              description="Shared across every worktree and session of this project."
-              entries={buildEntries}
-              repos={repos}
-              onSave={onSaveBuild}
-              onClose={() => setBuildConfigOpen(false)}
+              isWorktree={isWorktree}
+              onSaveRun={onSaveRun}
+              onSaveBuild={onSaveBuild}
+              onClose={() => setCommandSettings(null)}
             />
           )}
           {/* Toast host lives at the app root (App.tsx) so it's always mounted. */}
@@ -2559,8 +2557,7 @@ function ProjectWorkspaceImpl({
               terminalRevealTick={revealTick}
               runEntries={runEntries}
               buildEntries={buildEntries}
-              onConfigureRun={() => setRunConfigOpen(true)}
-              onConfigureBuild={() => setBuildConfigOpen(true)}
+              onOpenCommandSettings={setCommandSettings}
               onOpenScratch={() => openTab(makeScratchTab())}
             />
           </div>

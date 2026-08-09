@@ -18,7 +18,8 @@ interface Props {
   visible: boolean;
   /** Changing this forces a refit (e.g. after the sidebar's open animation). */
   fitSignal?: number;
-  /** Open this tab's command-config modal. */
+  /** Open the terminal settings on this tab's section (the strip's single gear
+   *  is the normal way in; this is the empty pane's call to action). */
   onConfigure: () => void;
 }
 
@@ -26,24 +27,6 @@ function PlayIcon() {
   return (
     <svg width="8" height="10" viewBox="0 0 9 11" fill="currentColor">
       <path d="M0 0l9 5.5L0 11z" />
-    </svg>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
@@ -84,11 +67,6 @@ const KILL_WATCHDOG_MS = 5_000;
 // The one prominent action in the header — a proper filled button, not a ghost.
 const runBtnCls =
   "flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-[var(--text)] px-2.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--bg)] transition-opacity hover:opacity-90";
-// Secondary "edit commands" gear. Always visible (it was opacity-0 until header
-// hover, which made it nearly impossible to find) but styled as a quiet,
-// bordered control so it reads as a button without competing with Run.
-const gearBtnCls =
-  "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]";
 
 /**
  * The Run / Build terminal. Its command list is project-level (passed in, shared
@@ -302,9 +280,8 @@ export function CommandsTerminal({
       <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[var(--bg)] px-6 text-center">
         <button
           onClick={onConfigure}
-          className="flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+          className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] underline decoration-[var(--border-strong)] underline-offset-4 transition-colors hover:text-[var(--text)]"
         >
-          <GearIcon />
           Configure {label.toLowerCase()} command
         </button>
       </div>
@@ -376,25 +353,14 @@ export function CommandsTerminal({
               })}
             </div>
           )}
-          <div className={cn("flex items-center gap-1.5", !multi && "ml-auto")}>
-            <button
-              className={runBtnCls}
-              onClick={runAll}
-              title={multi ? "Run every command" : `Run ${activeEntry.command}`}
-            >
-              <PlayIcon />
-              {runLabel}
-            </button>
-            {/* Edit commands — a quiet but always-visible control beside Run. */}
-            <button
-              className={gearBtnCls}
-              onClick={onConfigure}
-              title={`Edit ${label.toLowerCase()} commands`}
-              aria-label={`Edit ${label.toLowerCase()} commands`}
-            >
-              <GearIcon />
-            </button>
-          </div>
+          <button
+            className={cn(runBtnCls, !multi && "ml-auto")}
+            onClick={runAll}
+            title={multi ? "Run every command" : `Run ${activeEntry.command}`}
+          >
+            <PlayIcon />
+            {runLabel}
+          </button>
         </div>
       )}
 
@@ -465,18 +431,6 @@ export function CommandsTerminal({
               <PlayIcon />
               {label}
             </button>
-            {/* No header in this state (single idle command) — same quiet,
-                always-visible edit gear, pinned to the corner. */}
-            {!showHeader && (
-              <button
-                onClick={onConfigure}
-                title={`Edit ${label.toLowerCase()} commands`}
-                aria-label={`Edit ${label.toLowerCase()} commands`}
-                className={cn("absolute top-2 right-2", gearBtnCls)}
-              >
-                <GearIcon />
-              </button>
-            )}
           </div>
         )}
       </div>

@@ -33,6 +33,7 @@ import { CommandsTerminal } from "@/renderer/features/terminal/commands-terminal
 import { SearchPanel } from "@/renderer/features/search/search-panel";
 import { PrSidebar } from "@/renderer/features/pr/pr-sidebar";
 import { usePersistentNumber } from "@/renderer/lib/use-persistent-number";
+import { useEdgeFade } from "@/renderer/lib/use-edge-fade";
 
 import type { WorkTab } from "./use-workspace-tabs";
 
@@ -125,9 +126,8 @@ interface Props {
   runEntries: CommandEntry[];
   /** Project-level Build command list (surfaced only in a worktree). */
   buildEntries: CommandEntry[];
-  /** Open the Run / Build command-config modals. */
-  onConfigureRun: () => void;
-  onConfigureBuild: () => void;
+  /** Open the terminal settings, landing on one section. */
+  onOpenCommandSettings: (section: "run" | "build") => void;
   /** Open the per-worktree scratchpad as a tab in the center content pane. */
   onOpenScratch: () => void;
 }
@@ -146,6 +146,24 @@ function ChevronIcon({ up }: { up: boolean }) {
       className={cn("transition-transform duration-200", up && "rotate-180")}
     >
       <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
@@ -321,8 +339,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   terminalRevealTick,
   runEntries,
   buildEntries,
-  onConfigureRun,
-  onConfigureBuild,
+  onOpenCommandSettings,
   onOpenScratch,
 }: Props) {
   const sidebar = useSidebar();
@@ -343,6 +360,13 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   // Claude's TUI) stuck a couple of columns wide once the animation ends.
   const [fitSignal, setFitSignal] = useState(0);
   const [searchFocusSignal, setSearchFocusSignal] = useState(0);
+  // Tabs scroll under the pinned settings gear, so the strip's ends dissolve
+  // rather than being cut mid-label.
+  const stripFade = useEdgeFade(terminals.length);
+  // The gear opens the section the visible terminal belongs to; a scratch shell
+  // has no command list of its own, so it falls back to Run.
+  const activeTerminalKind =
+    terminals.find((t) => t.id === activeTerminalId)?.kind ?? "run";
 
   const startTermResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -625,7 +649,15 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               <ChevronIcon up={paneCollapsed} />
             </button>
           )}
-          <div className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto">
+          <div
+            ref={stripFade.ref}
+            onScroll={stripFade.onScroll}
+            style={{
+              maskImage: stripFade.mask,
+              WebkitMaskImage: stripFade.mask,
+            }}
+            className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto"
+          >
             {terminals.map((t) => {
               const active = t.id === activeTerminalId;
               return (
@@ -680,6 +712,20 @@ export const MiddleSidebar = memo(function MiddleSidebar({
               <PlusIcon />
             </button>
           </div>
+          {/* The one way into the command settings, pinned outside the scroller
+              so the tabs slide under it and fade out rather than reach it. */}
+          <button
+            onClick={() =>
+              onOpenCommandSettings(
+                activeTerminalKind === "build" ? "build" : "run",
+              )
+            }
+            title="Terminal commands"
+            aria-label="Terminal commands"
+            className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
+          >
+            <GearIcon />
+          </button>
         </div>
         {/* Embedded terminal pane: the active shell renders right here, sized
             to this bottom section only (drag the top edge to resize). All opened
@@ -701,6 +747,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             )}
             {terminals.map((t) => {
               const active = t.id === activeTerminalId;
+              const commandKind = t.kind === "shell" ? null : t.kind;
               return (
                 <div
                   key={t.id}
@@ -709,17 +756,17 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                     (!active || paneCollapsed) && "hidden",
                   )}
                 >
-                  {t.kind === "run" || t.kind === "build" ? (
+                  {commandKind ? (
                     <CommandsTerminal
-                      kind={t.kind}
+                      kind={commandKind}
                       encoded={encoded}
-                      entries={t.kind === "build" ? buildEntries : runEntries}
+                      entries={
+                        commandKind === "build" ? buildEntries : runEntries
+                      }
                       repos={repos}
                       visible={active && !paneCollapsed && sidebar.open}
                       fitSignal={fitSignal}
-                      onConfigure={
-                        t.kind === "build" ? onConfigureBuild : onConfigureRun
-                      }
+                      onConfigure={() => onOpenCommandSettings(commandKind)}
                     />
                   ) : (
                     <TerminalPanel
