@@ -1,4 +1,12 @@
-import { forwardRef, memo, useEffect, useRef, type ReactNode } from "react";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { NotebookPen } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
@@ -81,6 +89,9 @@ function tabIcon(tab: Tab): ReactNode {
       return <NotebookPen size={13} className="shrink-0" />;
   }
 }
+
+/** How far a tab dissolves at a scrolled-past end of the strip. */
+const FADE_PX = "28px";
 
 export interface TabBarProps {
   tabs: Tab[];
@@ -175,6 +186,19 @@ export const TabBar = memo(function TabBar({
 }: TabBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState({ left: false, right: false });
+
+  // Which ends have tabs hidden past them. Bails when nothing changed, so a
+  // scroll only re-renders the strip at the two transitions — not per frame.
+  const syncFade = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
+    setFade((prev) =>
+      prev.left === left && prev.right === right ? prev : { left, right },
+    );
+  }, []);
 
   // Keep the active tab in view — whether it just got appended (opening a new
   // tab) or it's an existing tab that was scrolled off-screen (re-opening a
@@ -190,29 +214,50 @@ export const TabBar = memo(function TabBar({
     } else if (elRect.right > cRect.right) {
       container.scrollLeft += elRect.right - cRect.right;
     }
-  }, [activeId, tabs.length]);
+    syncFade();
+  }, [activeId, tabs.length, syncFade]);
+
+  // Resizing the pane changes what overflows without ever firing a scroll.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(syncFade);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [syncFade]);
 
   if (tabs.length === 0) return null;
+  // Dissolve the overflowing end into the strip instead of guillotining a tab
+  // mid-glyph. The border + chrome fill sit on the unmasked wrapper, so the
+  // divider under the strip stays a full-width line.
+  const mask =
+    fade.left || fade.right
+      ? `linear-gradient(to right, transparent, #000 ${fade.left ? FADE_PX : "0px"}, #000 calc(100% - ${fade.right ? FADE_PX : "0px"}), transparent)`
+      : undefined;
   return (
-    <div
-      ref={scrollRef}
-      className="scrollbar-hover-x flex shrink-0 items-stretch overflow-x-auto border-b border-[var(--border)] bg-[var(--bg-surface)]"
-    >
-      {tabs.map((tab) => {
-        const active = tab.id === activeId;
-        return (
-          <TabItem
-            key={tab.id}
-            ref={active ? activeRef : undefined}
-            tab={tab}
-            active={active}
-            title={titleFor(tab)}
-            termId={termIdFor ? termIdFor(tab) : null}
-            onActivate={onActivate}
-            onClose={onClose}
-          />
-        );
-      })}
+    <div className="shrink-0 border-b border-[var(--border)] bg-[var(--bg-chrome,var(--bg-surface))]">
+      <div
+        ref={scrollRef}
+        onScroll={syncFade}
+        style={{ maskImage: mask, WebkitMaskImage: mask }}
+        className="scrollbar-hidden-x flex items-stretch overflow-x-auto"
+      >
+        {tabs.map((tab) => {
+          const active = tab.id === activeId;
+          return (
+            <TabItem
+              key={tab.id}
+              ref={active ? activeRef : undefined}
+              tab={tab}
+              active={active}
+              title={titleFor(tab)}
+              termId={termIdFor ? termIdFor(tab) : null}
+              onActivate={onActivate}
+              onClose={onClose}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 });

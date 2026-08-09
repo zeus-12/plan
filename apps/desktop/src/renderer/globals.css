@@ -76,22 +76,14 @@ textarea {
 }
 
 /*
- * Horizontal scroll strips (e.g. the content-pane tab bar): a slim 2px
- * scrollbar, VS Code style. It only shows when the tabs actually overflow (so
- * people know there's more), and never resizes on hover — this is the custom
- * webkit scrollbar, not the native overlay one that fattens. Kept very thin so
- * it stays unobtrusive under the labels. (The thumb's length is proportional
- * to the overflow — that's the browser, not something we set.)
+ * Horizontal scroll strips (e.g. the content-pane tab bar). No scrollbar: it
+ * would land on the strip's bottom edge, i.e. right on the divider against the
+ * content below it. "There's more" is signalled by the strip's edge fade
+ * instead (see TabBar), which also keeps a half-scrolled tab from being sliced
+ * mid-glyph.
  */
-.scrollbar-hover-x::-webkit-scrollbar {
-  height: 2px;
-}
-.scrollbar-hover-x::-webkit-scrollbar-thumb {
-  background-color: var(--border-strong);
-  border-radius: 9999px;
-}
-.scrollbar-hover-x:hover::-webkit-scrollbar-thumb {
-  background-color: var(--text-tertiary);
+.scrollbar-hidden-x::-webkit-scrollbar {
+  height: 0;
 }
 
 /*
