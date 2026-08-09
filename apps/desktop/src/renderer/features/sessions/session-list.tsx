@@ -115,7 +115,7 @@ export function SessionList({
           />
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="scrollbar-hidden-y min-h-0 flex-1 overflow-auto">
         {loading && sessions.length === 0 ? (
           <div className="flex h-32 items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
             Loading…
@@ -232,13 +232,15 @@ const SessionRow = memo(function SessionRow({
             >
               {s.title ?? "Untitled session"}
             </span>
-            {needsApproval ? (
-              <ApprovalDot />
-            ) : working ? (
-              <WorkingIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
-            ) : (
-              hasUnread && <RepliedDot />
-            )}
+            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+              {needsApproval ? (
+                <ApprovalDot />
+              ) : working ? (
+                <WorkingIcon className="h-3.5 w-3.5 text-[var(--text-secondary)]" />
+              ) : (
+                hasUnread && <RepliedDot />
+              )}
+            </span>
           </span>
           <TimeAgo
             ts={s.updatedAt}

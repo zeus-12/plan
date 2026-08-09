@@ -108,6 +108,16 @@ textarea {
 }
 
 /*
+ * Vertical counterpart, for sidebar lists that end in a ListFooter. The bar is
+ * the only thing on those lists that changes width, so hiding it is what keeps
+ * the rows still — a reserved gutter would hold the space but spend 6px of title
+ * on every row to do it. The footer's fade already signals there's more below.
+ */
+.scrollbar-hidden-y::-webkit-scrollbar {
+  width: 0;
+}
+
+/*
  * "Compile" working indicator (see WorkingIcon): a 5×5 dot grid whose columns
  * fill bottom-up and release together while an agent is busy. Both dot layers
  * use currentColor so the icon matches the surrounding text in every theme; the
