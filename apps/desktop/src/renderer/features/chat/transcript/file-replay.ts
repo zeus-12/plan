@@ -91,13 +91,15 @@ export function opsFromToolUse(
       const ops = raw
         .map(obj)
         .filter((e): e is Record<string, unknown> => e != null)
-        .map((e): FileEditOp => ({
-          kind: "edit",
-          row,
-          oldText: asStr(e.old_string),
-          newText: asStr(e.new_string),
-          replaceAll: e.replace_all === true,
-        }))
+        .map(
+          (e): FileEditOp => ({
+            kind: "edit",
+            row,
+            oldText: asStr(e.old_string),
+            newText: asStr(e.new_string),
+            replaceAll: e.replace_all === true,
+          }),
+        )
         .filter((e) => e.oldText || e.newText);
       return ops.length ? { path, ops } : null;
     }

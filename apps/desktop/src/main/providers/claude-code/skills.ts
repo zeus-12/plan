@@ -260,7 +260,8 @@ async function readEnabledPlugins(cwd: string): Promise<Map<string, boolean>> {
   const merged = new Map<string, boolean>();
   for (const file of files) {
     const parsed = (await readJsonSafe(file)) as
-      { enabledPlugins?: Record<string, unknown> } | undefined;
+      | { enabledPlugins?: Record<string, unknown> }
+      | undefined;
     const entries = parsed?.enabledPlugins;
     if (!entries || typeof entries !== "object") continue;
     for (const [key, value] of Object.entries(entries)) {

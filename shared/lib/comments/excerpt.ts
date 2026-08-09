@@ -57,7 +57,5 @@ export function excerpt(text: string, budget: number): string {
     }
   }
 
-  return (
-    text.slice(0, headBudget) + CUT + text.slice(totalChars - tailBudget)
-  );
+  return text.slice(0, headBudget) + CUT + text.slice(totalChars - tailBudget);
 }

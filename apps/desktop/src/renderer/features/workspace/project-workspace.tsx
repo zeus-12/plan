@@ -208,7 +208,11 @@ function openTarget(tab: Tab | null | undefined): {
  * header dot shows. `null` when no chat is selected (nothing to report).
  */
 type ChatStatus =
-  "disconnected" | "needsInput" | "terminal" | "working" | "idle";
+  | "disconnected"
+  | "needsInput"
+  | "terminal"
+  | "working"
+  | "idle";
 
 const CHAT_STATUS: Record<ChatStatus, { dot: string; label: string }> = {
   disconnected: {
