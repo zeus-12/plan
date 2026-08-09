@@ -56,6 +56,8 @@ import {
 import { TurnFilesStrip, turnFileChangesByRow } from "./turn-files";
 import {
   ToolPreviewCard,
+  hasImageResult,
+  resultImagePreview,
   toolPreview,
   useToolPreviewHover,
 } from "./tool-preview-card";
@@ -505,18 +507,43 @@ function ToolCallBlock({
 }) {
   const [open, setOpen] = useState(false);
   const { verb, target } = toolHeader(tool, input);
-  const preview = useMemo(() => toolPreview(tool, input), [tool, input]);
+  const inputPreview = useMemo(() => toolPreview(tool, input), [tool, input]);
   const hover = useToolPreviewHover();
+
+  // The base64 in an image result is megabytes; decode it to data URLs only once
+  // something is about to show it, and keep it for as long as this row lives.
+  const hasImages = hasImageResult(result?.output);
+  const [imagesWanted, setImagesWanted] = useState(false);
+  const path = asStr(
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>).file_path
+      : "",
+  );
+  const imagePreview = useMemo(
+    () => (imagesWanted ? resultImagePreview(path, result?.output) : null),
+    [imagesWanted, path, result?.output],
+  );
+
+  const preview = imagePreview ?? inputPreview;
+  const hoverable = hasImages || !!inputPreview;
+  const showImages = () => setImagesWanted(true);
+
   return (
     <div>
       <button
-        onClick={toggleUnlessSelecting(() => setOpen((v) => !v))}
+        onClick={toggleUnlessSelecting(() => {
+          showImages();
+          setOpen((v) => !v);
+        })}
         onMouseEnter={
-          preview
-            ? (e) => hover.onEnter(e.currentTarget.getBoundingClientRect())
+          hoverable
+            ? (e) => {
+                showImages();
+                hover.onEnter(e.currentTarget.getBoundingClientRect());
+              }
             : undefined
         }
-        onMouseLeave={preview ? hover.onLeave : undefined}
+        onMouseLeave={hoverable ? hover.onLeave : undefined}
         className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
       >
         <span className="shrink-0 text-[var(--text-tertiary)]">{verb}</span>
@@ -550,7 +577,11 @@ function ToolCallBlock({
                 <div className="mb-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
                   {result.isError ? "result (error)" : "result"}
                 </div>
-                <CodeBody text={result.output} />
+                {imagePreview ? (
+                  <ResultImages srcs={imagePreview.srcs} label={path} />
+                ) : (
+                  <CodeBody text={result.output} />
+                )}
               </div>
             )}
           </div>
@@ -706,11 +737,14 @@ const IMAGE_TILE = "h-[86px] w-[130px]";
 const IMAGE_GRID_MAX_W = 3 * 130 + 2 * 6;
 
 function TranscriptImage({
-  path,
+  src,
+  label,
   tiled,
   onOpen,
 }: {
-  path: string;
+  src: string;
+  /** Shown when the image won't render — the path it came from. */
+  label: string;
   tiled: boolean;
   onOpen: () => void;
 }) {
@@ -724,13 +758,13 @@ function TranscriptImage({
         )}
       >
         Image unavailable
-        <div className="truncate">{path}</div>
+        <div className="truncate">{label}</div>
       </div>
     );
   }
   return (
     <img
-      src={mediaUrl(path)}
+      src={src}
       alt="Attached image"
       loading="lazy"
       decoding="async"
@@ -769,7 +803,8 @@ function TranscriptImages({
         {paths.map((p, i) => (
           <TranscriptImage
             key={`${i}:${p}`}
-            path={p}
+            src={mediaUrl(p)}
+            label={p}
             tiled={tiled}
             onOpen={() => setAt(offset + i)}
           />
@@ -781,6 +816,32 @@ function TranscriptImages({
           index={at}
           onClose={() => setAt(null)}
         />
+      )}
+    </>
+  );
+}
+
+/**
+ * The images a tool result carried, shown in place of the base64 blob the
+ * transcript stores. Same tile + lightbox treatment as an attached image.
+ */
+function ResultImages({ srcs, label }: { srcs: string[]; label: string }) {
+  const [at, setAt] = useState<number | null>(null);
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        {srcs.map((src, i) => (
+          <TranscriptImage
+            key={i}
+            src={src}
+            label={label}
+            tiled={srcs.length > 1}
+            onOpen={() => setAt(i)}
+          />
+        ))}
+      </div>
+      {at !== null && (
+        <ImageLightbox srcs={srcs} index={at} onClose={() => setAt(null)} />
       )}
     </>
   );

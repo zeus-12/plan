@@ -45,7 +45,10 @@ export type ToolPreview =
       language: string;
       oldText: string;
       newText: string;
-    };
+    }
+  /** The images a tool result carried, as data URLs — the one preview built
+   *  from the result rather than the input. */
+  | { kind: "image"; path: string; srcs: string[] };
 
 function asStr(v: unknown): string {
   return typeof v === "string" ? v : "";
@@ -90,6 +93,49 @@ export function toolPreview(tool: string, input: unknown): ToolPreview | null {
     default:
       return null;
   }
+}
+
+const IMAGE_RESULT_PREFIX = '[{"type":"image"';
+
+/** Whether a tool result is image blocks — an O(1) gate before the parse, which
+ *  walks a base64 payload that routinely runs to megabytes. */
+export function hasImageResult(output: string | undefined): boolean {
+  return output != null && output.startsWith(IMAGE_RESULT_PREFIX);
+}
+
+export type ImagePreview = Extract<ToolPreview, { kind: "image" }>;
+
+/**
+ * The images a tool result carried, as data URLs — a Read of a .png or a .pdf
+ * comes back as base64 image blocks. Built from the result itself, not from the
+ * path on disk: the base64 is what the tool actually returned, and the file may
+ * have changed since.
+ */
+export function resultImagePreview(
+  path: string,
+  output: string | undefined,
+): ImagePreview | null {
+  if (!hasImageResult(output)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output!);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const srcs: string[] = [];
+  for (const block of parsed) {
+    if (!block || typeof block !== "object") continue;
+    const source = (block as Record<string, unknown>).source;
+    if (!source || typeof source !== "object") continue;
+    const s = source as Record<string, unknown>;
+    const data = asStr(s.data);
+    const media = asStr(s.media_type);
+    if (s.type === "base64" && data && media) {
+      srcs.push(`data:${media};base64,${data}`);
+    }
+  }
+  return srcs.length ? { kind: "image", path, srcs } : null;
 }
 
 // Fixed presentation — no user tweaking. A split (two-panel) diff needs more
@@ -450,9 +496,10 @@ function ContentSection({
 
 /**
  * A fixed, portalled hover card showing what a tool call changed — a diff for
- * Edits, the new contents for Writes. It positions itself below the anchor,
- * flipping above when there isn't room, and stays open while the pointer is over
- * it (the parent wires onMouseEnter/onMouseLeave to a shared hover timer).
+ * Edits, the new contents for Writes, the image for a Read that returned one. It
+ * positions itself below the anchor, flipping above when there isn't room, and
+ * stays open while the pointer is over it (the parent wires
+ * onMouseEnter/onMouseLeave to a shared hover timer).
  */
 export function ToolPreviewCard({
   preview,
@@ -473,7 +520,7 @@ export function ToolPreviewCard({
     visibility: "hidden",
   });
 
-  useLayoutEffect(() => {
+  const place = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     const h = el.offsetHeight;
@@ -485,7 +532,9 @@ export function ToolPreviewCard({
     }
     const left = Math.max(8, Math.min(anchor.left, window.innerWidth - w - 8));
     setPos({ top, left, visibility: "visible" });
-  }, [anchor, preview]);
+  }, [anchor]);
+
+  useLayoutEffect(place, [place, preview]);
 
   const name = preview.path ? basename(preview.path) : "";
   const label =
@@ -493,7 +542,9 @@ export function ToolPreviewCard({
       ? "new file"
       : preview.kind === "file"
         ? "file diff"
-        : "diff";
+        : preview.kind === "image"
+          ? "image"
+          : "diff";
 
   return (
     <div
@@ -503,9 +554,17 @@ export function ToolPreviewCard({
       className="fixed z-50 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-lg"
       style={{
         ...pos,
+        // An image sizes the card to itself; the text previews are fixed-width.
         width:
-          preview.kind === "content" ? CARD_WIDTH_CONTENT : CARD_WIDTH_DIFF,
-        maxWidth: "calc(100vw - 16px)",
+          preview.kind === "image"
+            ? undefined
+            : preview.kind === "content"
+              ? CARD_WIDTH_CONTENT
+              : CARD_WIDTH_DIFF,
+        maxWidth:
+          preview.kind === "image"
+            ? `min(${CARD_WIDTH_CONTENT}px, calc(100vw - 16px))`
+            : "calc(100vw - 16px)",
       }}
     >
       <div className="flex items-baseline gap-2 border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)]">
@@ -517,7 +576,22 @@ export function ToolPreviewCard({
         </span>
       </div>
       <div className="max-h-[60vh] overflow-auto py-1.5 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed">
-        {preview.kind === "file" ? (
+        {preview.kind === "image" ? (
+          <div className="flex flex-col items-center gap-1.5 px-1.5">
+            {preview.srcs.map((src, i) => (
+              <img
+                key={i}
+                src={src}
+                alt=""
+                // The image's height is unknown until it decodes, so the first
+                // placement measures an empty card — re-place once it lands.
+                onLoad={place}
+                className="max-w-full rounded-sm object-contain"
+                style={{ maxHeight: "56vh" }}
+              />
+            ))}
+          </div>
+        ) : preview.kind === "file" ? (
           <UnifiedSection
             oldText={preview.oldText}
             newText={preview.newText}
