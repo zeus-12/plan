@@ -143,7 +143,7 @@ const TabItem = forwardRef<
         "group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
         active
           ? "bg-[var(--bg)] text-[var(--text)]"
-          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-secondary)]",
+          : "text-[var(--text-tertiary)] hover:bg-[var(--row-hover)] hover:text-[var(--text-secondary)]",
       )}
     >
       <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
@@ -159,7 +159,7 @@ const TabItem = forwardRef<
           onClose(tab.id);
         }}
         className={cn(
-          "-mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[13px] leading-none transition-opacity hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]",
+          "-mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[13px] leading-none transition-opacity hover:bg-[var(--row-hover)] hover:text-[var(--text)]",
           active
             ? "text-[var(--text-tertiary)]"
             : "opacity-0 group-hover:opacity-100",
