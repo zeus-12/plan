@@ -35,6 +35,27 @@ A zero-install diff-and-comment tool in the browser. Paste an original and a cha
 - Copy a tidy, LLM-ready message of all your feedback.
 - Share a link with both versions baked into the URL, or copy a plain unified diff.
 
+## Validating a change
+
+One command checks every package in the workspace:
+
+```
+pnpm run validate
+```
+
+It runs, in order and stopping at the first failure:
+
+| Step                    | Covers                               |
+| ----------------------- | ------------------------------------ |
+| `pnpm run typecheck`    | `shared`, `apps/web`, `apps/desktop` |
+| `pnpm test`             | `apps/desktop` (vitest)              |
+| `pnpm run lint`         | `apps/web` (eslint)                  |
+| `pnpm run format:check` | `shared`, `apps/web`, `apps/desktop` |
+
+Run any step on its own while iterating. For a single test file, `pnpm --filter @plan/desktop exec vitest run test/<name>.test.ts`. `pnpm run format` rewrites files instead of just checking them.
+
+The release workflow runs `validate` as its first job and refuses to build or publish if it fails.
+
 ---
 
 Shared diff/comment logic lives in `shared/`. The whole thing is built almost entirely with Claude Code (this README included, this time :p).
