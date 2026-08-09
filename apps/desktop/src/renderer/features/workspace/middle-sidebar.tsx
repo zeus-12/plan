@@ -32,6 +32,8 @@ import { TerminalPanel } from "@/renderer/features/terminal/terminal-panel";
 import { CommandsTerminal } from "@/renderer/features/terminal/commands-terminal";
 import { SearchPanel } from "@/renderer/features/search/search-panel";
 import { PrSidebar } from "@/renderer/features/pr/pr-sidebar";
+import type { CommandKind } from "@/common/terminal-ids";
+import type { CommandSection } from "@/renderer/features/terminal/commands-settings-modal";
 import { usePersistentNumber } from "@/renderer/lib/use-persistent-number";
 import { useEdgeFade } from "@/renderer/lib/use-edge-fade";
 
@@ -105,11 +107,12 @@ interface Props {
 
   /** Project encoded dir — the embedded shells resolve their cwd from it. */
   encoded: string;
-  /** Run (always) + Build (worktree only) are first and non-closable; rest are shells. */
+  /** Run (always), Build (worktree only) and Scripts (once one exists) are
+   *  first and non-closable; the rest are shells. */
   terminals: {
     id: string;
     label: string;
-    kind: "run" | "build" | "shell";
+    kind: CommandKind | "shell";
     /** Runs once, when this shell's pty is created (a chat code block's run
      *  button spawns the shell already carrying its command). */
     initialCommand?: string;
@@ -126,8 +129,10 @@ interface Props {
   runEntries: CommandEntry[];
   /** Project-level Build command list (surfaced only in a worktree). */
   buildEntries: CommandEntry[];
+  /** Project-level Scripts list (surfaced only when it's non-empty). */
+  scriptEntries: CommandEntry[];
   /** Open the terminal settings, landing on one section. */
-  onOpenCommandSettings: (section: "run" | "build") => void;
+  onOpenCommandSettings: (section: CommandSection) => void;
   /** Open the per-worktree scratchpad as a tab in the center content pane. */
   onOpenScratch: () => void;
 }
@@ -339,6 +344,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   terminalRevealTick,
   runEntries,
   buildEntries,
+  scriptEntries,
   onOpenCommandSettings,
   onOpenScratch,
 }: Props) {
@@ -367,6 +373,12 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   // has no command list of its own, so it falls back to Run.
   const activeTerminalKind =
     terminals.find((t) => t.id === activeTerminalId)?.kind ?? "run";
+  const activeSection: CommandSection =
+    activeTerminalKind === "build"
+      ? "build"
+      : activeTerminalKind === "script"
+        ? "scripts"
+        : "run";
 
   const startTermResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -715,11 +727,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
           {/* The one way into the command settings, pinned outside the scroller
               so the tabs slide under it and fade out rather than reach it. */}
           <button
-            onClick={() =>
-              onOpenCommandSettings(
-                activeTerminalKind === "build" ? "build" : "run",
-              )
-            }
+            onClick={() => onOpenCommandSettings(activeSection)}
             title="Terminal commands"
             aria-label="Terminal commands"
             className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
@@ -761,12 +769,20 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                       kind={commandKind}
                       encoded={encoded}
                       entries={
-                        commandKind === "build" ? buildEntries : runEntries
+                        commandKind === "build"
+                          ? buildEntries
+                          : commandKind === "script"
+                            ? scriptEntries
+                            : runEntries
                       }
                       repos={repos}
                       visible={active && !paneCollapsed && sidebar.open}
                       fitSignal={fitSignal}
-                      onConfigure={() => onOpenCommandSettings(commandKind)}
+                      onConfigure={() =>
+                        onOpenCommandSettings(
+                          commandKind === "script" ? "scripts" : commandKind,
+                        )
+                      }
                     />
                   ) : (
                     <TerminalPanel

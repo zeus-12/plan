@@ -30,18 +30,26 @@ export function buildEntriesOf(defaults: ProjectDefaults): CommandEntry[] {
   return legacy ? [{ id: "build", command: legacy }] : [];
 }
 
+/** The project's Scripts list. No legacy shape to migrate — this one is new. */
+export function scriptEntriesOf(defaults: ProjectDefaults): CommandEntry[] {
+  return defaults.scripts ?? [];
+}
+
 /**
- * Label for an entry's sub-tab: the target repo's folder name when the entry is
- * bound to a sub-repo, otherwise the command itself (so several commands in a
- * single repo stay distinguishable — `npm run dev` vs `npm run test`, not two
- * "npm"s). The sub-tab truncates it visually and shows the full command on hover.
- * Falls back to a positional name like "Run 2" for an empty command.
+ * Label for an entry's sub-tab: its own name when it has one (Scripts), else
+ * the target repo's folder name when the entry is bound to a sub-repo, else the
+ * command itself (so several commands in a single repo stay distinguishable —
+ * `npm run dev` vs `npm run test`, not two "npm"s). The sub-tab truncates it
+ * visually and shows the full command on hover. Falls back to a positional name
+ * like "Run 2" for an empty command.
  */
 export function entryLabel(
   entry: CommandEntry,
   repos: DiscoveredRepo[],
   fallback: string,
 ): string {
+  const named = entry.name?.trim();
+  if (named) return named;
   if (entry.subPath) {
     const name =
       repos.find((r) => r.subPath === entry.subPath)?.subPath || entry.subPath;

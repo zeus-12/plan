@@ -174,11 +174,14 @@ interface Props {
   runEntries: CommandEntry[];
   /** Project-level Build command list (the Build tab shows only in a worktree). */
   buildEntries: CommandEntry[];
+  /** Project-level Scripts list (the Scripts tab shows only when it's non-empty). */
+  scriptEntries: CommandEntry[];
   /** Whether the current view is a worktree — gates the Build tab. */
   isWorktree: boolean;
-  /** Persist the Run / Build command lists to the project (parent-keyed defaults). */
+  /** Persist a command list to the project (parent-keyed defaults). */
   onSaveRun: (entries: CommandEntry[]) => Promise<void> | void;
   onSaveBuild: (entries: CommandEntry[]) => Promise<void> | void;
+  onSaveScripts: (entries: CommandEntry[]) => Promise<void> | void;
   /**
    * Move a chat session out of this view into another worktree (or the live
    * copy). Omitted when there's nowhere to move it (project has no worktrees).
@@ -557,9 +560,11 @@ function ProjectWorkspaceImpl({
   onSelectWorktree,
   runEntries,
   buildEntries,
+  scriptEntries,
   isWorktree,
   onSaveRun,
   onSaveBuild,
+  onSaveScripts,
   onMoveSession,
 }: Props) {
   // Keep the latest `active` in a ref so the global keydown handlers can read it
@@ -1812,9 +1817,10 @@ function ProjectWorkspaceImpl({
   );
 
   // Build comes first, but only inside a worktree (that's where a per-branch
-  // build makes sense); Run follows and is always present and non-closable.
-  // Both pty ids are scoped to this worktree's encoded so the processes are
-  // per-worktree; the command lists themselves are project-level (via props).
+  // build makes sense); Run follows and is always present and non-closable;
+  // Scripts appears only once the project has one. All three pty ids are scoped
+  // to this worktree's encoded so the processes are per-worktree; the command
+  // lists themselves are project-level (via props).
   const sidebarTerminals = useMemo(
     () => [
       ...(isWorktree
@@ -1827,6 +1833,15 @@ function ProjectWorkspaceImpl({
           ]
         : []),
       { id: `run:${project.encoded}`, label: "Run", kind: "run" as const },
+      ...(scriptEntries.length > 0
+        ? [
+            {
+              id: `script:${project.encoded}`,
+              label: "Scripts",
+              kind: "script" as const,
+            },
+          ]
+        : []),
       ...shells.map((id) => ({
         id,
         label: `Terminal ${shellNumber(id)}`,
@@ -1834,8 +1849,24 @@ function ProjectWorkspaceImpl({
         initialCommand: shellCommands[id],
       })),
     ],
-    [project.encoded, isWorktree, shells, shellNumber, shellCommands],
+    [
+      project.encoded,
+      isWorktree,
+      scriptEntries.length,
+      shells,
+      shellNumber,
+      shellCommands,
+    ],
   );
+
+  // The strip's selection, always resolved against the tabs that actually
+  // exist: nothing selected falls back to the always-present Run tab, and so
+  // does a selection that just disappeared (deleting the last script removes
+  // the Scripts tab while it's the one on screen).
+  const activeSidebarTerminalId =
+    activeShellId && sidebarTerminals.some((t) => t.id === activeShellId)
+      ? activeShellId
+      : `run:${project.encoded}`;
 
   // While the dock is open, keep the active chat terminal mounted. If there's
   // no live Claude for the selected session (e.g. you switched to a chat that
@@ -2157,10 +2188,12 @@ function ProjectWorkspaceImpl({
               section={commandSettings}
               runEntries={runEntries}
               buildEntries={buildEntries}
+              scriptEntries={scriptEntries}
               repos={repos}
               isWorktree={isWorktree}
               onSaveRun={onSaveRun}
               onSaveBuild={onSaveBuild}
+              onSaveScripts={onSaveScripts}
               onClose={() => setCommandSettings(null)}
             />
           )}
@@ -2557,14 +2590,14 @@ function ProjectWorkspaceImpl({
               repoName={prRepoName}
               encoded={project.encoded}
               terminals={sidebarTerminals}
-              // Default to the always-present Run tab when no shell is selected.
-              activeTerminalId={activeShellId ?? `run:${project.encoded}`}
+              activeTerminalId={activeSidebarTerminalId}
               onNewTerminal={newShell}
               onSelectTerminal={selectShell}
               onCloseTerminal={closeShell}
               terminalRevealTick={revealTick}
               runEntries={runEntries}
               buildEntries={buildEntries}
+              scriptEntries={scriptEntries}
               onOpenCommandSettings={setCommandSettings}
               onOpenScratch={() => openTab(makeScratchTab())}
             />

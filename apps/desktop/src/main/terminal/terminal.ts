@@ -104,6 +104,16 @@ function loadPty(): typeof import("node-pty") | null {
  * the Run/Build terminals in a multi-repo project, where each command targets
  * one of the project's git sub-repos).
  */
+/**
+ * Opens in flight, by id. A spawn can't register its session until it has
+ * resolved a cwd, so without this two opens racing on one id BOTH get past the
+ * "is there a session?" check and BOTH spawn a shell — the second wins the
+ * table and the first is orphaned: still writing to the id, still reporting its
+ * exit under it, and unreachable by any kill. React's StrictMode double-invokes
+ * every mount effect in dev, so a terminal pane produced that race every time.
+ */
+const opening = new Map<string, Promise<{ cwd: string; error?: string }>>();
+
 export async function openTerminal(
   id: string,
   encoded: string,
@@ -113,17 +123,29 @@ export async function openTerminal(
   subPath = "",
   opts: { attachOnly?: boolean } = {},
 ): Promise<{ cwd: string; error?: string }> {
+  const resize = (s: Session) => {
+    if (cols == null || rows == null) return;
+    try {
+      s.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
+      s.screen.resize(Math.max(cols, 1), Math.max(rows, 1));
+    } catch {
+      /* resize on a dead pty */
+    }
+  };
+
   const existing = sessions.get(id);
   if (existing) {
-    if (cols != null && rows != null) {
-      try {
-        existing.pty.resize(Math.max(cols, 1), Math.max(rows, 1));
-        existing.screen.resize(Math.max(cols, 1), Math.max(rows, 1));
-      } catch {
-        /* resize on a dead pty */
-      }
-    }
+    resize(existing);
     return { cwd: existing.cwd };
+  }
+  const inflight = opening.get(id);
+  if (inflight) {
+    // Someone is already creating this pty. Attach to whatever they get rather
+    // than start a second shell under the same id.
+    const result = await inflight;
+    const opened = sessions.get(id);
+    if (opened) resize(opened);
+    return result;
   }
   if (opts.attachOnly) {
     return {
@@ -131,9 +153,32 @@ export async function openTerminal(
       error: `No terminal is running for ${id}.`,
     };
   }
-  const spawnCols = Math.max(cols ?? 80, 1);
-  const spawnRows = Math.max(rows ?? 24, 1);
+  const spawn = spawnTerminal(
+    id,
+    encoded,
+    Math.max(cols ?? 80, 1),
+    Math.max(rows ?? 24, 1),
+    initialCommand,
+    subPath,
+  );
+  opening.set(id, spawn);
+  try {
+    return await spawn;
+  } finally {
+    opening.delete(id);
+  }
+}
 
+/** The spawn half of {@link openTerminal}, kept whole so it can be tracked as
+ *  one in-flight promise per id. */
+async function spawnTerminal(
+  id: string,
+  encoded: string,
+  spawnCols: number,
+  spawnRows: number,
+  initialCommand: string | undefined,
+  subPath: string,
+): Promise<{ cwd: string; error?: string }> {
   const cwd = await resolveWorkspaceCwd(encoded, subPath);
   const mod = loadPty();
   if (!mod) {
@@ -213,13 +258,33 @@ export function writeTerminal(id: string, data: string) {
   try {
     s.pty.write(data);
   } catch {
-    /* the pty died between its last read and its exit event */
+    // The write failed, so nothing typed here is reaching a shell. Say so if
+    // the process is really gone: swallowing it leaves a session registered,
+    // which reports as running and gives you a live-looking pane that eats
+    // every keystroke.
+    reapIfDead(s);
   }
 }
 
-/** Whether a pty is alive under this id. */
+/**
+ * Close out a session whose process is gone but whose `exit` never arrived.
+ * node-pty gates that event on the pty socket closing, which can be missed —
+ * and a session that outlives its shell is worse than no session at all: it
+ * answers "running" to every probe, so the pane never falls back to idle.
+ */
+function reapIfDead(s: Session): boolean {
+  if (s.tornDown) return true;
+  if (pidAlive(s.pty.pid)) return false;
+  teardown(s);
+  return true;
+}
+
+/** Whether a pty is alive under this id — verified against the OS, not just
+ *  our own table (see {@link reapIfDead}). */
 export function isTerminalRunning(id: string): boolean {
-  return sessions.has(id);
+  const s = sessions.get(id);
+  if (!s) return false;
+  return !reapIfDead(s);
 }
 
 /** A live pty's process id, for callers that need to inspect its descendants. */
@@ -469,8 +534,11 @@ export function rekeyTerminal(oldId: string, newId: string): boolean {
   return true;
 }
 
-/** Snapshot of every live pty — the source of truth for "what's running". */
+/** Snapshot of every live pty — the source of truth for "what's running", so
+ *  each one is checked against the OS before it's reported (see
+ *  {@link reapIfDead}). This is what heals a pane whose shell died unheard. */
 export function listTerminals(): TerminalInfo[] {
+  for (const s of [...sessions.values()]) reapIfDead(s);
   return [...sessions.entries()].map(([id, s]) => ({
     id,
     cwd: s.cwd,

@@ -351,18 +351,31 @@ export interface ProjectDefaults {
    * only inside a worktree (pty `build:<encoded>:<entry.id>`).
    */
   buildCommands?: CommandEntry[];
+  /**
+   * The "Scripts" terminal's list — one-off tasks you reach for occasionally
+   * (pty `script:<encoded>:<entry.id>`), each carrying a `name` to be labelled
+   * by. There's no "run all": a script is started deliberately, one at a time.
+   * Absent or empty hides the Scripts terminal entirely.
+   */
+  scripts?: CommandEntry[];
 }
 
 /**
- * One command in a Run/Build terminal's list. `subPath` targets a git sub-repo
- * of a multi-repo project (the command runs in that repo's dir); "" / undefined
- * runs it at the project root.
+ * One command in a Run/Build/Scripts terminal's list. `subPath` targets a git
+ * sub-repo of a multi-repo project (the command runs in that repo's dir); "" /
+ * undefined runs it at the project root.
  */
 export interface CommandEntry {
   /** Stable id — the pty key suffix + sub-tab key. Persisted so ptys survive reloads. */
   id: string;
   command: string;
   subPath?: string;
+  /**
+   * What to call this entry in its sub-tab. Scripts are named (that's how you
+   * tell `deploy` from `seed db` at a glance); Run/Build entries have no name
+   * and fall back to the command itself.
+   */
+  name?: string;
 }
 
 export interface CreateWorktreeInput {

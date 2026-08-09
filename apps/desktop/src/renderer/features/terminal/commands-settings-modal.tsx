@@ -9,13 +9,14 @@ import {
 import type { CommandEntry, DiscoveredRepo } from "@/common/shared-types";
 import { newEntryId } from "./commands";
 
-export type CommandSection = "run" | "build";
+export type CommandSection = "run" | "build" | "scripts";
 
 interface Props {
   /** Which section opens first — the gear passes the active terminal tab's. */
   section: CommandSection;
   runEntries: CommandEntry[];
   buildEntries: CommandEntry[];
+  scriptEntries: CommandEntry[];
   /** Sub-repos of the project — populate the per-row target dropdown (multi-repo only). */
   repos: DiscoveredRepo[];
   /** Outside a worktree the Build tab isn't shown, so its section says so. */
@@ -23,11 +24,17 @@ interface Props {
   /** Persist a list (empty commands dropped). Shared across worktrees + sessions. */
   onSaveRun: (entries: CommandEntry[]) => Promise<void> | void;
   onSaveBuild: (entries: CommandEntry[]) => Promise<void> | void;
+  onSaveScripts: (entries: CommandEntry[]) => Promise<void> | void;
   onClose: () => void;
 }
 
-const inputCls =
-  "w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 font-[family-name:var(--font-mono)] text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]";
+// Width is deliberately absent here and set per field below: two width
+// utilities on one element are decided by stylesheet order, not by the order
+// they're written in, so appending one to this string silently loses.
+const inputBase =
+  "rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 font-[family-name:var(--font-mono)] text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]";
+const commandInputCls = `${inputBase} min-w-0 flex-1`;
+const nameInputCls = `${inputBase} w-[132px] shrink-0`;
 const selectCls =
   "shrink-0 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-2 font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)] outline-none transition-colors focus:border-[var(--border-strong)]";
 
@@ -50,6 +57,7 @@ function cleanRows(rows: CommandEntry[]): CommandEntry[] {
       id: r.id,
       command: r.command.trim(),
       ...(r.subPath ? { subPath: r.subPath } : {}),
+      ...(r.name?.trim() ? { name: r.name.trim() } : {}),
     }));
 }
 
@@ -62,11 +70,16 @@ function CommandRows({
   setRows,
   repos,
   placeholder,
+  named = false,
+  addLabel = "Add command",
 }: {
   rows: CommandEntry[];
   setRows: (next: CommandEntry[]) => void;
   repos: DiscoveredRepo[];
   placeholder: string;
+  /** Scripts carry a name — it's what their tab is labelled by. */
+  named?: boolean;
+  addLabel?: string;
 }) {
   const multiRepo = repos.length > 1;
   const firstRef = useRef<HTMLInputElement>(null);
@@ -103,19 +116,27 @@ function CommandRows({
                 ))}
             </select>
           )}
+          {named && (
+            <input
+              ref={i === 0 ? firstRef : undefined}
+              value={row.name ?? ""}
+              onChange={(e) => setRow(row.id, { name: e.target.value })}
+              placeholder="name"
+              className={nameInputCls}
+            />
+          )}
           <input
-            ref={i === 0 ? firstRef : undefined}
+            ref={i === 0 && !named ? firstRef : undefined}
             value={row.command}
             onChange={(e) => setRow(row.id, { command: e.target.value })}
             placeholder={placeholder}
-            className={inputCls}
+            className={commandInputCls}
           />
           <button
             onClick={() => setRows(rows.filter((r) => r.id !== row.id))}
-            disabled={rows.length === 1}
             title="Remove command"
             aria-label="Remove command"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-30"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[16px] leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
           >
             ×
           </button>
@@ -127,7 +148,7 @@ function CommandRows({
         className="flex items-center gap-1.5 self-start rounded-md px-2 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
       >
         <span className="text-[14px] leading-none">+</span>
-        Add command
+        {addLabel}
       </button>
     </div>
   );
@@ -145,10 +166,12 @@ export function CommandsSettingsModal({
   section,
   runEntries,
   buildEntries,
+  scriptEntries,
   repos,
   isWorktree,
   onSaveRun,
   onSaveBuild,
+  onSaveScripts,
   onClose,
 }: Props) {
   const [tab, setTab] = useState<CommandSection>(section);
@@ -157,6 +180,9 @@ export function CommandsSettingsModal({
   );
   const [buildRows, setBuildRows] = useState<CommandEntry[]>(() =>
     blankRows(buildEntries),
+  );
+  const [scriptRows, setScriptRows] = useState<CommandEntry[]>(() =>
+    blankRows(scriptEntries),
   );
   const [busy, setBusy] = useState(false);
   // Whether the press that's now finishing started on the backdrop. Closing on
@@ -171,8 +197,10 @@ export function CommandsSettingsModal({
     setBusy(true);
     const run = cleanRows(runRows);
     const build = cleanRows(buildRows);
+    const script = cleanRows(scriptRows);
     if (!sameEntries(run, runEntries)) await onSaveRun(run);
     if (!sameEntries(build, buildEntries)) await onSaveBuild(build);
+    if (!sameEntries(script, scriptEntries)) await onSaveScripts(script);
     onClose();
   };
 
@@ -210,14 +238,17 @@ export function CommandsSettingsModal({
                 Commands
               </span>
               <span className="text-[11px] leading-snug text-[var(--text-tertiary)]">
-                {tab === "build" && !isWorktree
-                  ? "Worktree only — the Build terminal shows up once you're in one. Set it here and it's ready."
-                  : "Shared across every worktree and session of this project."}
+                {tab === "scripts"
+                  ? "Run one at a time. The tab is hidden when empty."
+                  : tab === "build" && !isWorktree
+                    ? "Only shows inside a worktree."
+                    : "Shared across all worktrees and sessions."}
               </span>
             </div>
             <TabsList className="shrink-0">
               <TabsTrigger value="run">Run</TabsTrigger>
               <TabsTrigger value="build">Build</TabsTrigger>
+              <TabsTrigger value="scripts">Scripts</TabsTrigger>
             </TabsList>
           </div>
 
@@ -236,6 +267,17 @@ export function CommandsSettingsModal({
               setRows={setBuildRows}
               repos={repos}
               placeholder="npm run build"
+            />
+          </TabsContent>
+
+          <TabsContent value="scripts">
+            <CommandRows
+              rows={scriptRows}
+              setRows={setScriptRows}
+              repos={repos}
+              placeholder="npm run db:seed"
+              named
+              addLabel="Add script"
             />
           </TabsContent>
         </Tabs>

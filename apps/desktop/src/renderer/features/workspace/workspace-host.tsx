@@ -10,6 +10,7 @@ import { useWorktrees } from "@/renderer/features/worktrees/use-worktrees";
 import {
   runEntriesOf,
   buildEntriesOf,
+  scriptEntriesOf,
 } from "@/renderer/features/terminal/commands";
 import {
   getCachedWorktreeRepos,
@@ -80,6 +81,10 @@ function WorkspaceHostImpl({
     () => buildEntriesOf(wt.defaults),
     [wt.defaults],
   );
+  const scriptEntries = useMemo(
+    () => scriptEntriesOf(wt.defaults),
+    [wt.defaults],
+  );
   const onSaveRun = useCallback(
     (runCommands: ReturnType<typeof runEntriesOf>) =>
       wt.saveDefaults((current) => ({
@@ -96,6 +101,11 @@ function WorkspaceHostImpl({
         buildCommands,
         buildCommand: undefined,
       })),
+    [wt],
+  );
+  const onSaveScripts = useCallback(
+    (scripts: ReturnType<typeof scriptEntriesOf>) =>
+      wt.saveDefaults((current) => ({ ...current, scripts })),
     [wt],
   );
 
@@ -170,9 +180,11 @@ function WorkspaceHostImpl({
           onSelectWorktree={onSelectWorktree}
           runEntries={runEntries}
           buildEntries={buildEntries}
+          scriptEntries={scriptEntries}
           isWorktree={isWorktree}
           onSaveRun={onSaveRun}
           onSaveBuild={onSaveBuild}
+          onSaveScripts={onSaveScripts}
           onMoveSession={onMoveSession}
         />
       ) : null}

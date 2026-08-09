@@ -7,6 +7,7 @@
  *   term:<encoded>:<n>            a scratch shell (sidebar Terminals section)
  *   run:<encoded>:<entryId>       one Run-list command's pty
  *   build:<encoded>:<entryId>     one Build-list command's pty
+ *   script:<encoded>:<entryId>    one Scripts-list command's pty
  *
  * `encoded` is Claude's cwd encoding ([a-zA-Z0-9-] only, so it never contains
  * ":"), and the suffixes are uuid/number-like — the segments are unambiguous.
@@ -29,9 +30,12 @@ export function shellTerminalPrefix(encoded: string): string {
   return `term:${encoded}:`;
 }
 
-/** Pty for one Run/Build command entry (per-worktree via `encoded`). */
+/** The command lists that get their own terminal tab and pty namespace. */
+export type CommandKind = "run" | "build" | "script";
+
+/** Pty for one Run/Build/Scripts entry (per-worktree via `encoded`). */
 export function commandTerminalId(
-  kind: "run" | "build",
+  kind: CommandKind,
   encoded: string,
   entryId: string,
 ): string {
@@ -56,15 +60,15 @@ export function parseChatTerminalId(
 export type ParsedTerminalId =
   | { kind: "chat"; encoded: string; sessionId: string }
   | { kind: "shell"; encoded: string; n: string }
-  | { kind: "run" | "build"; encoded: string; entryId: string }
+  | { kind: CommandKind; encoded: string; entryId: string }
   | { kind: "other" };
 
-/** Classify any pty id (chat / scratch shell / run / build / other). */
+/** Classify any pty id (chat / scratch shell / run / build / script / other). */
 export function parseTerminalId(id: string): ParsedTerminalId {
-  const m = id.match(/^(chat|term|run|build):(.+):([^:]+)$/);
+  const m = id.match(/^(chat|term|run|build|script):(.+):([^:]+)$/);
   if (!m) return { kind: "other" };
   const [, kind, encoded, suffix] = m;
   if (kind === "chat") return { kind: "chat", encoded, sessionId: suffix };
   if (kind === "term") return { kind: "shell", encoded, n: suffix };
-  return { kind: kind as "run" | "build", encoded, entryId: suffix };
+  return { kind: kind as CommandKind, encoded, entryId: suffix };
 }

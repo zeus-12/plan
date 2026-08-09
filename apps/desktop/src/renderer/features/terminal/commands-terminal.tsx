@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@plan/shared/lib/utils";
 import type { CommandEntry, DiscoveredRepo } from "@/common/shared-types";
-import { commandTerminalId } from "@/common/terminal-ids";
-import { TerminalPanel } from "./terminal-panel";
+import { commandTerminalId, type CommandKind } from "@/common/terminal-ids";
+import { TerminalPanel, type TerminalHandle } from "./terminal-panel";
 import { entryLabel } from "./commands";
 
 interface Props {
-  /** "run" → pty `run:<encoded>:<id>`; "build" → `build:<encoded>:<id>`. */
-  kind: "run" | "build";
+  /** Picks both the pty namespace (`<kind>:<encoded>:<id>`) and the shape: Run
+   *  and Build start their whole list at once, Scripts start one at a time. */
+  kind: CommandKind;
   /** Worktree encoded dir — main resolves each pty's cwd from it (+ entry.subPath). */
   encoded: string;
   /** Project-level command list (shared across worktrees). Empty = unconfigured. */
@@ -68,13 +69,21 @@ const KILL_WATCHDOG_MS = 5_000;
 const runBtnCls =
   "flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-[var(--text)] px-2.5 font-[family-name:var(--font-mono)] text-[11px] font-medium text-[var(--bg)] transition-opacity hover:opacity-90";
 
+const KIND_LABEL: Record<CommandKind, string> = {
+  run: "Run",
+  build: "Build",
+  script: "Scripts",
+};
+
 /**
- * The Run / Build terminal. Its command list is project-level (passed in, shared
- * across worktrees); each entry runs in its own per-worktree pty (keyed by this
- * worktree's `encoded` + the entry id). When there's more than one entry we show
- * a sub-tab per entry so you can watch each one's output; "Run all" starts them
- * together. We never assume a process is alive — each view is driven by the real
- * pty: `terminalStatus` on mount/worktree-switch, and `terminal:exit` when it stops.
+ * The Run / Build / Scripts terminal. Its command list is project-level (passed
+ * in, shared across worktrees); each entry runs in its own per-worktree pty
+ * (keyed by this worktree's `encoded` + the entry id) and gets a sub-tab so you
+ * can watch its output. Run and Build offer a "Run all" that starts the whole
+ * list; a script is a task you reach for on purpose, so it has none — you pick
+ * its tab and press play. We never assume a process is alive: each view is
+ * driven by the real pty (`terminalStatus` on mount/worktree-switch, and
+ * `terminal:exit` when it stops).
  */
 export function CommandsTerminal({
   kind,
@@ -85,7 +94,10 @@ export function CommandsTerminal({
   fitSignal,
   onConfigure,
 }: Props) {
-  const label = kind === "build" ? "Build" : "Run";
+  const label = KIND_LABEL[kind];
+  // A script is started deliberately, one at a time — no "run all", and its tab
+  // strip is always up (it's the list of scripts, not an overflow affordance).
+  const scripts = kind === "script";
   // Stable key for the effects: re-probe / re-subscribe only when the entry set
   // itself changes (its identity churns every parent render).
   const entryKey = entries.map((e) => e.id).join(",");
@@ -99,6 +111,12 @@ export function CommandsTerminal({
   // Why an entry's pty couldn't be attached, straight from main's open result.
   // Shown in place of the dead pane a failed spawn would otherwise leave.
   const [openError, setOpenError] = useState<Record<string, string>>({});
+  // Bumped per entry on every restart and folded into the pane's React key.
+  // Mounting is what runs the command, so a restart MUST produce a genuinely
+  // fresh mount — a changed key guarantees that in a single commit, where
+  // toggling `started` off and on again only does it if the two updates happen
+  // to land in different renders.
+  const [generation, setGeneration] = useState<Record<string, number>>({});
   // Entry ids whose next stop (from our own kill) is immediately followed by a
   // fresh start — that's a per-tab "Restart".
   const pendingRestart = useRef<Set<string>>(new Set());
@@ -113,6 +131,17 @@ export function CommandsTerminal({
   // Read by callbacks that outlive the render they were made in.
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  // Each mounted pane's terminal, so the strip can hand focus back to one.
+  const handles = useRef<Map<string, TerminalHandle>>(new Map());
+
+  // A sub-tab is a button, so clicking it moves focus off xterm's textarea and
+  // the terminal goes deaf. Switching between two tabs gets focus back for free
+  // (the newly visible pane's own effect focuses it), but clicking the tab of a
+  // list with ONE entry changes nothing — so put the caret back explicitly.
+  // After a frame: the click's own focus assignment lands first.
+  const focusEntry = (id: string) => {
+    requestAnimationFrame(() => handles.current.get(id)?.focus());
+  };
 
   const clearWatchdog = useCallback((id: string) => {
     const t = killWatchdogs.current.get(id);
@@ -142,11 +171,11 @@ export function CommandsTerminal({
       });
       if (pendingRestart.current.has(id)) {
         pendingRestart.current.delete(id);
-        // A separate task, not the same batch: the pane has to actually unmount
-        // before it re-mounts, since mounting is what re-runs the command. A
-        // timer rather than rAF — rAF doesn't fire while the window is hidden,
-        // which strands the restart until the app is brought forward.
-        setTimeout(() => setStarted((s) => ({ ...s, [id]: true })), 0);
+        // Safe to batch with the removal above: the new generation gives the
+        // pane a new key, so React tears the old terminal down and builds a new
+        // one even when `started` never observably went false.
+        setGeneration((g) => ({ ...g, [id]: (g[id] ?? 0) + 1 }));
+        setStarted((s) => ({ ...s, [id]: true }));
       }
     },
     [clearWatchdog],
@@ -282,7 +311,9 @@ export function CommandsTerminal({
           onClick={onConfigure}
           className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] underline decoration-[var(--border-strong)] underline-offset-4 transition-colors hover:text-[var(--text)]"
         >
-          Configure {label.toLowerCase()} command
+          {scripts
+            ? "Add a script"
+            : `Configure ${label.toLowerCase()} command`}
         </button>
       </div>
     );
@@ -296,21 +327,28 @@ export function CommandsTerminal({
   const multi = entries.length > 1;
   const activeEntry = entries.find((e) => e.id === active) ?? entries[0];
   const anyStarted = entries.some((e) => started[e.id]);
-  const showHeader = multi || anyStarted;
+  // Run/Build earn a strip once there's something to choose between; Scripts is
+  // a menu, so its strip is the point even at one entry.
+  const showTabs = scripts || multi;
+  const showHeader = showTabs || anyStarted;
   const runLabel = multi ? `${label} all` : label;
+  const fallbackName = scripts ? "Script" : label;
 
   return (
     <div className="flex h-full w-full flex-col bg-[var(--bg)]">
       {showHeader && (
         <div className="group flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-2.5 py-2">
-          {multi && (
+          {showTabs && (
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
               {entries.map((e, i) => {
                 const on = e.id === active;
                 return (
                   <button
                     key={e.id}
-                    onClick={() => setActive(e.id)}
+                    onClick={() => {
+                      setActive(e.id);
+                      focusEntry(e.id);
+                    }}
                     title={e.command}
                     className={cn(
                       "group/tab flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1 font-[family-name:var(--font-mono)] text-[12px] transition-colors",
@@ -338,29 +376,34 @@ export function CommandsTerminal({
                         onClick={(ev) => {
                           ev.stopPropagation();
                           runEntry(e);
+                          focusEntry(e.id);
                         }}
-                        title={`${started[e.id] ? "Restart" : "Run"} ${entryLabel(e, repos, `${label} ${i + 1}`)}`}
+                        title={`${started[e.id] ? "Restart" : "Run"} ${entryLabel(e, repos, `${fallbackName} ${i + 1}`)}`}
                         className="absolute inset-0 hidden items-center justify-center rounded text-[var(--text-secondary)] hover:text-[var(--text)] group-hover/tab:flex"
                       >
                         {started[e.id] ? <MiniRestartIcon /> : <MiniPlayIcon />}
                       </span>
                     </span>
                     <span className="max-w-[140px] truncate">
-                      {entryLabel(e, repos, `${label} ${i + 1}`)}
+                      {entryLabel(e, repos, `${fallbackName} ${i + 1}`)}
                     </span>
                   </button>
                 );
               })}
             </div>
           )}
-          <button
-            className={cn(runBtnCls, !multi && "ml-auto")}
-            onClick={runAll}
-            title={multi ? "Run every command" : `Run ${activeEntry.command}`}
-          >
-            <PlayIcon />
-            {runLabel}
-          </button>
+          {/* Scripts run one at a time from their own tab's glyph, so there's
+              nothing for a header action to start. */}
+          {!scripts && (
+            <button
+              className={cn(runBtnCls, !multi && "ml-auto")}
+              onClick={runAll}
+              title={multi ? "Run every command" : `Run ${activeEntry.command}`}
+            >
+              <PlayIcon />
+              {runLabel}
+            </button>
+          )}
         </div>
       )}
 
@@ -368,13 +411,17 @@ export function CommandsTerminal({
         {entries.map((e) =>
           started[e.id] ? (
             <div
-              key={e.id}
+              key={`${e.id}:${generation[e.id] ?? 0}`}
               className={cn(
                 "absolute inset-0 overflow-hidden",
                 e.id !== active && "hidden",
               )}
             >
               <TerminalPanel
+                ref={(h) => {
+                  if (h) handles.current.set(e.id, h);
+                  else handles.current.delete(e.id);
+                }}
                 id={ptyId(e)}
                 encoded={encoded}
                 subPath={e.subPath}
@@ -429,7 +476,7 @@ export function CommandsTerminal({
               )}
             >
               <PlayIcon />
-              {label}
+              {scripts ? "Run" : label}
             </button>
           </div>
         )}
