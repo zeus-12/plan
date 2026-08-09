@@ -29,6 +29,20 @@ export interface PlanVersionInfo {
   timestamp: string;
 }
 
+// Claude presents a plan by writing it to ~/.claude/plans/<slug>.md (a real
+// Write tool call that executes — and lands in the transcript — immediately),
+// then calls ExitPlanMode. ExitPlanMode is gated behind the user's approval, so
+// its content shows up late/empty; the Write does NOT. So the inline plan card
+// is sourced from the plan file's Write/Edit ops, reconstructed from the
+// transcript, and the gated ExitPlanMode block is hidden entirely.
+const PLANS_PATH_MARKER = "/.claude/plans/";
+
+/** Whether a path is one of Claude's plan files — those writes belong to the
+ *  plan card, so the rest of the transcript UI leaves them alone. */
+export function isPlanFilePath(path: string): boolean {
+  return path.includes(PLANS_PATH_MARKER);
+}
+
 /** Defensive parse — the plan markdown, or null if the input isn't a plan. */
 export function parsePlanInput(input: unknown): string | null {
   if (input == null || typeof input !== "object") return null;

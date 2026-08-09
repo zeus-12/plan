@@ -47,7 +47,13 @@ import {
   type TaskNotification,
 } from "./message-kind";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
-import { PlanCard, parsePlanInput, type PlanVersionInfo } from "./plan-card";
+import {
+  PlanCard,
+  isPlanFilePath,
+  parsePlanInput,
+  type PlanVersionInfo,
+} from "./plan-card";
+import { TurnFilesStrip, turnFileChangesByRow } from "./turn-files";
 import {
   ToolPreviewCard,
   toolPreview,
@@ -130,6 +136,9 @@ interface Props {
   /** Project key — lets plan cards reach the shared annotation store for
    *  diff comments (keyed there by the plan file path). */
   encoded: string;
+  /** The session's working directory — the root the changed-file pills read
+   *  files against when reconstructing a turn's diff. */
+  cwd?: string | null;
   annotations: ChatAnnotation[];
   onAddAnnotation: (
     anchor: ChatAnchor,
@@ -237,15 +246,6 @@ function previewInput(input: unknown): string {
   }
 }
 
-// ── Plan-file detection ─────────────────────────────────────────────
-// Claude presents a plan by writing it to ~/.claude/plans/<slug>.md (a real
-// Write tool call that executes — and lands in the transcript — immediately),
-// then calls ExitPlanMode. ExitPlanMode is gated behind the user's approval, so
-// its content shows up late/empty; the Write does NOT. So we source the inline
-// plan card from the plan file's Write/Edit ops, reconstructed from the
-// transcript, and hide the gated ExitPlanMode block entirely.
-const PLANS_PATH_MARKER = "/.claude/plans/";
-
 function asStr(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
@@ -256,7 +256,7 @@ function planFilePath(p: MessagePart): string | null {
   if (p.tool !== "Write" && p.tool !== "Edit" && p.tool !== "MultiEdit")
     return null;
   const fp = (p.input as { file_path?: unknown } | null)?.file_path;
-  return typeof fp === "string" && fp.includes(PLANS_PATH_MARKER) ? fp : null;
+  return typeof fp === "string" && isPlanFilePath(fp) ? fp : null;
 }
 
 /** Apply one Edit op exactly as the Edit tool does (first occurrence, or all). */
@@ -1287,6 +1287,7 @@ export const MessageList = memo(function MessageList({
   messages,
   sessionId,
   encoded,
+  cwd = null,
   annotations,
   onAddAnnotation,
   onUpdateAnnotation,
@@ -1353,6 +1354,11 @@ export const MessageList = memo(function MessageList({
     }
     return null;
   }, [items]);
+
+  // Files each turn wrote to, keyed by the turn's last row — the pill strip
+  // that closes a reply. Same anchor as the reply meta row, so a turn ends with
+  // its prose, then what it changed, then the time.
+  const turnFilesByRow = useMemo(() => turnFileChangesByRow(items), [items]);
 
   // The inline plan card is sourced from the plan FILE Claude writes to
   // ~/.claude/plans/ (see planFilePath): each Write is a new revision, and
@@ -2086,6 +2092,13 @@ export const MessageList = memo(function MessageList({
                             <div className="flex w-full flex-col gap-1.5">
                               {partNodes}
                             </div>
+                            {turnFilesByRow.has(idx) && (
+                              <TurnFilesStrip
+                                files={turnFilesByRow.get(idx)!}
+                                encoded={encoded}
+                                cwd={cwd}
+                              />
+                            )}
                             {/* Meta row (reply time + copy) shows on ONLY the
                           last row of the newest assistant turn, and only once
                           the reply has finished (`!working`) — so it marks the

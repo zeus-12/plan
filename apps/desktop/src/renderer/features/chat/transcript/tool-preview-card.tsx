@@ -11,6 +11,7 @@ import {
 import {
   buildDiffLines,
   buildSplitRows,
+  filterUnchangedLines,
   type DiffLine,
   type WordSegment,
 } from "@plan/shared/lib/diff/diff";
@@ -35,7 +36,16 @@ export type ToolPreview =
       language: string;
       edits: { oldText: string; newText: string }[];
     }
-  | { kind: "content"; path: string; language: string; content: string };
+  | { kind: "content"; path: string; language: string; content: string }
+  /** Whole-file before/after, reconstructed by file-replay — the only preview
+   *  that can carry real line numbers and collapsed context. */
+  | {
+      kind: "file";
+      path: string;
+      language: string;
+      oldText: string;
+      newText: string;
+    };
 
 function asStr(v: unknown): string {
   return typeof v === "string" ? v : "";
@@ -288,6 +298,107 @@ function DiffSection({
   );
 }
 
+/**
+ * A whole-file diff as one numbered column: old/new line numbers, a sign, and
+ * the content. Runs of unchanged lines collapse into a click-to-expand row, the
+ * same treatment the Diffs tab gives them.
+ */
+function UnifiedSection({
+  oldText,
+  newText,
+  language,
+  shikiReady,
+}: {
+  oldText: string;
+  newText: string;
+  language: string;
+  shikiReady: number;
+}) {
+  const all = useMemo(
+    () => buildDiffLines(oldText, newText),
+    [oldText, newText],
+  );
+  const items = useMemo(() => filterUnchangedLines(all), [all]);
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  const [oldPer, newPer] = useMemo(
+    () => [
+      highlightPerLine(oldText, language),
+      highlightPerLine(newText, language),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [oldText, newText, language, shikiReady],
+  );
+
+  // `filterUnchangedLines` hands back the very same DiffLine objects in order,
+  // so a separator's hiddenCount is exactly the next N lines of `all`.
+  const rows: (DiffLine | { gap: true; key: number; count: number })[] = [];
+  let cursor = 0;
+  let gapKey = 0;
+  for (const item of items) {
+    if (item.type === "separator") {
+      const key = gapKey++;
+      if (expanded.has(key)) {
+        for (let i = 0; i < item.hiddenCount; i++) rows.push(all[cursor + i]);
+      } else {
+        rows.push({ gap: true, key, count: item.hiddenCount });
+      }
+      cursor += item.hiddenCount;
+    } else {
+      rows.push(item);
+      cursor++;
+    }
+  }
+
+  return (
+    <div>
+      {rows.map((row, i) => {
+        if ("gap" in row) {
+          return (
+            <button
+              key={`gap-${row.key}`}
+              onClick={() => setExpanded((prev) => new Set(prev).add(row.key))}
+              className="flex w-full items-center gap-2 py-0.5 text-left text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+            >
+              <span className="w-[72px] shrink-0 text-center">⋯</span>
+              <span>
+                show {row.count} {row.count === 1 ? "line" : "lines"}
+              </span>
+            </button>
+          );
+        }
+        const tokens =
+          row.type === "remove"
+            ? (oldPer[(row.oldNum ?? 0) - 1] ?? [])
+            : (newPer[(row.newNum ?? 0) - 1] ?? []);
+        return (
+          <div key={i} className="flex" style={rowStyle(row.type)}>
+            <span className="w-9 shrink-0 select-none pr-2 text-right text-[var(--text-tertiary)] opacity-70">
+              {row.oldNum ?? ""}
+            </span>
+            <span className="w-9 shrink-0 select-none pr-2 text-right text-[var(--text-tertiary)] opacity-70">
+              {row.newNum ?? ""}
+            </span>
+            <span
+              className="w-4 shrink-0 select-none text-center"
+              style={{ color: signColor(row.type) }}
+            >
+              {sign(row.type)}
+            </span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-3">
+              <LineSpans
+                text={row.content}
+                tokens={tokens}
+                wordSegments={row.wordSegments ?? null}
+                lineType={row.type}
+              />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Highlighted contents of a newly written file. */
 function ContentSection({
   content,
@@ -377,7 +488,12 @@ export function ToolPreviewCard({
   }, [anchor, preview]);
 
   const name = preview.path ? basename(preview.path) : "";
-  const label = preview.kind === "content" ? "new file" : "diff";
+  const label =
+    preview.kind === "content"
+      ? "new file"
+      : preview.kind === "file"
+        ? "file diff"
+        : "diff";
 
   return (
     <div
@@ -387,7 +503,8 @@ export function ToolPreviewCard({
       className="fixed z-50 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-lg"
       style={{
         ...pos,
-        width: preview.kind === "diff" ? CARD_WIDTH_DIFF : CARD_WIDTH_CONTENT,
+        width:
+          preview.kind === "content" ? CARD_WIDTH_CONTENT : CARD_WIDTH_DIFF,
         maxWidth: "calc(100vw - 16px)",
       }}
     >
@@ -400,7 +517,14 @@ export function ToolPreviewCard({
         </span>
       </div>
       <div className="max-h-[60vh] overflow-auto py-1.5 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed">
-        {preview.kind === "diff" ? (
+        {preview.kind === "file" ? (
+          <UnifiedSection
+            oldText={preview.oldText}
+            newText={preview.newText}
+            language={preview.language}
+            shikiReady={shikiReady}
+          />
+        ) : preview.kind === "diff" ? (
           preview.edits.map((e, i) => (
             <div
               key={i}
