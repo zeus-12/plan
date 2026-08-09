@@ -144,6 +144,64 @@ export function resultImagePreview(
 const CARD_WIDTH_DIFF = 720;
 const CARD_WIDTH_CONTENT = 560;
 
+const VIEWPORT_MARGIN = 8;
+const ANCHOR_GAP = 6;
+/** Tallest the card ever gets, even with room to spare. */
+const CARD_MAX_FRACTION = 0.6;
+/** Floor for the height cap, so a pill hard against an edge still shows
+ *  something readable rather than a sliver. */
+const CARD_MIN_HEIGHT = 140;
+
+/**
+ * Where a card of the given size sits against its anchor, and how tall it may
+ * grow there. The cap is what keeps a card inside the window when its content
+ * grows after placement — a collapsed run being expanded — so it is tied to the
+ * room on the side actually chosen, not to a fixed fraction of the viewport.
+ */
+export function placeCard(
+  anchor: { top: number; bottom: number; left: number },
+  cardHeight: number,
+  cardWidth: number,
+  viewport: { width: number; height: number },
+): { top: number; left: number; maxHeight: number } {
+  const cap = viewport.height * CARD_MAX_FRACTION;
+  const below = Math.min(
+    cap,
+    viewport.height - anchor.bottom - ANCHOR_GAP - VIEWPORT_MARGIN,
+  );
+  const above = Math.min(cap, anchor.top - ANCHOR_GAP - VIEWPORT_MARGIN);
+
+  let top: number;
+  let room: number;
+  if (cardHeight <= below) {
+    top = anchor.bottom + ANCHOR_GAP;
+    room = below;
+  } else if (cardHeight <= above) {
+    top = anchor.top - ANCHOR_GAP - cardHeight;
+    room = above;
+  } else if (above > below) {
+    room = above;
+    top = anchor.top - ANCHOR_GAP - room;
+  } else {
+    room = below;
+    top = anchor.bottom + ANCHOR_GAP;
+  }
+
+  const maxHeight = Math.max(room, CARD_MIN_HEIGHT);
+  const settled = Math.min(cardHeight, maxHeight);
+  return {
+    top: Math.max(
+      VIEWPORT_MARGIN,
+      Math.min(top, viewport.height - VIEWPORT_MARGIN - settled),
+    ),
+    left: Math.max(
+      VIEWPORT_MARGIN,
+      Math.min(anchor.left, viewport.width - cardWidth - VIEWPORT_MARGIN),
+    ),
+    maxHeight,
+  };
+}
+
 /**
  * One diff line's rendered spans: syntax colour (from Shiki tokens) merged with
  * word-diff pills (the exact characters that changed within a changed line).
@@ -523,18 +581,30 @@ export function ToolPreviewCard({
   const place = useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    const h = el.offsetHeight;
-    const w = el.offsetWidth;
-    let top = anchor.bottom + 6;
-    if (top + h > window.innerHeight - 8) {
-      const above = anchor.top - 6 - h;
-      top = above >= 8 ? above : Math.max(8, window.innerHeight - 8 - h);
-    }
-    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - w - 8));
-    setPos({ top, left, visibility: "visible" });
+    setPos({
+      ...placeCard(anchor, el.offsetHeight, el.offsetWidth, {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }),
+      visibility: "visible",
+    });
   }, [anchor]);
 
-  useLayoutEffect(place, [place, preview]);
+  // Expanding a collapsed run (and an image finishing its decode) changes the
+  // card's height after it was placed; without this it keeps the top of a much
+  // shorter card and runs off the bottom of the window.
+  useLayoutEffect(() => {
+    place();
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [place, preview]);
 
   const name = preview.path ? basename(preview.path) : "";
   const label =
@@ -551,7 +621,7 @@ export function ToolPreviewCard({
       ref={ref}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="fixed z-50 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-lg"
+      className="fixed z-50 flex flex-col overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-lg"
       style={{
         ...pos,
         // An image sizes the card to itself; the text previews are fixed-width.
@@ -567,7 +637,7 @@ export function ToolPreviewCard({
             : "calc(100vw - 16px)",
       }}
     >
-      <div className="flex items-baseline gap-2 border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)]">
+      <div className="flex shrink-0 items-baseline gap-2 border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)]">
         <span className="truncate text-[11px] text-[var(--text-secondary)]">
           {name}
         </span>
@@ -575,7 +645,7 @@ export function ToolPreviewCard({
           {label}
         </span>
       </div>
-      <div className="max-h-[60vh] overflow-auto py-1.5 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed">
+      <div className="min-h-0 flex-1 overflow-auto py-1.5 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed">
         {preview.kind === "image" ? (
           <div className="flex flex-col items-center gap-1.5 px-1.5">
             {preview.srcs.map((src, i) => (
@@ -583,9 +653,6 @@ export function ToolPreviewCard({
                 key={i}
                 src={src}
                 alt=""
-                // The image's height is unknown until it decodes, so the first
-                // placement measures an empty card — re-place once it lands.
-                onLoad={place}
                 className="max-w-full rounded-sm object-contain"
                 style={{ maxHeight: "56vh" }}
               />
