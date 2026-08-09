@@ -386,7 +386,6 @@ export default function DocPage() {
               language={effectiveLanguage}
               comments={comments}
               onAddComment={addComment}
-              onRemoveComment={removeComment}
               activeCommentId={activeCommentId}
               onActiveCommentChange={setActiveCommentId}
               fontSize={docSettings.fontSize}

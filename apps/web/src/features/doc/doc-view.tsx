@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   highlightPerLine,
   type SyntaxToken,
@@ -28,7 +28,6 @@ interface DocViewProps {
     quote: string,
     body: string,
   ) => void;
-  onRemoveComment?: (id: string) => void;
   /** Two-way hover link with an external comments list. */
   activeCommentId?: string | null;
   onActiveCommentChange?: (id: string | null) => void;
@@ -97,7 +96,6 @@ export function DocView({
   language,
   comments,
   onAddComment,
-  onRemoveComment,
   activeCommentId,
   onActiveCommentChange,
   fontSize = 13,
