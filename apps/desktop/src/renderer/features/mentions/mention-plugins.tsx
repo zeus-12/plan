@@ -17,7 +17,7 @@ import {
 import { cn } from "@plan/shared/lib/utils";
 import { FileIcon, FolderIcon } from "@/renderer/components/file-icon";
 import { $createReferenceNode } from "./reference-node";
-import { menuOpened, menuClosed } from "./mention-menu-state";
+import { useMentionMenuFlag } from "./mention-menu-state";
 import {
   loadFileIndex,
   loadSkillIndex,
@@ -253,6 +253,7 @@ export function FileMentionPlugin({
   projectEncoded: string;
 }) {
   const [editor] = useLexicalComposerContext();
+  const menuFlag = useMentionMenuFlag();
   const [query, setQuery] = useState<string | null>(null);
   const settled = useDebouncedQuery(query);
   const [options, setOptions] = useState<FileOption[]>([]);
@@ -304,8 +305,8 @@ export function FileMentionPlugin({
     <LexicalTypeaheadMenuPlugin<FileOption>
       onQueryChange={setQuery}
       onSelectOption={onSelectOption}
-      onOpen={menuOpened}
-      onClose={menuClosed}
+      onOpen={menuFlag.onOpen}
+      onClose={menuFlag.onClose}
       triggerFn={triggerFn}
       options={options}
       menuRenderFn={(
@@ -351,6 +352,7 @@ export function SkillMentionPlugin({
   projectEncoded: string;
 }) {
   const [editor] = useLexicalComposerContext();
+  const menuFlag = useMentionMenuFlag();
   const [query, setQuery] = useState<string | null>(null);
   const settled = useDebouncedQuery(query);
   const [options, setOptions] = useState<SlashOption[]>([]);
@@ -415,8 +417,8 @@ export function SkillMentionPlugin({
     <LexicalTypeaheadMenuPlugin<SlashOption>
       onQueryChange={setQuery}
       onSelectOption={onSelectOption}
-      onOpen={menuOpened}
-      onClose={menuClosed}
+      onOpen={menuFlag.onOpen}
+      onClose={menuFlag.onClose}
       triggerFn={triggerFn}
       options={options}
       menuRenderFn={(
