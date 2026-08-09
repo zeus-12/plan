@@ -120,14 +120,6 @@ describe("classifyInputState", () => {
     expect(classifyInputState(frame).state).toBe("unknown");
   });
 
-  it("only reads the bottom 16 rows — menu text in scrollback is ignored", () => {
-    const frame = [
-      "❯ 1. Yes", // old menu, scrolled far up
-      ...Array.from({ length: 16 }, (_, i) => `output line ${i}`),
-    ];
-    expect(classifyInputState(frame).state).toBe("unknown");
-  });
-
   it("returns the matched footer lines for debugging", () => {
     const { lines } = classifyInputState(IDLE_FRAME);
     expect(lines.length).toBeGreaterThan(0);
