@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { cn } from "@plan/shared/lib/utils";
+import { Slider } from "@plan/shared/components/ui/slider";
 import { Switch } from "@plan/shared/components/ui/switch";
 import {
   Select,
@@ -24,7 +25,8 @@ import { useAutoContinueEnabled } from "@/renderer/features/chat/session/auto-co
 import {
   PROSE_BRIGHTNESS,
   PROSE_FONTS,
-  PROSE_SIZES,
+  PROSE_SIZE_MAX,
+  PROSE_SIZE_MIN,
   useTranscriptPrefs,
   type ProseBrightnessId,
   type ProseFontId,
@@ -38,9 +40,8 @@ interface Props {
 }
 
 /**
- * Settings modal — opened from the sidebar's gear button. Today it configures
- * the "session finished" notification: a master toggle and the chime preset.
- * Same overlay/panel shell as the sessions dashboard for visual consistency.
+ * Settings modal — opened from the sidebar's gear button. Same overlay/panel
+ * shell as the sessions dashboard for visual consistency.
  */
 export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [settings, update] = useNotificationSettings();
@@ -96,7 +97,6 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               Font, size, and contrast for chat and PR text.
             </p>
 
-            {/* Reading font. */}
             <div className="flex flex-col gap-1.5">
               <span className="text-[11px] text-[var(--text-tertiary)]">
                 Font
@@ -124,29 +124,26 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               </Select>
             </div>
 
-            {/* Size. */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                Text size
-              </span>
-              <Select
-                value={String(prose.fontSize)}
-                onValueChange={(v) => setProse({ fontSize: Number(v) })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROSE_SIZES.map((size) => (
-                    <SelectItem key={size} value={String(size)}>
-                      {size}px
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Text size
+                </span>
+                <span className="font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-[var(--text-secondary)]">
+                  {prose.fontSize}px
+                </span>
+              </div>
+              <Slider
+                aria-label="Text size"
+                value={[prose.fontSize]}
+                onValueChange={([size]) => setProse({ fontSize: size })}
+                min={PROSE_SIZE_MIN}
+                max={PROSE_SIZE_MAX}
+                step={1}
+                showSteps
+              />
             </div>
 
-            {/* Contrast (text brightness against the reading background). */}
             <div className="flex flex-col gap-1.5">
               <span className="text-[11px] text-[var(--text-tertiary)]">
                 Contrast
@@ -170,7 +167,6 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               </Select>
             </div>
 
-            {/* Closes the section with a hairline rule. */}
             <div className="mt-2 h-px bg-[var(--border)]" />
           </section>
 
@@ -251,7 +247,6 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               Notifications
             </h3>
 
-            {/* Master toggle. */}
             <div className="flex items-center justify-between gap-3">
               <div className="flex flex-col">
                 <span className="text-[12px] text-[var(--text)]">
@@ -268,7 +263,6 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
               />
             </div>
 
-            {/* Sound picker. */}
             <div
               className={cn(
                 "flex flex-col gap-1.5",

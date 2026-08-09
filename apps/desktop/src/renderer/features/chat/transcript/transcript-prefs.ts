@@ -39,8 +39,9 @@ export const PROSE_FONTS: ProseFontOption[] = [
   },
 ];
 
-/** Selectable body sizes, in px. */
-export const PROSE_SIZES = [13, 14, 15, 16] as const;
+/** Body size range, in px — the slider steps through it one pixel at a time. */
+export const PROSE_SIZE_MIN = 12;
+export const PROSE_SIZE_MAX = 18;
 
 export interface ProseBrightnessOption {
   id: ProseBrightnessId;
@@ -82,9 +83,13 @@ const store = createPersistedValue<TranscriptPrefs>(
       fontFamily: PROSE_FONTS.some((f) => f.id === r.fontFamily)
         ? (r.fontFamily as ProseFontId)
         : DEFAULTS.fontFamily,
-      fontSize: PROSE_SIZES.includes(r.fontSize as (typeof PROSE_SIZES)[number])
-        ? (r.fontSize as number)
-        : DEFAULTS.fontSize,
+      fontSize:
+        typeof r.fontSize === "number" &&
+        Number.isInteger(r.fontSize) &&
+        r.fontSize >= PROSE_SIZE_MIN &&
+        r.fontSize <= PROSE_SIZE_MAX
+          ? r.fontSize
+          : DEFAULTS.fontSize,
       brightness: PROSE_BRIGHTNESS.some((b) => b.id === r.brightness)
         ? (r.brightness as ProseBrightnessId)
         : DEFAULTS.brightness,
