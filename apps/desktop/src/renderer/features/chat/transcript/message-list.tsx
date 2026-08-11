@@ -1200,6 +1200,9 @@ interface PartViewProps extends MessagePartViewProps {
   partAnns: PartAnn[];
   /** The in-flight selection's cover for this part, if any. */
   pendingCover: PartCover | null;
+  /** Bumped when the pane returns from display:none so covers re-register —
+   *  Chromium won't repaint custom highlights held across a hidden spell. */
+  repaintNonce: number;
   onClickAnnotation: (ann: ChatAnnotation, rect: DOMRect) => void;
 }
 
@@ -1218,6 +1221,7 @@ const PartView = memo(
       partIndex,
       partAnns,
       pendingCover,
+      repaintNonce,
       onClickAnnotation,
       ...content
     } = props;
@@ -1267,7 +1271,7 @@ const PartView = memo(
         ro.disconnect();
         clear();
       };
-    }, [partAnns, pendingCover]);
+    }, [partAnns, pendingCover, repaintNonce]);
 
     const handleClick = useCallback(
       (e: React.MouseEvent) => {
@@ -1320,6 +1324,7 @@ const PartView = memo(
     prev.messageUuid === next.messageUuid &&
     prev.partIndex === next.partIndex &&
     prev.partAnns === next.partAnns &&
+    prev.repaintNonce === next.repaintNonce &&
     prev.onClickAnnotation === next.onClickAnnotation &&
     prev.terminalReady === next.terminalReady &&
     prev.onSendKeys === next.onSendKeys &&
@@ -1600,6 +1605,22 @@ export const MessageList = memo(function MessageList({
   }
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+
+  // Chromium doesn't repaint custom-highlight ranges that lived through an
+  // ancestor's display:none (the keep-alive pool hides inactive workspaces/tabs
+  // instead of unmounting), so bump a nonce on re-show to re-register them.
+  const [repaintNonce, setRepaintNonce] = useState(0);
+  const wasHiddenRef = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      wasHiddenRef.current = true;
+      return;
+    }
+    if (wasHiddenRef.current) {
+      wasHiddenRef.current = false;
+      setRepaintNonce((n) => n + 1);
+    }
+  }, [visible]);
 
   const [showScrollDown, setShowScrollDown] = useState(false);
 
@@ -2116,6 +2137,7 @@ export const MessageList = memo(function MessageList({
                             messageUuid={m.uuid}
                             partIndex={i}
                             partAnns={partMap?.get(i) ?? EMPTY_PART_ANNS}
+                            repaintNonce={repaintNonce}
                             pendingCover={
                               pending
                                 ? coverForSpanPart(
