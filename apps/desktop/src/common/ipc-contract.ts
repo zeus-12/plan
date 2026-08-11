@@ -54,6 +54,7 @@ import type {
   ScratchData,
   SearchOptions,
   SearchResult,
+  SentFile,
   SessionDelta,
   SessionDeltaClient,
   SessionEvent,
@@ -179,6 +180,9 @@ export interface IpcInvokeContract {
     args: [encoded: string, relPath: string];
     result: string | null;
   };
+  /** Head of a file the agent sent, by absolute path — bounded at the read,
+   *  so hovering a row never loads a large file. Null when it can't be read. */
+  "files:readSent": { args: [path: string]; result: SentFile | null };
   "files:search": {
     args: [encoded: string, query: string, opts: SearchOptions];
     result: SearchResult;
@@ -403,6 +407,12 @@ export interface IpcInvokeContract {
     args: [encoded: string, relPath: string | null, subPath?: string];
     result: string;
   };
+  /** Launch an absolute path. Only for files the transcript already names —
+   *  a sent file lives outside every workspace, so nothing can resolve it. */
+  "apps:openPath": {
+    args: [appId: string, path: string];
+    result: { ok: boolean; error?: string };
+  };
 
   // Per-worktree scratchpad
   "scratch:read": { args: [encoded: string]; result: ScratchData | null };
@@ -467,6 +477,7 @@ export const API_INVOKE = {
 
   listProjectFiles: "files:list",
   readProjectFile: "files:read",
+  readSentFile: "files:readSent",
   projectFilePath: "files:path",
   searchProjectFiles: "files:search",
   listSkills: "skills:list",
@@ -524,6 +535,7 @@ export const API_INVOKE = {
 
   listExternalApps: "apps:list",
   openInExternalApp: "apps:open",
+  openPathInExternalApp: "apps:openPath",
   resolveTargetPath: "apps:resolvePath",
 
   readScratch: "scratch:read",

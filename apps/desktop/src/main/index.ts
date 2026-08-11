@@ -43,6 +43,7 @@ import { readScratch, writeScratch } from "@/main/store/scratch-store";
 import {
   listExternalApps,
   openInExternalApp,
+  openPathInExternalApp,
   resolveTargetPath,
 } from "@/main/app/external-apps";
 import type {
@@ -88,6 +89,7 @@ import {
   resolveProjectFilePath,
   searchProjectFiles,
 } from "@/main/fs/project-files";
+import { readSentFile } from "@/main/fs/sent-file";
 import { listSkills } from "./providers/claude-code/skills";
 import { getProjectIcons } from "@/main/fs/project-icons";
 import { checkForUpdate } from "@/main/app/updates";
@@ -506,6 +508,7 @@ const invokeHandlers: {
   "files:read": (_e, encoded, relPath) => readProjectFile(encoded, relPath),
   "files:path": (_e, encoded, relPath) =>
     resolveProjectFilePath(encoded, relPath),
+  "files:readSent": (_e, path) => readSentFile(path),
   "files:search": async (_e, encoded, query, opts) => {
     // Never let an unexpected throw reject the IPC (which surfaces as an
     // opaque "Search failed" in the UI) — return it as a structured error.
@@ -645,6 +648,7 @@ const invokeHandlers: {
     openInExternalApp(appId, encoded, relPath, subPath),
   "apps:resolvePath": (_e, encoded, relPath, subPath) =>
     resolveTargetPath(encoded, relPath, subPath),
+  "apps:openPath": (_e, appId, path) => openPathInExternalApp(appId, path),
 
   // Per-worktree scratchpad: durable notepad content persisted to ~/.plan.
   "scratch:read": (_e, encoded) => readScratch(encoded),

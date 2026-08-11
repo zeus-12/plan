@@ -414,14 +414,15 @@ async function isDirectory(path: string): Promise<boolean> {
   }
 }
 
-export async function openInExternalApp(
+/**
+ * Launch `target` in one app, with `root` as the project context an editor
+ * should open around it.
+ */
+async function launch(
   appId: string,
-  encoded: string,
-  relPath: string | null,
-  subPath = "",
+  root: string,
+  target: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const root = await resolveWorkspaceCwd(encoded, subPath);
-  const target = relPath ? join(root, relPath) : root;
   const found = (await detect()).find((a) => a.id === appId);
   if (!found) return { ok: false, error: "That app is no longer installed." };
 
@@ -451,4 +452,31 @@ export async function openInExternalApp(
   return r.ok
     ? { ok: true }
     : { ok: false, error: `Could not open ${found.label}.` };
+}
+
+export async function openInExternalApp(
+  appId: string,
+  encoded: string,
+  relPath: string | null,
+  subPath = "",
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveWorkspaceCwd(encoded, subPath);
+  return launch(appId, root, relPath ? join(root, relPath) : root);
+}
+
+/**
+ * Launch an absolute path — the exception to this module's rule that targets
+ * are workspace-relative. A file the agent sent lives wherever it was written,
+ * usually a scratchpad outside every project, and the transcript already holds
+ * that path verbatim: there is nothing to resolve it against. The file's own
+ * folder stands in as the editor's project root.
+ */
+export async function openPathInExternalApp(
+  appId: string,
+  path: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!(await pathExists(path))) {
+    return { ok: false, error: "That file is no longer there." };
+  }
+  return launch(appId, dirname(path), path);
 }

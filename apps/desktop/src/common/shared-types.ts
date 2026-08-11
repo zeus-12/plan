@@ -665,6 +665,24 @@ export interface ProjectFile {
 }
 
 /**
+ * A file the agent sent the user, as much of it as one bounded read returns.
+ * `text` holds UTF-8 content only for `kind: "text"`; an image is left on disk
+ * for the renderer to load by URL, and a binary is never read past the probe.
+ */
+export interface SentFile {
+  /** Size on disk, from stat — known for every kind, including binaries. */
+  size: number;
+  mtimeMs: number;
+  kind: "text" | "image" | "binary";
+  /** file:// URL for `kind: "image"`, empty otherwise. */
+  url: string;
+  /** Head of the file, cut at a line boundary. Empty unless `kind: "text"`. */
+  text: string;
+  /** Whether `text` is the whole file — false when the byte cap cut it short. */
+  complete: boolean;
+}
+
+/**
  * Switcher trigger codes that MAIN forwards to the renderer as
  * "switcher:cycle" IPC (from before-input-event). Single source of truth for
  * both sides of the contract: main derives its forwarding rules from this

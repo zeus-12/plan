@@ -54,6 +54,8 @@ import {
   type PlanVersionInfo,
 } from "./plan-card";
 import { TurnFilesStrip, turnFileChangesByRow } from "./turn-files";
+import { parseSendUserFile } from "./sent-file";
+import { SentFileBlock } from "./sent-file-row";
 import {
   ToolPreviewCard,
   hasImageResult,
@@ -484,6 +486,17 @@ function toolHeader(
       return { verb: "Glob", target: asStr(obj.pattern) };
     case "Skill":
       return { verb: "Skill", target: asStr(obj.skill) };
+    case "SendUserFile": {
+      const call = parseSendUserFile(input);
+      if (!call) return { verb: tool, target: previewInput(input) };
+      return {
+        verb: "Sent",
+        target:
+          call.files.length === 1
+            ? basename(call.files[0])
+            : `${call.files.length} files`,
+      };
+    }
     default:
       return { verb: tool, target: previewInput(input) };
   }
@@ -1171,6 +1184,15 @@ function renderPartContent({
             body={<MarkdownText text={planText} />}
           />
         );
+      }
+      // A delivered file gets its own row: the caption inline, an Open control,
+      // and the file itself on hover. A failed send falls through to the raw
+      // block instead — the error is the only thing worth showing then.
+      if (part.tool === "SendUserFile" && !result?.isError) {
+        const call = parseSendUserFile(part.input);
+        if (call) {
+          return <SentFileBlock files={call.files} caption={call.caption} />;
+        }
       }
       let inputJson: string;
       try {

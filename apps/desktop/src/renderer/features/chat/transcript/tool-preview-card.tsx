@@ -22,6 +22,7 @@ import {
   type SyntaxToken,
 } from "@plan/shared/lib/syntax/highlight";
 import { basename } from "@plan/shared/lib/path";
+import { cn } from "@plan/shared/lib/utils";
 
 /**
  * What a tool call is worth previewing on hover: an Edit/MultiEdit becomes a
@@ -47,8 +48,25 @@ export type ToolPreview =
       newText: string;
     }
   /** The images a tool result carried, as data URLs — the one preview built
-   *  from the result rather than the input. */
-  | { kind: "image"; path: string; srcs: string[] };
+   *  from the result rather than the input. A sent image instead passes one
+   *  file:// URL, since its bytes are already on disk. */
+  | { kind: "image"; path: string; srcs: string[]; meta?: string }
+  /** A sent CSV, as far as the bounded read got. `meta` says how far. */
+  | {
+      kind: "table";
+      path: string;
+      columns: string[];
+      rows: string[][];
+      meta: string;
+    }
+  /** A sent text file, as far as the bounded read got. */
+  | {
+      kind: "text";
+      path: string;
+      language: string;
+      text: string;
+      meta: string;
+    };
 
 function asStr(v: unknown): string {
   return typeof v === "string" ? v : "";
@@ -552,6 +570,85 @@ function ContentSection({
   );
 }
 
+/** A sent text file, plain — no diff gutter, since nothing changed. */
+function TextSection({
+  text,
+  language,
+  shikiReady,
+}: {
+  text: string;
+  language: string;
+  shikiReady: number;
+}) {
+  const perLine = useMemo(
+    () => highlightPerLine(text, language),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [text, language, shikiReady],
+  );
+  const lines = useMemo(() => text.split("\n"), [text]);
+
+  return (
+    <div className="px-3">
+      {lines.map((line, i) => (
+        <div key={i} className="whitespace-pre-wrap break-words">
+          <LineSpans
+            text={line}
+            tokens={perLine[i] ?? []}
+            wordSegments={null}
+            lineType="context"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A sent CSV as a table. Cells stay on one line and clip: a preview is for
+ * recognising the file, and a wrapped cell would make every row a different
+ * height.
+ */
+function TableSection({
+  columns,
+  rows,
+}: {
+  columns: string[];
+  rows: string[][];
+}) {
+  return (
+    <table className="w-full table-fixed border-collapse">
+      <thead>
+        <tr>
+          {columns.map((c, i) => (
+            <th
+              key={i}
+              className="truncate border-b border-[var(--border)] px-2 py-1 text-left font-normal text-[var(--text-tertiary)]"
+              title={c}
+            >
+              {c}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} className={i % 2 ? "bg-[var(--bg-surface)]" : undefined}>
+            {columns.map((_, c) => (
+              <td
+                key={c}
+                className="truncate px-2 py-[3px] text-[var(--text-secondary)]"
+                title={row[c] ?? ""}
+              >
+                {row[c] ?? ""}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 /**
  * A fixed, portalled hover card showing what a tool call changed — a diff for
  * Edits, the new contents for Writes, the image for a Read that returned one. It
@@ -607,6 +704,9 @@ export function ToolPreviewCard({
   }, [place, preview]);
 
   const name = preview.path ? basename(preview.path) : "";
+  // A sent file states what the read actually covered ("first 200 rows · 412
+  // MB") in place of the kind label.
+  const meta = "meta" in preview ? preview.meta : undefined;
   const label =
     preview.kind === "content"
       ? "new file"
@@ -614,7 +714,11 @@ export function ToolPreviewCard({
         ? "file diff"
         : preview.kind === "image"
           ? "image"
-          : "diff";
+          : preview.kind === "table"
+            ? "csv"
+            : preview.kind === "text"
+              ? "file"
+              : "diff";
 
   return (
     <div
@@ -628,7 +732,7 @@ export function ToolPreviewCard({
         width:
           preview.kind === "image"
             ? undefined
-            : preview.kind === "content"
+            : preview.kind === "content" || preview.kind === "text"
               ? CARD_WIDTH_CONTENT
               : CARD_WIDTH_DIFF,
         maxWidth:
@@ -641,8 +745,13 @@ export function ToolPreviewCard({
         <span className="truncate text-[11px] text-[var(--text-secondary)]">
           {name}
         </span>
-        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-          {label}
+        <span
+          className={cn(
+            "ml-auto shrink-0 text-[10px] text-[var(--text-tertiary)]",
+            !meta && "uppercase tracking-wider",
+          )}
+        >
+          {meta ?? label}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto py-1.5 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed">
@@ -658,6 +767,14 @@ export function ToolPreviewCard({
               />
             ))}
           </div>
+        ) : preview.kind === "table" ? (
+          <TableSection columns={preview.columns} rows={preview.rows} />
+        ) : preview.kind === "text" ? (
+          <TextSection
+            text={preview.text}
+            language={preview.language}
+            shikiReady={shikiReady}
+          />
         ) : preview.kind === "file" ? (
           <UnifiedSection
             oldText={preview.oldText}
