@@ -47,6 +47,39 @@ export function parseBashBlock(text: string): {
   return { input, stdout, stderr };
 }
 
+// CSI (colors/styles) and OSC (titles/links) escape sequences.
+const ANSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, "");
+}
+
+/**
+ * Claude Code records the output of a locally-executed slash command (/model,
+ * /compact, …) as a user turn of tagged text:
+ *   <local-command-stdout>Set model to …</local-command-stdout>
+ * It's CLI feedback, not something the human typed, and the payload keeps the
+ * CLI's ANSI styling — detect it so we render a machinery row, stripped of
+ * escapes, instead of a user bubble of tag soup.
+ */
+export function parseLocalCommandOutput(text: string): {
+  stdout: string | null;
+  stderr: string | null;
+} | null {
+  const t = text.trim();
+  if (!/^<local-command-(stdout|stderr)>/.test(t)) return null;
+  const grab = (tag: string) => {
+    const m = t.match(
+      new RegExp(`<local-command-${tag}>([\\s\\S]*?)</local-command-${tag}>`),
+    );
+    return m ? stripAnsi(m[1]).trim() : null;
+  };
+  const stdout = grab("stdout");
+  const stderr = grab("stderr");
+  if (stdout === null && stderr === null) return null;
+  return { stdout, stderr };
+}
+
 /**
  * Claude Code injects a background-task completion as a user turn whose text is
  * a raw `<task-notification>` block:
@@ -119,6 +152,19 @@ export function isTaskNotificationMessage(m: ConversationMessage): boolean {
 }
 
 /**
+ * A locally-executed slash command's output turn — rendered full-width as a
+ * muted machinery row, not in the right-hand user bubble.
+ */
+export function isLocalCommandOutputMessage(m: ConversationMessage): boolean {
+  return (
+    m.parts.length > 0 &&
+    m.parts.every(
+      (p) => p.kind === "text" && parseLocalCommandOutput(p.text) !== null,
+    )
+  );
+}
+
+/**
  * A turn that carries nothing but attachments. It gets no bubble chrome and no
  * height clamp — thumbnails are already small, and a bubble around them would
  * draw a second border inside the image's own edge.
@@ -156,7 +202,12 @@ export function classifyMessage(m: ConversationMessage): MessageCategory {
     // Harness machinery rendered as tool-style rows (SystemMetaBlock /
     // TaskNotificationBlock) — categorized as "tool" so it doesn't count as a
     // turn change and pick up header spacing around it.
-    else if (isSystemMetaMessage(m) || isTaskNotificationMessage(m)) v = "tool";
+    else if (
+      isSystemMetaMessage(m) ||
+      isTaskNotificationMessage(m) ||
+      isLocalCommandOutputMessage(m)
+    )
+      v = "tool";
     else v = "user-real";
     categoryCache.set(m, v);
   }

@@ -42,6 +42,7 @@ import {
   isImageOnlyMessage,
   isRealUserTurn,
   parseBashBlock,
+  parseLocalCommandOutput,
   parseTaskNotifications,
   type MessageCategory,
   type TaskNotification,
@@ -1031,6 +1032,82 @@ function SystemMetaBlock({ text }: { text: string }) {
   );
 }
 
+/**
+ * A locally-executed slash command's output (/model, /compact, …) rendered like
+ * the other machinery rows (see SystemMetaBlock): a muted "Output" verb plus
+ * the first line of the output. When there's more than one line, a chevron
+ * expands the full text in a bordered panel.
+ */
+function LocalCommandOutputBlock({
+  stdout,
+  stderr,
+}: {
+  stdout: string | null;
+  stderr: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const out = stdout?.trim() ?? "";
+  const err = stderr?.trim() ?? "";
+  const full = [out, err].filter((v) => v !== "").join("\n");
+  const summary = full.split("\n")[0] || "(no output)";
+  const expandable = full.includes("\n");
+  return (
+    <div>
+      <button
+        onClick={toggleUnlessSelecting(() => expandable && setOpen((v) => !v))}
+        className={cn(
+          "flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]",
+          !expandable && "cursor-default",
+        )}
+      >
+        <span className="shrink-0 text-[var(--text-tertiary)]">Output</span>
+        <span
+          className={cn(
+            "min-w-0 truncate",
+            err !== "" && out === ""
+              ? "text-[var(--removed-text,#f87171)]"
+              : "text-[var(--text-secondary)]",
+          )}
+          data-find-skip=""
+        >
+          {" "}
+          {summary}
+        </span>
+        {expandable && (
+          <Chevron
+            open={open}
+            size={12}
+            className="text-[var(--text-tertiary)] duration-200"
+          />
+        )}
+      </button>
+      {expandable && (
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-out"
+          style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+          data-find-skip=""
+          data-anno-skip=""
+        >
+          <div className="overflow-hidden">
+            <div className="mt-1 select-text rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 pb-3 pt-2 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed">
+              {out !== "" && (
+                <pre className="whitespace-pre-wrap break-all text-[var(--text-secondary)]">
+                  {out}
+                </pre>
+              )}
+              {err !== "" && (
+                <pre className="whitespace-pre-wrap break-all text-[var(--removed-text,#f87171)]">
+                  {err}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BashBlock({
   input,
   stdout,
@@ -1126,6 +1203,15 @@ function renderPartContent({
             input={bash.input}
             stdout={bash.stdout}
             stderr={bash.stderr}
+          />
+        );
+      }
+      const localOutput = parseLocalCommandOutput(part.text);
+      if (localOutput) {
+        return (
+          <LocalCommandOutputBlock
+            stdout={localOutput.stdout}
+            stderr={localOutput.stderr}
           />
         );
       }
