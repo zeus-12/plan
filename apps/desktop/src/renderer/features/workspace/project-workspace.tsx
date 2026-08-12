@@ -2127,16 +2127,13 @@ function ProjectWorkspaceImpl({
         // from any tab (Diffs/Files included). No chat selected → nothing to
         // show, so do nothing (never open a bare shell).
         toggleChatTerminal();
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === "t") {
-        e.preventDefault();
-        newShell();
       } else if (e.key === "Escape" && terminalOpen) {
         setTerminalOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [terminalOpen, setTerminalOpen, newShell, toggleChatTerminal]);
+  }, [terminalOpen, setTerminalOpen, toggleChatTerminal]);
 
   const tabSwitcher = useTabSwitcher({
     // Per-worktree id: under the keep-alive pool several workspaces are mounted

@@ -432,19 +432,21 @@ export const MiddleSidebar = memo(function MiddleSidebar({
 
   // ⌘T → toggle the embedded terminal pane (⌘J stays the coding-agent dock).
   // Reveals a hidden sidebar and spawns a first shell when there are none, so
-  // one keystroke always lands you in a terminal.
+  // one keystroke always lands you in a terminal. ⌘⇧T always spawns a fresh
+  // shell (never a toggle) but reveals the pane the same way — otherwise the
+  // new shell spawns behind a still-closed pane.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (
-        !(e.metaKey || e.ctrlKey) ||
-        e.shiftKey ||
-        e.altKey ||
-        e.key.toLowerCase() !== "t"
-      )
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "t")
         return;
       e.preventDefault();
       const wasOpen = sidebar.open;
       if (!wasOpen) sidebar.setOpen(true);
+      if (e.shiftKey) {
+        onNewTerminal();
+        setPaneCollapsed(false);
+        return;
+      }
       if (terminals.length === 0) {
         onNewTerminal();
         setPaneCollapsed(false);
