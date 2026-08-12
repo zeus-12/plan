@@ -60,6 +60,7 @@ import { SentFileBlock } from "./sent-file-row";
 import {
   ToolPreviewCard,
   hasImageResult,
+  readResultPreview,
   resultImagePreview,
   toolPreview,
   useToolPreviewHover,
@@ -524,35 +525,44 @@ function ToolCallBlock({
   const inputPreview = useMemo(() => toolPreview(tool, input), [tool, input]);
   const hover = useToolPreviewHover();
 
-  // The base64 in an image result is megabytes; decode it to data URLs only once
-  // something is about to show it, and keep it for as long as this row lives.
+  // The base64 in an image result is megabytes, and a Read's result has to be
+  // reparsed out of its "cat -n" text; do either only once something is about
+  // to show it, and keep it for as long as this row lives.
   const hasImages = hasImageResult(result?.output);
-  const [imagesWanted, setImagesWanted] = useState(false);
+  const canReadPreview = tool === "Read" && !!result && !result.isError;
+  const [previewWanted, setPreviewWanted] = useState(false);
   const path = asStr(
     input && typeof input === "object"
       ? (input as Record<string, unknown>).file_path
       : "",
   );
   const imagePreview = useMemo(
-    () => (imagesWanted ? resultImagePreview(path, result?.output) : null),
-    [imagesWanted, path, result?.output],
+    () => (previewWanted ? resultImagePreview(path, result?.output) : null),
+    [previewWanted, path, result?.output],
+  );
+  const readPreview = useMemo(
+    () =>
+      previewWanted && canReadPreview
+        ? readResultPreview(path, input, result?.output)
+        : null,
+    [previewWanted, canReadPreview, path, input, result?.output],
   );
 
-  const preview = imagePreview ?? inputPreview;
-  const hoverable = hasImages || !!inputPreview;
-  const showImages = () => setImagesWanted(true);
+  const preview = imagePreview ?? readPreview ?? inputPreview;
+  const hoverable = hasImages || canReadPreview || !!inputPreview;
+  const showPreview = () => setPreviewWanted(true);
 
   return (
     <div>
       <button
         onClick={toggleUnlessSelecting(() => {
-          showImages();
+          showPreview();
           setOpen((v) => !v);
         })}
         onMouseEnter={
           hoverable
             ? (e) => {
-                showImages();
+                showPreview();
                 hover.onEnter(e.currentTarget.getBoundingClientRect());
               }
             : undefined

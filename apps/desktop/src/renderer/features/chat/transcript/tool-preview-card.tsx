@@ -28,7 +28,9 @@ import { cn } from "@plan/shared/lib/utils";
  * What a tool call is worth previewing on hover: an Edit/MultiEdit becomes a
  * before/after diff, a Write becomes the created file's contents. Everything
  * else returns null (the header already says enough). The diff/content is built
- * purely from the tool input — we never read the file on disk.
+ * purely from the tool input — we never read the file on disk. A Read's preview
+ * (see `readResultPreview`) is the one exception: it's parsed from the tool's own
+ * result, since the input carries no bytes, only an optional offset/limit.
  */
 export type ToolPreview =
   | {
@@ -46,6 +48,17 @@ export type ToolPreview =
       language: string;
       oldText: string;
       newText: string;
+    }
+  /** A Read's own output, parsed back into its real (offset-aware) line
+   *  numbers. `meta` names the range only when the Read used offset/limit —
+   *  a whole-file Read falls back to the generic "file" label. */
+  | {
+      kind: "read";
+      path: string;
+      language: string;
+      content: string;
+      startLine: number;
+      meta?: string;
     }
   /** The images a tool result carried, as data URLs — the one preview built
    *  from the result rather than the input. A sent image instead passes one
@@ -154,6 +167,53 @@ export function resultImagePreview(
     }
   }
   return srcs.length ? { kind: "image", path, srcs } : null;
+}
+
+const READ_LINE_RE = /^\s*(\d+)\t(.*)$/;
+
+/**
+ * A Read tool_result, parsed back out of its own "cat -n" output — line
+ * number + tab + content, per line. Built from the result rather than the
+ * input for the same reason images are: the input only carries an optional
+ * offset/limit, never the bytes. Returns null for anything that isn't that
+ * format (an error string, the empty-file system reminder, an image result).
+ */
+export function readResultPreview(
+  path: string,
+  input: unknown,
+  output: string | undefined,
+): ToolPreview | null {
+  if (!output || hasImageResult(output)) return null;
+  const rawLines = output.split("\n");
+  if (rawLines.at(-1) === "") rawLines.pop();
+  const first = rawLines.length ? READ_LINE_RE.exec(rawLines[0]) : null;
+  if (!first) return null;
+
+  const startLine = Number(first[1]);
+  const contentLines: string[] = [];
+  for (const raw of rawLines) {
+    const m = READ_LINE_RE.exec(raw);
+    if (m) contentLines.push(m[2]);
+  }
+  const endLine = startLine + contentLines.length - 1;
+
+  const obj =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : null;
+  const ranged =
+    obj != null &&
+    (typeof obj.offset === "number" || typeof obj.limit === "number");
+
+  const language = (path && languageFromPath(path)) || "plaintext";
+  return {
+    kind: "read",
+    path,
+    language,
+    content: contentLines.join("\n"),
+    startLine,
+    meta: ranged ? `lines ${startLine}–${endLine}` : undefined,
+  };
 }
 
 // Fixed presentation — no user tweaking. A split (two-panel) diff needs more
@@ -603,6 +663,47 @@ function TextSection({
   );
 }
 
+/** A Read's contents, numbered with the file's own (offset-aware) line
+ *  numbers rather than a recount from the top. */
+function ReadSection({
+  content,
+  language,
+  startLine,
+  shikiReady,
+}: {
+  content: string;
+  language: string;
+  startLine: number;
+  shikiReady: number;
+}) {
+  const perLine = useMemo(
+    () => highlightPerLine(content, language),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [content, language, shikiReady],
+  );
+  const lines = useMemo(() => content.split("\n"), [content]);
+
+  return (
+    <div>
+      {lines.map((line, i) => (
+        <div key={i} className="flex">
+          <span className="w-10 shrink-0 select-none pr-2 text-right text-[var(--text-tertiary)] opacity-70">
+            {startLine + i}
+          </span>
+          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-3">
+            <LineSpans
+              text={line}
+              tokens={perLine[i] ?? []}
+              wordSegments={null}
+              lineType="context"
+            />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * A sent CSV as a table. Cells stay on one line and clip: a preview is for
  * recognising the file, and a wrapped cell would make every row a different
@@ -716,7 +817,7 @@ export function ToolPreviewCard({
           ? "image"
           : preview.kind === "table"
             ? "csv"
-            : preview.kind === "text"
+            : preview.kind === "text" || preview.kind === "read"
               ? "file"
               : "diff";
 
@@ -732,7 +833,9 @@ export function ToolPreviewCard({
         width:
           preview.kind === "image"
             ? undefined
-            : preview.kind === "content" || preview.kind === "text"
+            : preview.kind === "content" ||
+                preview.kind === "text" ||
+                preview.kind === "read"
               ? CARD_WIDTH_CONTENT
               : CARD_WIDTH_DIFF,
         maxWidth:
@@ -773,6 +876,13 @@ export function ToolPreviewCard({
           <TextSection
             text={preview.text}
             language={preview.language}
+            shikiReady={shikiReady}
+          />
+        ) : preview.kind === "read" ? (
+          <ReadSection
+            content={preview.content}
+            language={preview.language}
+            startLine={preview.startLine}
             shikiReady={shikiReady}
           />
         ) : preview.kind === "file" ? (
