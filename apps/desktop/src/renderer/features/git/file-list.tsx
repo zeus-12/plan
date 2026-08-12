@@ -7,7 +7,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import { usePersistentString } from "./use-persistent-string";
+import type { SyncTarget } from "./use-working-tree";
 import {
   buildFileTree,
   flattenFileTree,
@@ -60,6 +62,10 @@ interface Props {
   /** Repo-wide bulk actions on the Changes group. */
   onDiscardAll: (subPath: string) => void;
   onStashAll: (subPath: string) => void;
+  /** Push/pull status for every repo, shown as a pinned "Other repos" footer
+   * for repos that have no local changes to list above. */
+  syncTargets: SyncTarget[];
+  onPush: (subPath: string) => void;
 }
 
 const REPO_H = 34;
@@ -185,6 +191,15 @@ function DiscardIcon() {
     <svg {...svgProps()}>
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+function UploadIcon() {
+  return (
+    <svg {...svgProps()} className="shrink-0">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
     </svg>
   );
 }
@@ -344,6 +359,8 @@ export function FileList({
   onUnstageAll,
   onDiscardAll,
   onStashAll,
+  syncTargets,
+  onPush,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   // Collapse state lives here so the whole list can be flattened + virtualized.
@@ -355,6 +372,7 @@ export function FileList({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     new Set(),
   );
+  const [syncCollapsed, setSyncCollapsed] = useState(false);
   const [viewMode, setViewMode] = usePersistentString<ViewMode>(
     "plan.diffs.viewMode",
     "list",
@@ -367,6 +385,11 @@ export function FileList({
   );
   const multiRepo = nonEmpty.length > 1;
   const hasCommit = !!renderCommit;
+  // Excludes repos already listed above with their files, so no repo appears twice.
+  const otherRepos = useMemo(() => {
+    const shown = new Set(nonEmpty.map((g) => g.subPath || "/"));
+    return syncTargets.filter((t) => !shown.has(t.subPath || "/"));
+  }, [syncTargets, nonEmpty]);
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -434,14 +457,6 @@ export function FileList({
     overscan: 12,
   });
 
-  if (nonEmpty.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
-        No uncommitted changes
-      </div>
-    );
-  }
-
   const toggleRepo = (key: string) =>
     setCollapsedRepos((prev) => toggleInSet(prev, key));
   const toggleSection = (key: string) =>
@@ -450,285 +465,347 @@ export function FileList({
     setCollapsedFolders((prev) => toggleInSet(prev, key));
 
   return (
-    <div
-      ref={parentRef}
-      className="h-full min-h-0 overflow-auto [scrollbar-gutter:stable]"
-    >
+    <div className="flex h-full min-h-0 flex-col">
       <div
-        className="relative w-full"
-        style={{ height: virtualizer.getTotalSize() }}
+        ref={parentRef}
+        className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]"
       >
-        {virtualizer.getVirtualItems().map((vi) => {
-          const row = rows[vi.index];
-          const style: React.CSSProperties = {
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: vi.size,
-            transform: `translateY(${vi.start}px)`,
-          };
+        {rows.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-4 text-center font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)]">
+            No uncommitted changes
+          </div>
+        ) : (
+          <div
+            className="relative w-full"
+            style={{ height: virtualizer.getTotalSize() }}
+          >
+            {virtualizer.getVirtualItems().map((vi) => {
+              const row = rows[vi.index];
+              const style: React.CSSProperties = {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: vi.size,
+                transform: `translateY(${vi.start}px)`,
+              };
 
-          if (row.kind === "commit") {
-            // Measured (not fixed height) so the resizable textarea reflows.
-            return (
-              <div
-                key={row.key}
-                ref={virtualizer.measureElement}
-                data-index={vi.index}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${vi.start}px)`,
-                }}
-              >
-                {renderCommit?.(row.group)}
-              </div>
-            );
-          }
+              if (row.kind === "commit") {
+                // Measured (not fixed height) so the resizable textarea reflows.
+                return (
+                  <div
+                    key={row.key}
+                    ref={virtualizer.measureElement}
+                    data-index={vi.index}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${vi.start}px)`,
+                    }}
+                  >
+                    {renderCommit?.(row.group)}
+                  </div>
+                );
+              }
 
-          if (row.kind === "repo") {
-            const repoKey = row.group.subPath || "/";
-            const open = !collapsedRepos.has(repoKey);
-            const total = row.group.staged.length + row.group.unstaged.length;
-            return (
-              <button
-                key={row.key}
-                style={style}
-                onClick={() => toggleRepo(repoKey)}
-                className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--bg-surface-hover)] px-3 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface)]"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <Chevron
-                    open={open}
-                    className="text-[var(--text-tertiary)]"
-                  />
-                  <span className="truncate font-semibold">
-                    {row.group.repoName}
-                  </span>
-                  {/* Same bordered pill as the workspace header; truncates
+              if (row.kind === "repo") {
+                const repoKey = row.group.subPath || "/";
+                const open = !collapsedRepos.has(repoKey);
+                const total =
+                  row.group.staged.length + row.group.unstaged.length;
+                return (
+                  <button
+                    key={row.key}
+                    style={style}
+                    onClick={() => toggleRepo(repoKey)}
+                    className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--bg-surface-hover)] px-3 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface)]"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Chevron
+                        open={open}
+                        className="text-[var(--text-tertiary)]"
+                      />
+                      <span className="truncate font-semibold">
+                        {row.group.repoName}
+                      </span>
+                      {/* Same bordered pill as the workspace header; truncates
                       well before the repo name does. */}
-                  {row.group.branch && (
-                    <span className="min-w-0 shrink-[4] truncate rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--text-secondary)]">
-                      {row.group.branch}
+                      {row.group.branch && (
+                        <span className="min-w-0 shrink-[4] truncate rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--text-secondary)]">
+                          {row.group.branch}
+                        </span>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                      {total}
                     </span>
-                  )}
-                </div>
-                <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
-                  {total}
-                </span>
-              </button>
-            );
-          }
+                  </button>
+                );
+              }
 
-          if (row.kind === "section") {
-            const repoKey = row.group.subPath || "/";
-            const sKey = `${repoKey}::${row.section}`;
-            const open = !collapsedSections.has(sKey);
-            const isStaged = row.section === "staged";
-            const files = isStaged ? row.group.staged : row.group.unstaged;
-            return (
-              <div
-                key={row.key}
-                style={style}
-                className="group/section flex items-center justify-between border-b border-[var(--border)] pr-1.5 hover:bg-[var(--bg-surface-hover)]"
-              >
-                <button
-                  onClick={() => toggleSection(sKey)}
-                  className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 text-left font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
+              if (row.kind === "section") {
+                const repoKey = row.group.subPath || "/";
+                const sKey = `${repoKey}::${row.section}`;
+                const open = !collapsedSections.has(sKey);
+                const isStaged = row.section === "staged";
+                const files = isStaged ? row.group.staged : row.group.unstaged;
+                return (
+                  <div
+                    key={row.key}
+                    style={style}
+                    className="group/section flex items-center justify-between border-b border-[var(--border)] pr-1.5 hover:bg-[var(--bg-surface-hover)]"
+                  >
+                    <button
+                      onClick={() => toggleSection(sKey)}
+                      className="flex h-full min-w-0 flex-1 items-center gap-2 pl-3 text-left font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
+                    >
+                      <Chevron
+                        open={open}
+                        className="text-[var(--text-tertiary)]"
+                      />
+                      <span className="truncate">
+                        {isStaged ? "Staged Changes" : "Changes"}
+                      </span>
+                      <span>{files.length}</span>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-0.5 pl-2">
+                      <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+                      {isStaged ? (
+                        <SectionIconButton
+                          icon={<MinusIcon />}
+                          tooltip="Unstage all"
+                          onClick={() => onUnstageAll(row.group.subPath)}
+                        />
+                      ) : (
+                        <>
+                          <SectionIconButton
+                            icon={<StashIcon />}
+                            tooltip="Stash all changes"
+                            onClick={() => onStashAll(row.group.subPath)}
+                          />
+                          <SectionIconButton
+                            icon={<DiscardIcon />}
+                            tooltip="Discard all changes"
+                            danger
+                            onClick={() => onDiscardAll(row.group.subPath)}
+                          />
+                          <SectionIconButton
+                            icon={<PlusIcon />}
+                            tooltip="Stage all"
+                            accent
+                            onClick={() => onStageAll(row.group.subPath)}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (row.kind === "folder") {
+                const open = !collapsedFolders.has(row.collapseKey);
+                const isStaged = row.section === "staged";
+                return (
+                  <div
+                    key={row.key}
+                    style={style}
+                    className="group/folder flex items-center border-l-2 border-l-transparent transition-colors hover:bg-[var(--bg-surface-hover)]"
+                  >
+                    <button
+                      onClick={() => toggleFolder(row.collapseKey)}
+                      title={row.dirPath}
+                      style={{ paddingLeft: INDENT + row.depth * INDENT }}
+                      className="flex h-full min-w-0 flex-1 items-center gap-1.5 pr-2 text-left"
+                    >
+                      <Chevron
+                        open={open}
+                        className="text-[var(--text-tertiary)]"
+                      />
+                      <FolderIcon open={open} />
+                      <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)]">
+                        {row.name}
+                      </span>
+                    </button>
+                    <div className="flex items-center gap-0.5 pl-1.5 pr-2 opacity-0 transition-opacity group-hover/folder:opacity-100">
+                      {isStaged ? (
+                        <ActionButton
+                          icon={<MinusIcon />}
+                          title="Unstage folder"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnstage(row.dirPath, row.group.subPath);
+                          }}
+                        />
+                      ) : (
+                        <ActionButton
+                          icon={<PlusIcon />}
+                          title="Stage folder"
+                          accent
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onStage(row.dirPath, row.group.subPath);
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              const file = row.file;
+              const isSelected =
+                selected?.subPath === file.subPath &&
+                selected?.path === file.path &&
+                selected?.staged === file.staged;
+              const projPath = file.subPath
+                ? `${file.subPath}/${file.path}`
+                : file.path;
+              const isActive = !isSelected && projPath === activeFilePath;
+              const fileBasename = basename(file.path);
+              const fileDirname = dirname(file.path);
+              return (
+                <div
+                  key={row.key}
+                  style={style}
+                  className={cn(
+                    "group flex items-center border-l-2 transition-colors",
+                    isSelected
+                      ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
+                      : isActive
+                        ? "border-l-[var(--accent)] bg-[var(--bg-surface)]"
+                        : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
+                  )}
                 >
-                  <Chevron
-                    open={open}
-                    className="text-[var(--text-tertiary)]"
-                  />
-                  <span className="truncate">
-                    {isStaged ? "Staged Changes" : "Changes"}
-                  </span>
-                  <span>{files.length}</span>
-                </button>
-                <div className="flex shrink-0 items-center gap-0.5 pl-2">
-                  <ViewModeToggle mode={viewMode} onChange={setViewMode} />
-                  {isStaged ? (
-                    <SectionIconButton
-                      icon={<MinusIcon />}
-                      tooltip="Unstage all"
-                      onClick={() => onUnstageAll(row.group.subPath)}
-                    />
-                  ) : (
-                    <>
-                      <SectionIconButton
-                        icon={<StashIcon />}
-                        tooltip="Stash all changes"
-                        onClick={() => onStashAll(row.group.subPath)}
-                      />
-                      <SectionIconButton
-                        icon={<DiscardIcon />}
-                        tooltip="Discard all changes"
-                        danger
-                        onClick={() => onDiscardAll(row.group.subPath)}
-                      />
-                      <SectionIconButton
-                        icon={<PlusIcon />}
-                        tooltip="Stage all"
-                        accent
-                        onClick={() => onStageAll(row.group.subPath)}
-                      />
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          }
-
-          if (row.kind === "folder") {
-            const open = !collapsedFolders.has(row.collapseKey);
-            const isStaged = row.section === "staged";
-            return (
-              <div
-                key={row.key}
-                style={style}
-                className="group/folder flex items-center border-l-2 border-l-transparent transition-colors hover:bg-[var(--bg-surface-hover)]"
-              >
-                <button
-                  onClick={() => toggleFolder(row.collapseKey)}
-                  title={row.dirPath}
-                  style={{ paddingLeft: INDENT + row.depth * INDENT }}
-                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 pr-2 text-left"
-                >
-                  <Chevron
-                    open={open}
-                    className="text-[var(--text-tertiary)]"
-                  />
-                  <FolderIcon open={open} />
-                  <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)]">
-                    {row.name}
-                  </span>
-                </button>
-                <div className="flex items-center gap-0.5 pl-1.5 pr-2 opacity-0 transition-opacity group-hover/folder:opacity-100">
-                  {isStaged ? (
-                    <ActionButton
-                      icon={<MinusIcon />}
-                      title="Unstage folder"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUnstage(row.dirPath, row.group.subPath);
-                      }}
-                    />
-                  ) : (
-                    <ActionButton
-                      icon={<PlusIcon />}
-                      title="Stage folder"
-                      accent
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStage(row.dirPath, row.group.subPath);
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          }
-
-          const file = row.file;
-          const isSelected =
-            selected?.subPath === file.subPath &&
-            selected?.path === file.path &&
-            selected?.staged === file.staged;
-          const projPath = file.subPath
-            ? `${file.subPath}/${file.path}`
-            : file.path;
-          const isActive = !isSelected && projPath === activeFilePath;
-          const fileBasename = basename(file.path);
-          const fileDirname = dirname(file.path);
-          return (
-            <div
-              key={row.key}
-              style={style}
-              className={cn(
-                "group flex items-center border-l-2 transition-colors",
-                isSelected
-                  ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
-                  : isActive
-                    ? "border-l-[var(--accent)] bg-[var(--bg-surface)]"
-                    : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
-              )}
-            >
-              <button
-                onClick={() => onSelect(file.subPath, file.path, file.staged)}
-                title={
-                  file.subPath ? `${file.subPath}/${file.path}` : file.path
-                }
-                style={{ paddingLeft: INDENT + row.depth * INDENT }}
-                className="flex h-full min-w-0 flex-1 items-center gap-2 pr-2 text-left"
-              >
-                {/* Reserve the folder's chevron column so a file's icon aligns
+                  <button
+                    onClick={() =>
+                      onSelect(file.subPath, file.path, file.staged)
+                    }
+                    title={
+                      file.subPath ? `${file.subPath}/${file.path}` : file.path
+                    }
+                    style={{ paddingLeft: INDENT + row.depth * INDENT }}
+                    className="flex h-full min-w-0 flex-1 items-center gap-2 pr-2 text-left"
+                  >
+                    {/* Reserve the folder's chevron column so a file's icon aligns
                     under its parent folder icon — since files sit one depth
                     deeper, this nests them clearly beneath the folder. */}
-                {viewMode === "tree" && (
-                  <span aria-hidden className="w-2 shrink-0" />
-                )}
-                <FileIcon name={fileBasename} />
-                <span className="min-w-0 shrink truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
-                  {fileBasename}
-                </span>
-                {viewMode === "list" && fileDirname && (
-                  <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                    {fileDirname}
+                    {viewMode === "tree" && (
+                      <span aria-hidden className="w-2 shrink-0" />
+                    )}
+                    <FileIcon name={fileBasename} />
+                    <span className="min-w-0 shrink truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
+                      {fileBasename}
+                    </span>
+                    {viewMode === "list" && fileDirname && (
+                      <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                        {fileDirname}
+                      </span>
+                    )}
+                  </button>
+                  <span
+                    className={cn(
+                      "shrink-0 pl-1 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
+                      statusColor(file.letter),
+                    )}
+                    title={file.letter === "?" ? "Untracked" : undefined}
+                  >
+                    {displayLetter(file.letter)}
                   </span>
-                )}
-              </button>
-              <span
-                className={cn(
-                  "shrink-0 pl-1 text-center font-[family-name:var(--font-mono)] text-[11px] font-semibold",
-                  statusColor(file.letter),
-                )}
-                title={file.letter === "?" ? "Untracked" : undefined}
-              >
-                {displayLetter(file.letter)}
-              </span>
-              {/* Fixed width, right-aligned: a staged row has one button and an
+                  {/* Fixed width, right-aligned: a staged row has one button and an
                   unstaged row two, so without it staging a file would rewiden
                   the name column and stagger the two sections' action columns. */}
-              <div className="flex w-[56px] shrink-0 items-center justify-end gap-0.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
-                {file.staged ? (
-                  <ActionButton
-                    icon={<MinusIcon />}
-                    title="Unstage"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUnstage(file.path, file.subPath);
-                    }}
-                  />
-                ) : (
-                  <>
-                    <ActionButton
-                      icon={<DiscardIcon />}
-                      title="Discard changes"
-                      danger
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDiscard(file.path, file.subPath);
-                      }}
-                    />
-                    <ActionButton
-                      icon={<PlusIcon />}
-                      title="Stage"
-                      accent
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStage(file.path, file.subPath);
-                      }}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                  <div className="flex w-[56px] shrink-0 items-center justify-end gap-0.5 pr-2 opacity-60 transition-opacity group-hover:opacity-100">
+                    {file.staged ? (
+                      <ActionButton
+                        icon={<MinusIcon />}
+                        title="Unstage"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUnstage(file.path, file.subPath);
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <ActionButton
+                          icon={<DiscardIcon />}
+                          title="Discard changes"
+                          danger
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDiscard(file.path, file.subPath);
+                          }}
+                        />
+                        <ActionButton
+                          icon={<PlusIcon />}
+                          title="Stage"
+                          accent
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onStage(file.path, file.subPath);
+                          }}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+      {/* Inside this panel rather than a sibling of it, so the scrolling list
+          above can never overlap it. */}
+      {otherRepos.length > 0 && (
+        <div className="shrink-0 border-t border-[var(--border)]">
+          <button
+            onClick={() => setSyncCollapsed((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 bg-[var(--bg-surface-hover)] px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface)]"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <Chevron
+                open={!syncCollapsed}
+                className="text-[var(--text-tertiary)]"
+              />
+              <span className="truncate font-semibold">Other repos</span>
+            </div>
+            <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+              {otherRepos.length}
+            </span>
+          </button>
+          {!syncCollapsed && (
+            <div className="max-h-[240px] overflow-y-auto">
+              {otherRepos.map((t) => (
+                <button
+                  key={t.subPath || "/"}
+                  onClick={() => onPush(t.subPath)}
+                  disabled={t.pushing || (t.hasUpstream && t.ahead === 0)}
+                  className="flex w-full shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-chrome,var(--bg-surface))] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-chrome,var(--bg-surface))]"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <UploadIcon />
+                    <span className="truncate">
+                      {t.pushing ? (
+                        <TextShimmer duration={2.4}>Pushing…</TextShimmer>
+                      ) : !t.hasUpstream ? (
+                        "Publish branch"
+                      ) : t.ahead > 0 ? (
+                        `Pull & push ${t.ahead}`
+                      ) : (
+                        "Up to date"
+                      )}
+                    </span>
+                  </span>
+                  <span className="shrink-0 truncate text-[10px] text-[var(--text-tertiary)]">
+                    {groups.length > 1 ? t.repoName : (t.branch ?? "")}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

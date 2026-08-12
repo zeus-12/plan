@@ -22,6 +22,7 @@ import {
   FileList,
   type RepoFileGroup,
 } from "@/renderer/features/git/file-list";
+import type { SyncTarget } from "@/renderer/features/git/use-working-tree";
 import {
   SessionList,
   type SessionListItem,
@@ -59,14 +60,7 @@ interface Props {
   onUnstageAll: (subPath: string) => void;
   onDiscardAll: (subPath: string) => void;
   onStashAll: (subPath: string) => void;
-  syncTargets: {
-    subPath: string;
-    repoName: string;
-    branch: string | null;
-    ahead: number;
-    hasUpstream: boolean;
-    pushing: boolean;
-  }[];
+  syncTargets: SyncTarget[];
   onPush: (subPath: string) => void;
   onCommit: (
     message: string,
@@ -187,26 +181,6 @@ function PlusIcon() {
     >
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function UploadIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0"
-    >
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="17 8 12 3 7 8" />
-      <line x1="12" y1="3" x2="12" y2="15" />
     </svg>
   );
 }
@@ -354,7 +328,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   const [paneCollapsed, setPaneCollapsed] = useState(false);
   const [width, setWidth] = usePersistentNumber(
     "plan.middleSidebar.width",
-    280,
+    320,
   );
   const [termHeight, setTermHeight] = usePersistentNumber(
     "plan.middleSidebar.termHeight",
@@ -525,64 +499,37 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                 Loading…
               </div>
             ) : (
-              <div className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1">
                 {/* Each repo's commit box sits directly above its own files. */}
-                <div className="min-h-0 flex-1">
-                  <FileList
-                    groups={repoGroups}
-                    renderCommit={(g) => {
-                      const repo = repos.find((r) => r.subPath === g.subPath);
-                      const key = g.subPath || "/";
-                      return (
-                        <CommitPanel
-                          stagedCount={g.staged.length}
-                          branch={repo?.branch ?? null}
-                          repoLabel={multiRepo ? g.repoName : null}
-                          message={commitDrafts[key] ?? ""}
-                          onMessageChange={(msg) => setDraft(key, msg)}
-                          onCommit={(msg) => onCommit(msg, g.subPath)}
-                        />
-                      );
-                    }}
-                    selected={selectedFile}
-                    activeFilePath={activeFilePath}
-                    onSelect={onSelectFile}
-                    onStage={onStageFile}
-                    onUnstage={onUnstageFile}
-                    onDiscard={onDiscardFile}
-                    onStageAll={onStageAll}
-                    onUnstageAll={onUnstageAll}
-                    onDiscardAll={onDiscardAll}
-                    onStashAll={onStashAll}
-                  />
-                </div>
-                {/* Push / sync bar pinned at the bottom. */}
-                {syncTargets.map((t) => (
-                  <button
-                    key={t.subPath || "/"}
-                    onClick={() => onPush(t.subPath)}
-                    disabled={t.pushing || (t.hasUpstream && t.ahead === 0)}
-                    className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-chrome,var(--bg-surface))] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-chrome,var(--bg-surface))]"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <UploadIcon />
-                      <span className="truncate">
-                        {t.pushing ? (
-                          <TextShimmer duration={2.4}>Pushing…</TextShimmer>
-                        ) : !t.hasUpstream ? (
-                          "Publish branch"
-                        ) : t.ahead > 0 ? (
-                          `Pull & push ${t.ahead}`
-                        ) : (
-                          "Up to date"
-                        )}
-                      </span>
-                    </span>
-                    <span className="shrink-0 truncate text-[10px] text-[var(--text-tertiary)]">
-                      {multiRepo ? t.repoName : (t.branch ?? "")}
-                    </span>
-                  </button>
-                ))}
+                <FileList
+                  groups={repoGroups}
+                  renderCommit={(g) => {
+                    const repo = repos.find((r) => r.subPath === g.subPath);
+                    const key = g.subPath || "/";
+                    return (
+                      <CommitPanel
+                        stagedCount={g.staged.length}
+                        branch={repo?.branch ?? null}
+                        repoLabel={multiRepo ? g.repoName : null}
+                        message={commitDrafts[key] ?? ""}
+                        onMessageChange={(msg) => setDraft(key, msg)}
+                        onCommit={(msg) => onCommit(msg, g.subPath)}
+                      />
+                    );
+                  }}
+                  selected={selectedFile}
+                  activeFilePath={activeFilePath}
+                  onSelect={onSelectFile}
+                  onStage={onStageFile}
+                  onUnstage={onUnstageFile}
+                  onDiscard={onDiscardFile}
+                  onStageAll={onStageAll}
+                  onUnstageAll={onUnstageAll}
+                  onDiscardAll={onDiscardAll}
+                  onStashAll={onStashAll}
+                  syncTargets={syncTargets}
+                  onPush={onPush}
+                />
               </div>
             )}
           </TabsContent>
