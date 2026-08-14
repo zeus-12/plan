@@ -430,8 +430,47 @@ function SplitCell({
   );
 }
 
+/** Whether a preview only ever adds — no old side anywhere in it, so the card
+ *  drops the panel (or gutter) that would sit empty beside every row. */
+export function isCreationPreview(preview: ToolPreview): boolean {
+  if (preview.kind === "content") return true;
+  if (preview.kind === "diff") return preview.edits.every((e) => !e.oldText);
+  if (preview.kind === "file") return !preview.oldText;
+  return false;
+}
+
 /** A single edit rendered as a two-panel (old | new), syntax-highlighted diff. */
 function DiffSection({
+  oldText,
+  newText,
+  language,
+  shikiReady,
+}: {
+  oldText: string;
+  newText: string;
+  language: string;
+  shikiReady: number;
+}) {
+  if (!oldText) {
+    return (
+      <ContentSection
+        content={newText}
+        language={language}
+        shikiReady={shikiReady}
+      />
+    );
+  }
+  return (
+    <SplitDiff
+      oldText={oldText}
+      newText={newText}
+      language={language}
+      shikiReady={shikiReady}
+    />
+  );
+}
+
+function SplitDiff({
   oldText,
   newText,
   language,
@@ -501,6 +540,7 @@ function UnifiedSection({
     [oldText, newText],
   );
   const items = useMemo(() => filterUnchangedLines(all), [all]);
+  const creation = !oldText;
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const [oldPer, newPer] = useMemo(
     () => [
@@ -541,7 +581,14 @@ function UnifiedSection({
               onClick={() => setExpanded((prev) => new Set(prev).add(row.key))}
               className="flex w-full items-center gap-2 py-0.5 text-left text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
             >
-              <span className="w-[72px] shrink-0 text-center">⋯</span>
+              <span
+                className={cn(
+                  "shrink-0 text-center",
+                  creation ? "w-9" : "w-[72px]",
+                )}
+              >
+                ⋯
+              </span>
               <span>
                 show {row.count} {row.count === 1 ? "line" : "lines"}
               </span>
@@ -554,9 +601,11 @@ function UnifiedSection({
             : (newPer[(row.newNum ?? 0) - 1] ?? []);
         return (
           <div key={i} className="flex" style={rowStyle(row.type)}>
-            <span className="w-9 shrink-0 select-none pr-2 text-right text-[var(--text-tertiary)] opacity-70">
-              {row.oldNum ?? ""}
-            </span>
+            {!creation && (
+              <span className="w-9 shrink-0 select-none pr-2 text-right text-[var(--text-tertiary)] opacity-70">
+                {row.oldNum ?? ""}
+              </span>
+            )}
             <span className="w-9 shrink-0 select-none pr-2 text-right text-[var(--text-tertiary)] opacity-70">
               {row.newNum ?? ""}
             </span>
@@ -808,18 +857,18 @@ export function ToolPreviewCard({
   // A sent file states what the read actually covered ("first 200 rows · 412
   // MB") in place of the kind label.
   const meta = "meta" in preview ? preview.meta : undefined;
-  const label =
-    preview.kind === "content"
-      ? "new file"
-      : preview.kind === "file"
-        ? "file diff"
-        : preview.kind === "image"
-          ? "image"
-          : preview.kind === "table"
-            ? "csv"
-            : preview.kind === "text" || preview.kind === "read"
-              ? "file"
-              : "diff";
+  const creation = isCreationPreview(preview);
+  const label = creation
+    ? "new file"
+    : preview.kind === "file"
+      ? "file diff"
+      : preview.kind === "image"
+        ? "image"
+        : preview.kind === "table"
+          ? "csv"
+          : preview.kind === "text" || preview.kind === "read"
+            ? "file"
+            : "diff";
 
   return (
     <div
@@ -833,9 +882,7 @@ export function ToolPreviewCard({
         width:
           preview.kind === "image"
             ? undefined
-            : preview.kind === "content" ||
-                preview.kind === "text" ||
-                preview.kind === "read"
+            : creation || preview.kind === "text" || preview.kind === "read"
               ? CARD_WIDTH_CONTENT
               : CARD_WIDTH_DIFF,
         maxWidth:
