@@ -39,6 +39,7 @@ import {
   abortedPromptUuids,
   classifyMessage,
   imageOnlyPaths,
+  interruptionKind,
   isImageOnlyMessage,
   isRealUserTurn,
   parseBashBlock,
@@ -47,6 +48,7 @@ import {
   type MessageCategory,
   type TaskNotification,
 } from "./message-kind";
+import { InterruptedRow } from "./interrupted-row";
 import { AskQuestionCard, parseAskInput } from "./ask-question-card";
 import {
   PlanCard,
@@ -1235,6 +1237,10 @@ function renderPartContent({
             {tasks.remainder && <MarkdownText text={tasks.remainder} />}
           </div>
         );
+      }
+      const interruption = interruptionKind(part.text);
+      if (interruption) {
+        return <InterruptedRow kind={interruption} />;
       }
       if (message.isMeta || message.promptSource === "system") {
         return <SystemMetaBlock text={part.text} />;

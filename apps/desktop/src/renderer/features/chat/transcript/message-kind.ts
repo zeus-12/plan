@@ -127,6 +127,28 @@ export function parseTaskNotifications(
 }
 
 /**
+ * Claude Code records a stopped reply as a user turn whose only text is a
+ * marker: `[Request interrupted by user]`, or the `for tool use` variant when
+ * the stop landed on a tool call. It's a record of an Esc keypress, not
+ * something the human typed, so it renders as a machinery row.
+ */
+export type InterruptionKind = "reply" | "tool";
+
+export function interruptionKind(text: string): InterruptionKind | null {
+  const t = text.trim();
+  if (t === "[Request interrupted by user]") return "reply";
+  if (t === "[Request interrupted by user for tool use]") return "tool";
+  return null;
+}
+
+export function isInterruptionMessage(m: ConversationMessage): boolean {
+  return (
+    m.parts.length > 0 &&
+    m.parts.every((p) => p.kind === "text" && interruptionKind(p.text) !== null)
+  );
+}
+
+/**
  * A "!" bash-mode turn (command or its output) — its parts are all bash-tagged
  * text. Rendered left-aligned and full-width like terminal output, not in the
  * right-hand user bubble.
@@ -205,7 +227,8 @@ export function classifyMessage(m: ConversationMessage): MessageCategory {
     else if (
       isSystemMetaMessage(m) ||
       isTaskNotificationMessage(m) ||
-      isLocalCommandOutputMessage(m)
+      isLocalCommandOutputMessage(m) ||
+      isInterruptionMessage(m)
     )
       v = "tool";
     else v = "user-real";
