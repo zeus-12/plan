@@ -5,6 +5,8 @@ import type { FileView, FileImageDiff } from "@/common/shared-types";
 import { useProjectAnnotations } from "@/renderer/features/comments/annotation-store";
 import { useDiffSettings } from "@plan/shared/lib/settings/settings";
 import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
+import { DiffSettingsControls } from "@plan/shared/components/diff/settings-controls";
+import { useExpandedSeparators } from "@plan/shared/lib/diff/expanded-separators";
 import { useDiffBlame } from "@/renderer/features/git/blame/use-diff-blame";
 import { LanguageToolbar } from "@plan/shared/components/editor/language-toolbar";
 import { Button } from "@plan/shared/components/ui/button";
@@ -90,8 +92,7 @@ function FileDiffViewerImpl({
 }: Props) {
   const isStaged = mode === "staged";
   const [settings, updateSettings] = useDiffSettings();
-  // Header slot the diff portals its settings gear into (beside "Format").
-  const [settingsSlot, setSettingsSlot] = useState<HTMLDivElement | null>(null);
+  const separators = useExpandedSeparators();
   const [contents, setContents] = useState<FileView | null>(null);
   // Bumped after a per-hunk op to re-fetch this file's view in place (so the
   // staged hunk leaves "Changes" immediately) without remounting the viewer.
@@ -382,6 +383,9 @@ function FileDiffViewerImpl({
 
   const formatAvailable = canFormat(effectiveLanguage);
 
+  const diffMounted =
+    !isImagePath(file.path) && !file.binary && !!contents && !contents.binary;
+
   const handleFormatClick = useCallback(async () => {
     if (!contents || !formatAvailable) return;
     // Already computed → just toggle the preview.
@@ -522,8 +526,13 @@ function FileDiffViewerImpl({
             </TooltipTrigger>
             <TooltipContent side="bottom">{formatTooltip}</TooltipContent>
           </Tooltip>
-          {/* InteractiveDiff portals its settings gear here. */}
-          <div ref={setSettingsSlot} className="flex items-center" />
+          <DiffSettingsControls
+            settings={settings}
+            onSettingsChange={updateSettings}
+            isFirstVersion={!contents?.oldText}
+            separators={separators}
+            disabled={!diffMounted}
+          />
         </div>
       </div>
 
@@ -561,8 +570,7 @@ function FileDiffViewerImpl({
               newText={viewNewText}
               settings={settings}
               onSettingsChange={updateSettings}
-              settingsVariant="popover"
-              settingsPortalTarget={settingsSlot}
+              separators={separators}
               findEnabled={active}
               isFirstVersion={!contents.oldText}
               language={effectiveLanguage}

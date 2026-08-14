@@ -47,7 +47,7 @@ import { CommentPopover } from "../comment-popover";
 import { FindWidget } from "../find-widget";
 import { LineContent, EMPTY_TOKENS, EMPTY_HLS, type Hl } from "./line-content";
 import { MergeOverlay } from "./merge-overlay";
-import { DiffSettingsControls } from "./settings-controls";
+import type { ExpandedSeparators } from "../../lib/diff/expanded-separators";
 import { useReadonlyCaretHost } from "../../lib/diff/use-readonly-caret-host";
 
 /** Re-exported: HunkRange is part of the hunkActions contract below. */
@@ -171,20 +171,11 @@ interface Props {
    */
   findEnabled?: boolean;
   /**
-   * How the diff-settings controls are presented. "bar" (default) lays them out
-   * inline above the diff — the web surface. "popover" collapses them behind a
-   * single gear button that opens a small panel — the desktop surface, where the
-   * header is already crowded with file actions.
+   * Manual "N unchanged lines" expansions, owned by the host (useExpandedSeparators)
+   * so it can render DiffSettingsControls wherever it likes — a header, a bar —
+   * and still have "Changes only" collapse them.
    */
-  settingsVariant?: "bar" | "popover";
-  /**
-   * Where to render the "popover" gear button. When provided, the gear is
-   * portaled into this node (e.g. a slot in the file header beside "Format")
-   * instead of sitting above the diff — while its logic stays here, so the
-   * "Changes only" toggle keeps tracking manual line expansions. Ignored unless
-   * settingsVariant is "popover".
-   */
-  settingsPortalTarget?: HTMLElement | null;
+  separators: ExpandedSeparators;
   /**
    * Opt-in inline git blame. Clicking a row shows a muted trailing annotation
    * (`labelFor`'s text) after that row's code; hovering/clicking the
@@ -322,8 +313,7 @@ export function InteractiveDiff({
   onMergeChange,
   hunkActions,
   findEnabled = true,
-  settingsVariant = "bar",
-  settingsPortalTarget,
+  separators,
   blame,
   revealAnnotation,
   commentSource,
@@ -344,9 +334,12 @@ export function InteractiveDiff({
   const unifiedRef = useRef<HTMLDivElement>(null);
   const [hoveredAnnId, setHoveredAnnId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingAnn | null>(null);
-  const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(
-    new Set(),
-  );
+  const {
+    expanded: expandedSeparators,
+    toggle: toggleSeparator,
+    expandAll: expandAllSeparators,
+    collapseAll: collapseSeparators,
+  } = separators;
   // Start lines (DiffLine.idx) of the regions the user has collapsed.
   const [collapsedFolds, setCollapsedFolds] = useState<Set<number>>(new Set());
 
@@ -354,8 +347,8 @@ export function InteractiveDiff({
   const effectiveViewMode = isFirstVersion ? "unified" : settings.viewMode;
 
   useEffect(() => {
-    setExpandedSeparators(new Set());
-  }, [oldText, newText, settings.hideUnchanged]);
+    collapseSeparators();
+  }, [oldText, newText, settings.hideUnchanged, collapseSeparators]);
 
   // The row whose inline blame annotation is showing (set by clicking a row).
   // Keyed by DiffLine.idx + side; cleared whenever the underlying text changes
@@ -1129,12 +1122,6 @@ export function InteractiveDiff({
   const numDigits = Math.max(String(maxLineNum).length, 1);
   const numColW = numDigits * NUM_DIGIT_WIDTH + NUM_COL_PAD;
 
-  /* ── Separator toggle ───────────────────────────────────── */
-
-  const toggleSeparator = useCallback((idx: number) => {
-    setExpandedSeparators((prev) => toggleInSet(prev, idx));
-  }, []);
-
   /* ── Offset calculation ─────────────────────────────────── */
 
   function getAbsoluteOffset(node: Node, nodeOff: number): number {
@@ -1352,9 +1339,7 @@ export function InteractiveDiff({
           (n, it) => n + (it.type === "separator" ? 1 : 0),
           0,
         );
-        setExpandedSeparators(
-          new Set(Array.from({ length: sepCount }, (_, i) => i)),
-        );
+        expandAllSeparators(sepCount);
       }
       if (frames++ < 10) raf = requestAnimationFrame(find);
     });
@@ -2122,16 +2107,6 @@ export function InteractiveDiff({
           <FindWidget find={find} revealTrigger={findReveal} />
         </div>
       )}
-      <DiffSettingsControls
-        settings={settings}
-        onSettingsChange={onSettingsChange}
-        isFirstVersion={isFirstVersion}
-        variant={settingsVariant}
-        portalTarget={settingsPortalTarget}
-        separatorsCustomized={expandedSeparators.size > 0}
-        onCollapseSeparators={() => setExpandedSeparators(new Set())}
-      />
-
       <div
         ref={contentRef}
         // Opt into the desktop tight drag-selection paint (live-selection-

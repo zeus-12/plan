@@ -20,6 +20,8 @@ import { useCallback, useState } from "react";
 import type { Annotation } from "@plan/shared/lib/comments/store";
 import { useDiffSettings } from "@plan/shared/lib/settings/settings";
 import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
+import { DiffSettingsControls } from "@plan/shared/components/diff/settings-controls";
+import { useExpandedSeparators } from "@plan/shared/lib/diff/expanded-separators";
 import { useProjectAnnotations } from "@/renderer/features/comments/annotation-store";
 
 const EMPTY_ANNOTATIONS: Annotation[] = [];
@@ -83,6 +85,7 @@ export function PlanCard({
   planPath,
 }: Props) {
   const [settings, updateSettings] = useDiffSettings();
+  const separators = useExpandedSeparators();
   // Diff comments live in the shared annotation store, keyed per version-pair so
   // the highlight always matches the exact diff on screen (versions are
   // immutable, so offsets stay valid). They join the same compose buffer as
@@ -199,12 +202,19 @@ export function PlanCard({
               ))}
             </div>
           )}
+          <DiffSettingsControls
+            settings={settings}
+            onSettingsChange={updateSettings}
+            variant="bar"
+            separators={separators}
+          />
           <InteractiveDiff
             commentSource={{ filePath: planPath ?? undefined }}
             oldText={versions[baseIdx]?.text ?? ""}
             newText={current?.text ?? ""}
             settings={settings}
             onSettingsChange={updateSettings}
+            separators={separators}
             language="markdown"
             annotations={diffKey ? diffAnnotations : undefined}
             onAddAnnotation={diffKey ? addDiffAnnotation : undefined}

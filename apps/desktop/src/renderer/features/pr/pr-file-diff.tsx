@@ -3,6 +3,8 @@ import type { FileDiff } from "@plan/shared/lib/diff/diff-parser";
 import type { Annotation } from "@plan/shared/lib/comments/store";
 import { useDiffSettings } from "@plan/shared/lib/settings/settings";
 import { InteractiveDiff } from "@plan/shared/components/diff/interactive-diff";
+import { DiffSettingsControls } from "@plan/shared/components/diff/settings-controls";
+import { useExpandedSeparators } from "@plan/shared/lib/diff/expanded-separators";
 import {
   detectLanguage,
   languageFromPath,
@@ -68,7 +70,7 @@ export const PrFileDiff = memo(function PrFileDiff({
   active,
 }: Props) {
   const [settings, updateSettings] = useDiffSettings();
-  const [settingsSlot, setSettingsSlot] = useState<HTMLDivElement | null>(null);
+  const separators = useExpandedSeparators();
   // The fetched head blob text; null while loading, undefined-safe binary flag.
   const [head, setHead] = useState<{ text: string; binary: boolean } | null>(
     null,
@@ -159,6 +161,9 @@ export const PrFileDiff = memo(function PrFileDiff({
       : null,
   );
 
+  const diffMounted =
+    !file.binary && !!headSha && !!contents && !contents.binary;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2">
@@ -174,10 +179,17 @@ export const PrFileDiff = memo(function PrFileDiff({
             −{file.deletions}
           </span>
         </div>
-        {/* Reserve the gear's height (h-8) so the header row doesn't grow when
-            InteractiveDiff mounts and portals its settings button in here —
-            otherwise switching files visibly shifts this bar down. */}
-        <div ref={setSettingsSlot} className="flex h-8 items-center" />
+        {/* h-8 keeps this row's height independent of the gear, so switching
+            files never shifts the bar. */}
+        <div className="flex h-8 items-center">
+          <DiffSettingsControls
+            settings={settings}
+            onSettingsChange={updateSettings}
+            isFirstVersion={!contents?.oldText}
+            separators={separators}
+            disabled={!diffMounted}
+          />
+        </div>
       </div>
 
       <div
@@ -210,8 +222,7 @@ export const PrFileDiff = memo(function PrFileDiff({
             newText={viewNewText}
             settings={settings}
             onSettingsChange={updateSettings}
-            settingsVariant="popover"
-            settingsPortalTarget={settingsSlot}
+            separators={separators}
             findEnabled={active}
             isFirstVersion={!contents.oldText}
             language={effectiveLanguage}

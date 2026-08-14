@@ -1,48 +1,48 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   type DiffSettings,
   FONT_SIZE_OPTIONS,
 } from "../../lib/settings/settings";
+import type { ExpandedSeparators } from "../../lib/diff/expanded-separators";
 
 /* ── Diff settings controls ─────────────────────────────────
- * The same widgets serve two hosts as two layouts: "bar" lays them out inline
- * above the diff (the web surface); "popover" collapses them behind a gear
- * button (the desktop surface, where the header is already crowded) —
- * optionally portaled into a caller-provided header slot so the trigger lives
- * where the user expects it while the logic stays here.
+ * Diff view settings, as a gear button opening a small panel ("popover") or as
+ * an inline row of widgets ("bar"). Hosts render this themselves — in a file
+ * header, above a diff — so it's present as soon as the host is, whether or not
+ * a diff has loaded behind it.
  *
  * The one piece of diff state these controls need is whether the user has
  * manually expanded "N unchanged lines" sections: that puts the view in a
  * mixed state neither "Changes only" nor "All lines" reflects, and clicking
  * "Changes only" then means "collapse my expansions" rather than a settings
- * change. The host passes that as `separatorsCustomized` +
- * `onCollapseSeparators`. */
+ * change. That state is the `separators` handle, shared with the diff. */
 
 export interface DiffSettingsControlsProps {
   settings: DiffSettings;
   onSettingsChange?: (patch: Partial<DiffSettings>) => void;
   /** First version of a plan: no old side, so the view-mode toggle is moot. */
-  isFirstVersion: boolean;
-  variant: "bar" | "popover";
-  /** Portal target for the popover gear; ignored for the bar variant. */
-  portalTarget?: HTMLElement | null;
-  /** True while the user has manually expanded hidden-lines separators. */
-  separatorsCustomized: boolean;
-  /** Collapse those manual expansions back (without re-firing hideUnchanged). */
-  onCollapseSeparators: () => void;
+  isFirstVersion?: boolean;
+  variant?: "bar" | "popover";
+  /** Manual separator expansions, shared with the diff this configures. */
+  separators: ExpandedSeparators;
+  /** No diff behind the gear yet (still loading, binary, an image) — the button
+   *  holds its place rather than appearing once contents arrive. Popover only;
+   *  the bar renders beside a diff that's already there. */
+  disabled?: boolean;
 }
+
+const GEAR_CLASS =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-[15px] transition-colors";
 
 export function DiffSettingsControls({
   settings,
   onSettingsChange,
-  isFirstVersion,
-  variant,
-  portalTarget,
-  separatorsCustomized,
-  onCollapseSeparators,
+  isFirstVersion = false,
+  variant = "popover",
+  separators,
+  disabled = false,
 }: DiffSettingsControlsProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -58,6 +58,11 @@ export function DiffSettingsControls({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
+
+  // A disabled gear can't be closed by the click-outside handler above.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   if (!onSettingsChange) return null;
 
@@ -116,15 +121,15 @@ export function DiffSettingsControls({
           // When the user has manually expanded "N unchanged lines" sections
           // we're in a mixed state — neither toggle reflects reality.
           const isActive =
-            !separatorsCustomized && settings.hideUnchanged === hide;
+            !separators.customized && settings.hideUnchanged === hide;
           return (
             <button
               key={String(hide)}
               onClick={() => {
-                if (hide && settings.hideUnchanged && separatorsCustomized) {
+                if (hide && settings.hideUnchanged && separators.customized) {
                   // Already in changes-only mode but with expansions —
                   // collapse them back without re-firing hideUnchanged.
-                  onCollapseSeparators();
+                  separators.collapseAll();
                   return;
                 }
                 onSettingsChange({ hideUnchanged: hide });
@@ -189,7 +194,6 @@ export function DiffSettingsControls({
     );
   }
 
-  if (!portalTarget) return null;
   const rows: { label: string; control: ReactNode }[] = [
     { label: "View", control: renderViewModeToggle() },
     { label: "Font size", control: renderFontSizeSelect() },
@@ -198,17 +202,21 @@ export function DiffSettingsControls({
     { label: "Whitespace", control: renderIgnoreWhitespaceButton() },
   ].filter((r) => r.control);
 
-  const menu = (
+  return (
     <div ref={rootRef} className="relative">
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
         title="Diff settings"
         aria-label="Diff settings"
         aria-expanded={open}
-        className={`flex h-7 w-7 items-center justify-center rounded-md border text-[15px] transition-colors ${
-          open
-            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
-            : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
+        className={`${GEAR_CLASS} ${
+          disabled
+            ? "cursor-default border-[var(--border)] text-[var(--text-tertiary)] opacity-40"
+            : open
+              ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)]"
+              : "border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text)]"
         }`}
       >
         ⚙
@@ -230,6 +238,4 @@ export function DiffSettingsControls({
       )}
     </div>
   );
-
-  return createPortal(menu, portalTarget);
 }
