@@ -51,7 +51,7 @@ const vscodeCli = (bin: string) => ({
 
 /**
  * The apps we know how to open things in. Hardcoded, like every editor picker
- * of this kind (t3code keeps the same table) — the OS can enumerate installed
+ * of this kind — the OS can enumerate installed
  * apps but not say which ones are sensible targets for a repo. Entries the
  * user doesn't have are dropped at detection time, so an unused row costs one
  * Spotlight query at startup and nothing after.
