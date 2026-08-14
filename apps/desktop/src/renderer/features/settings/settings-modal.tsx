@@ -142,6 +142,8 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                 min={PROSE_SIZE_MIN}
                 max={PROSE_SIZE_MAX}
                 step={1}
+                minLabel={`${PROSE_SIZE_MIN}px`}
+                maxLabel={`${PROSE_SIZE_MAX}px`}
                 formatValue={(size) => `${size}px`}
               />
             </div>

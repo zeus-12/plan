@@ -40,7 +40,7 @@ export const PROSE_FONTS: ProseFontOption[] = [
 ];
 
 /** Body size range, in px — the slider steps through it one pixel at a time. */
-export const PROSE_SIZE_MIN = 12;
+export const PROSE_SIZE_MIN = 14;
 export const PROSE_SIZE_MAX = 18;
 
 export interface ProseBrightnessOption {

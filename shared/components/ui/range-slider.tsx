@@ -8,23 +8,18 @@ import { cn } from "../../lib/utils";
 // Their springs are reproduced inline rather than pulled from `motion`, which
 // this repo does not depend on.
 
-const TRACK_HEIGHT = 20;
-const THUMB_HEIGHT = 25;
-const THUMB_WIDTH = 6;
+const TRACK_HEIGHT = 34;
+const THUMB_HEIGHT = 18;
+const THUMB_WIDTH = 3;
 
 /** Position: overdamped (ratio 1.34), so it tracks the pointer without rebound. */
 const SPRING_GLIDE = { stiffness: 700, damping: 50, mass: 0.5 };
 /** Grab feedback on the thumb's scaleY only, never on position. */
 const SPRING_BOUNCY = { stiffness: 500, damping: 14, mass: 0.7 };
 
-// BeUI grows the thumb by 7px on a 40px track — 17.5% of track height. Holding
-// that ratio at 20px gives 3.5px, so 25px of thumb presses to 28.5px. Their
-// literal 1.35 would reach 33.75px here and read as a lurch.
+// BeUI grows the thumb by 17.5% of the track height on press. At 34px that is
+// 5.95px, so 18px of thumb presses to 24px and still clears the track.
 const PRESS_SCALE = 1 + (TRACK_HEIGHT * 0.175) / THUMB_HEIGHT;
-
-const ROW_HEIGHT = Math.ceil(
-  Math.max(TRACK_HEIGHT, THUMB_HEIGHT * PRESS_SCALE),
-);
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
@@ -123,6 +118,10 @@ interface Props {
   max: number;
   step?: number;
   label?: string;
+  /** End caption inside the track, at the `min` end. */
+  minLabel?: string;
+  /** End caption inside the track, at the `max` end. */
+  maxLabel?: string;
   formatValue?: (value: number) => string;
   className?: string;
 }
@@ -134,16 +133,22 @@ export function RangeSlider({
   max,
   step = 1,
   label,
+  minLabel,
+  maxLabel,
   formatValue,
   className,
 }: Props) {
-  const rootRef = React.useRef<HTMLDivElement>(null);
+  const trackRef = React.useRef<HTMLDivElement>(null);
+  const travelRef = React.useRef<HTMLDivElement>(null);
   const fillRef = React.useRef<HTMLDivElement>(null);
   const thumbRef = React.useRef<HTMLDivElement>(null);
   const draggingRef = React.useRef(false);
 
   const posRef = React.useRef(0);
   const scaleRef = React.useRef(1);
+  // The fill runs from the track's edge, the thumb only across the travel span
+  // between the captions — so the fill needs that offset in pixels.
+  const geomRef = React.useRef({ inset: 0, span: 0 });
   const posSpring = React.useRef<ReturnType<typeof createSpring> | null>(null);
   const scaleSpring = React.useRef<ReturnType<typeof createSpring> | null>(
     null,
@@ -153,16 +158,30 @@ export function RangeSlider({
 
   const paint = React.useCallback(() => {
     const p = posRef.current;
-    if (fillRef.current) fillRef.current.style.width = `${p}%`;
+    const { inset, span } = geomRef.current;
+    if (fillRef.current) {
+      const center = (p / 100) * (span - THUMB_WIDTH) + THUMB_WIDTH / 2;
+      fillRef.current.style.width = `${inset + center}px`;
+    }
     if (thumbRef.current) {
       thumbRef.current.style.left = `${p}%`;
-      // Self-offset by -p% of the thumb's own width keeps it inside the track
+      // Self-offset by -p% of the thumb's own width keeps it inside the span
       // at both ends — flush left at 0, flush right at 100, no clip, no gap.
       thumbRef.current.style.transform = `translate(${-p}%, -50%) scaleY(${scaleRef.current})`;
     }
   }, []);
 
   React.useEffect(() => {
+    const measure = () => {
+      const track = trackRef.current;
+      const travel = travelRef.current;
+      if (!track || !travel) return;
+      const t = track.getBoundingClientRect();
+      const s = travel.getBoundingClientRect();
+      geomRef.current = { inset: s.left - t.left, span: s.width };
+      paint();
+    };
+
     posSpring.current = createSpring(percent, SPRING_GLIDE, (p) => {
       posRef.current = p;
       paint();
@@ -173,6 +192,10 @@ export function RangeSlider({
     });
     posSpring.current.jump(percent);
 
+    const ro = new ResizeObserver(measure);
+    if (trackRef.current) ro.observe(trackRef.current);
+    if (travelRef.current) ro.observe(travelRef.current);
+
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => {
       posSpring.current?.setReduced(mq.matches);
@@ -182,6 +205,7 @@ export function RangeSlider({
     mq.addEventListener("change", sync);
 
     return () => {
+      ro.disconnect();
       mq.removeEventListener("change", sync);
       posSpring.current?.stop();
       scaleSpring.current?.stop();
@@ -197,7 +221,7 @@ export function RangeSlider({
 
   const commitFromX = React.useCallback(
     (clientX: number) => {
-      const rect = rootRef.current?.getBoundingClientRect();
+      const rect = travelRef.current?.getBoundingClientRect();
       if (!rect || rect.width === 0) return;
       const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
       const next = snapValue(min + ratio * (max - min), min, max, step);
@@ -244,31 +268,33 @@ export function RangeSlider({
   };
 
   const stops = Math.floor(Number(((max - min) / step).toFixed(6))) + 1;
+  const caption =
+    "relative shrink-0 font-[family-name:var(--font-mono)] text-[11px] leading-none text-[var(--text-tertiary)]";
 
   return (
     <div
-      ref={rootRef}
+      ref={trackRef}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onLostPointerCapture={endDrag}
-      style={{ height: ROW_HEIGHT }}
+      style={{ height: TRACK_HEIGHT }}
       className={cn(
-        "relative flex w-full cursor-grab touch-none items-center select-none active:cursor-grabbing",
+        "relative flex w-full cursor-grab touch-none items-center overflow-hidden rounded-[11px] border border-[var(--text)]/[0.08] bg-[var(--text)]/[0.05] select-none active:cursor-grabbing has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[var(--accent)]",
         className,
       )}
     >
-      {/* Clipping is confined to this box: the thumb is taller than the track
-          and would be sliced if it lived inside an overflow-hidden parent. */}
       <div
-        style={{ height: TRACK_HEIGHT }}
-        className="relative w-full overflow-hidden rounded-lg bg-[var(--bg-surface)]"
-      >
-        <div
-          ref={fillRef}
-          className="absolute inset-y-0 left-0 bg-[var(--text)]/15"
-        />
+        ref={fillRef}
+        className="absolute inset-y-0 left-0 bg-[var(--text)]/[0.07]"
+      />
+
+      {minLabel && (
+        <span className={cn(caption, "pr-2.5 pl-3")}>{minLabel}</span>
+      )}
+
+      <div ref={travelRef} className="relative h-full flex-1">
         {/* Inset by half a thumb — the span the thumb's centre actually travels,
             so every dot sits exactly where the thumb lands. */}
         <div
@@ -278,26 +304,30 @@ export function RangeSlider({
           {Array.from({ length: stops }, (_, i) => (
             <span
               key={i}
-              className="absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--text)]/25"
+              className="absolute top-1/2 size-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--text)]/20"
               style={{ left: `${(i / (stops - 1)) * 100}%` }}
             />
           ))}
         </div>
+
+        <div
+          ref={thumbRef}
+          role="slider"
+          tabIndex={0}
+          aria-label={label}
+          aria-valuemin={min}
+          aria-valuemax={max}
+          aria-valuenow={value}
+          aria-valuetext={formatValue?.(value)}
+          onKeyDown={onKeyDown}
+          style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
+          className="absolute top-1/2 rounded-full bg-[var(--text)] outline-none"
+        />
       </div>
 
-      <div
-        ref={thumbRef}
-        role="slider"
-        tabIndex={0}
-        aria-label={label}
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={value}
-        aria-valuetext={formatValue?.(value)}
-        onKeyDown={onKeyDown}
-        style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
-        className="absolute top-1/2 rounded-[3px] bg-[var(--text)] shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-      />
+      {maxLabel && (
+        <span className={cn(caption, "pr-3 pl-2.5")}>{maxLabel}</span>
+      )}
     </div>
   );
 }
