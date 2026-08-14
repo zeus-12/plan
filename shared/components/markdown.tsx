@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSendToTerminal } from "./send-to-terminal";
 import {
@@ -455,12 +455,19 @@ export const Markdown = memo(function Markdown({
         color: "var(--prose-fg, var(--text))",
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
   );
 });
+
+// GFM strikes through `~one~` as well as `~~two~~`. Single tildes show up in
+// ordinary prose (paths, ranges, approximations), so only the doubled form is
+// treated as strikethrough here.
+const REMARK_PLUGINS: Options["remarkPlugins"] = [
+  [remarkGfm, { singleTilde: false }],
+];
 
 type Props<T extends ElementType> = ComponentPropsWithoutRef<T>;
 
