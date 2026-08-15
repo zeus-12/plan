@@ -3,6 +3,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -64,6 +65,9 @@ export interface TextFind {
   query: string;
   options: FindOptions;
   matches: FindMatch[];
+  /** Increments on next/prev only, so a surface can scroll on navigation
+   *  without scrolling on every keystroke. */
+  navSeq: number;
   /** Index of the active match (0-based), or -1 when there are none. */
   current: number;
   setQuery: (q: string) => void;
@@ -87,7 +91,13 @@ export interface TextFind {
  * the user actually opens find. Pass a memoized callback so its identity only
  * changes when the underlying text does.
  */
-export function useTextFind(source: string | (() => string)): TextFind {
+export function useTextFind(
+  source: string | (() => string),
+  /** Which match to select when the query or options change. Editors land on
+   *  the match nearest what you are looking at rather than the top of the
+   *  document; without this every keystroke jumps to the first result. */
+  pickInitial?: (matches: FindMatch[]) => number,
+): TextFind {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<FindOptions>({
@@ -96,6 +106,9 @@ export function useTextFind(source: string | (() => string)): TextFind {
     regex: false,
   });
   const [current, setCurrent] = useState(0);
+  // Bumped only by next/prev. Typing reselects the nearest match so the count
+  // reads correctly, but must not drag the view somewhere else mid-word.
+  const [navSeq, setNavSeq] = useState(0);
 
   // Only materialize the searchable text while open; closed find does no work
   // even as the underlying content (source identity) changes.
@@ -110,10 +123,13 @@ export function useTextFind(source: string | (() => string)): TextFind {
     [open, text, deferredQuery, options],
   );
 
-  // New query/options → jump back to the first match.
+  // New query/options → reselect. `pickInitial` is read through a ref so a
+  // caller can pass an inline function without re-running this every render.
+  const pickRef = useRef(pickInitial);
+  pickRef.current = pickInitial;
   useEffect(() => {
-    setCurrent(0);
-  }, [deferredQuery, options]);
+    setCurrent(matches.length ? (pickRef.current?.(matches) ?? 0) : 0);
+  }, [deferredQuery, options, matches]);
 
   const toggle = useCallback(
     (key: keyof FindOptions) => setOptions((o) => ({ ...o, [key]: !o[key] })),
@@ -122,6 +138,9 @@ export function useTextFind(source: string | (() => string)): TextFind {
 
   const show = useCallback((seed?: string) => {
     setOpen(true);
+    // A fresh find session must not replay the last navigation of the previous
+    // one, which would scroll to a match from minutes ago.
+    setNavSeq(0);
     if (seed != null && seed !== "") setQuery(seed);
   }, []);
 
@@ -129,12 +148,14 @@ export function useTextFind(source: string | (() => string)): TextFind {
 
   const next = useCallback(() => {
     setCurrent((c) => (matches.length ? (c + 1) % matches.length : 0));
+    setNavSeq((n) => n + 1);
   }, [matches.length]);
 
   const prev = useCallback(() => {
     setCurrent((c) =>
       matches.length ? (c - 1 + matches.length) % matches.length : 0,
     );
+    setNavSeq((n) => n + 1);
   }, [matches.length]);
 
   return {
@@ -142,6 +163,7 @@ export function useTextFind(source: string | (() => string)): TextFind {
     query,
     options,
     matches,
+    navSeq,
     current: matches.length ? Math.min(current, matches.length - 1) : -1,
     setQuery,
     toggle,

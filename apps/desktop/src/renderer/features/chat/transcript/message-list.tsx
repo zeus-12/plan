@@ -56,6 +56,7 @@ import {
   parsePlanInput,
   type PlanVersionInfo,
 } from "./plan-card";
+import { useRowWindow } from "./row-window";
 import { TurnFilesStrip, turnFileChangesByRow } from "./turn-files";
 import { parseSendUserFile } from "./sent-file";
 import { SentFileBlock } from "./sent-file-row";
@@ -1710,11 +1711,24 @@ export const MessageList = memo(function MessageList({
     return out;
   }, [items]);
 
-  // Not virtualized: chat sessions are bounded, and virtualization with
-  // dynamic (markdown) heights re-measures rows above the viewport, which
-  // shifts the scroll position — the "jumps as you scroll up" glitch. Natural
-  // flow keeps the scroll perfectly stable.
+  // Every row stays mounted — find, comment selection, annotations and the
+  // message rail all read this DOM. What varies is which rows are RENDERED:
+  // see useRowWindow, which reserves a measured height for the rest.
   const contentRef = useRef<HTMLDivElement>(null);
+  // The find indexer renders a slice at a time to read its text. Declared here
+  // because the window is built before `find` further down.
+  const [findForceRange, setFindForceRange] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [indexing, setIndexing] = useState(false);
+  const rowWindow = useRowWindow(
+    parentRef,
+    contentRef,
+    items,
+    findForceRange,
+    indexing,
+  );
   const scrollKey = sessionId ? chatScrollKey(encoded, sessionId) : null;
   const scrollKeyRef = useRef<string | null>(null);
   // Anchor to restore to (null = never scrolled this session, or it was left at
@@ -1809,6 +1823,14 @@ export const MessageList = memo(function MessageList({
     };
   }, []);
 
+  // Pick the render window BEFORE anything reads layout. The restore below
+  // reads scrollHeight, and that first read lays out whatever is rendered at
+  // the time — every row, if this has not run yet.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    rowWindow.sync();
+  }, [visible, items, rowWindow]);
+
   // Restore on mount and every time the pane comes back on screen — a hidden
   // pane has no layout box, so the browser drops its scroll offset.
   useLayoutEffect(() => {
@@ -1830,12 +1852,14 @@ export const MessageList = memo(function MessageList({
     if (!content) return;
     const ro = new ResizeObserver(() => {
       if (!visibleRef.current) return;
+      // A row that just grew (shiki, an image) has a stale reservation.
+      rowWindow.schedule();
       if (followingBottomRef.current) applyScrollTarget();
       else if (performance.now() < settleUntilRef.current) applyScrollTarget();
     });
     ro.observe(content);
     return () => ro.disconnect();
-  }, [applyScrollTarget]);
+  }, [applyScrollTarget, rowWindow]);
 
   // Record the position so returning to this chat resumes where it was left.
   // scrollTop lands on every event (cheap); the anchor row is sampled once
@@ -2076,70 +2100,245 @@ export const MessageList = memo(function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealAnnNonce]);
 
-  /* ── In-view find (⌘F) ──────────────────────────────────────── */
+  /* ── In-view find (⌘F) ──────────────────────────────────────────────────
+   * Searching used to mount every row so it could read the DOM, which left the
+   * whole transcript rendered for the entire find session — every keystroke
+   * then paid a full style pass (~850ms on 1,792 rows).
+   *
+   * The chat is indexed ONCE instead, in chunks: a slice of rows is rendered,
+   * its real text is read and cached against the message object, the slice is
+   * released. Searching runs on that cache and the transcript stays windowed.
+   * Text still comes from rendered DOM, so `data-find-skip` and markdown output
+   * mean exactly what they did before.
+   */
+  const rowText = useRef(new WeakMap<object, string>());
+  const rowStarts = useRef<number[]>([]);
+  const [findText, setFindText] = useState("");
+  const [indexCursor, setIndexCursor] = useState(0);
 
-  // The transcript is plain rendered DOM (not virtualized), so we search the
-  // concatenated visible text and paint matches with the CSS Custom Highlight
-  // API — no DOM splitting, every match found.
-  const [findDomText, setFindDomText] = useState("");
-  const find = useTextFind(findDomText);
+  /** Which row a global offset falls in. */
+  const rowOfOffset = useCallback((offset: number) => {
+    const st = rowStarts.current;
+    let lo = 0;
+    let hi = st.length - 1;
+    let ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (st[mid] <= offset) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return ans;
+  }, []);
+
+  // Start at the match nearest what the reader is looking at, the way an editor
+  // does, instead of jumping to the top of the chat on every keystroke.
+  const pickNearest = useCallback((matches: { start: number }[]) => {
+    const el = parentRef.current;
+    if (!el || matches.length === 0) return 0;
+    const rows =
+      contentRef.current?.querySelectorAll<HTMLElement>("[data-msg-row]");
+    if (!rows || rows.length === 0) return 0;
+    const base = contentRef.current?.offsetTop ?? 0;
+    const top = el.scrollTop;
+    // First row at or below the viewport top, by its real position.
+    let lo = 0;
+    let hi = rows.length - 1;
+    let firstVisible = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (rows[mid].offsetTop - base + rows[mid].offsetHeight > top) {
+        firstVisible = mid;
+        hi = mid - 1;
+      } else lo = mid + 1;
+    }
+    const wantOffset = rowStarts.current[firstVisible] ?? 0;
+    const at = matches.findIndex((m) => m.start >= wantOffset);
+    return at === -1 ? matches.length - 1 : at;
+  }, []);
+
+  const find = useTextFind(findText, pickNearest);
   const [findReveal, setFindReveal] = useState(0);
-  // Text-node segments captured alongside `findDomText`, so a match offset maps
-  // back to a DOM Range (and tool-call args excluded via `data-find-skip`).
-  const findSegsRef = useRef<TextSegment[]>([]);
+  const [findPaintNonce, setFindPaintNonce] = useState(0);
 
-  // (Re)snapshot the transcript text whenever find is open and the content
-  // settles, so offsets line up with what's currently on screen. The snapshot
-  // walks every text node — O(DOM size) — so we DON'T run it synchronously on
-  // the keypress that opens find (that was the lag on long transcripts), and we
-  // coalesce re-walks while a session streams. A short debounce both defers the
-  // first walk off the open frame and collapses a burst of streaming updates
-  // into one rebuild; transcript updates land ~quarter-second apart, so it
-  // settles between them rather than starving.
+  // Small chunks: the cost is rendering each row once, so the total is fixed
+  // and the only choice is how much of it lands in a single frame. 60 rows put
+  // 299ms in one frame; 12 keeps every frame short enough to stay smooth.
+  const INDEX_CHUNK = 12;
+  useEffect(() => {
+    setFindForceRange(
+      indexing
+        ? {
+            start: indexCursor,
+            end: Math.min(indexCursor + INDEX_CHUNK, items.length),
+          }
+        : null,
+    );
+  }, [indexing, indexCursor, items.length]);
+
+  const rebuildFindText = useCallback(() => {
+    let acc = 0;
+    const starts: number[] = [];
+    const parts: string[] = [];
+    for (const m of items) {
+      starts.push(acc);
+      const t = rowText.current.get(m) ?? "";
+      parts.push(t);
+      acc += t.length + 1; // newline separator keeps a match inside one row
+    }
+    rowStarts.current = starts;
+    setFindText(parts.join("\n"));
+  }, [items]);
+
+  // Index when find opens, and only the rows not already cached.
   useEffect(() => {
     if (!find.open) {
-      setFindDomText("");
-      findSegsRef.current = [];
+      setIndexing(false);
       return;
     }
-    const id = setTimeout(() => {
-      const el = parentRef.current;
-      if (!el) return;
-      const { text, segs } = collectTextSegments(el, FIND_SKIP);
-      findSegsRef.current = segs;
-      setFindDomText(text);
-    }, 120);
-    return () => clearTimeout(id);
-  }, [find.open, items, deferredMessages]);
+    const firstMissing = items.findIndex((m) => !rowText.current.has(m));
+    if (firstMissing === -1) {
+      rebuildFindText();
+      return;
+    }
+    setIndexCursor(firstMissing);
+    setIndexing(true);
+  }, [find.open, items, rebuildFindText]);
 
-  // Paint all matches; the active one gets the stronger highlight.
+  // Harvest the slice that was just rendered, then move on. A layout effect, so
+  // a chunk is read before it can be released again.
+  useLayoutEffect(() => {
+    const range = findForceRange;
+    if (!range || !indexing) return;
+    const content = contentRef.current;
+    if (!content) return;
+    const rows = content.querySelectorAll<HTMLElement>("[data-msg-row]");
+    for (let i = range.start; i < range.end && i < rows.length; i++) {
+      const m = items[i];
+      if (!m || rowText.current.has(m)) continue;
+      rowText.current.set(m, textOf(rows[i], FIND_SKIP));
+    }
+    const nextMissing = items.findIndex(
+      (m, i) => i >= range.end && !rowText.current.has(m),
+    );
+    if (range.end >= items.length || nextMissing === -1) {
+      setIndexing(false);
+      rebuildFindText();
+      return;
+    }
+    const raf = requestAnimationFrame(() => setIndexCursor(nextMissing));
+    return () => cancelAnimationFrame(raf);
+  }, [findForceRange, indexing, items, rebuildFindText]);
+
+  /** A DOM Range for a match, when its row is rendered. */
+  const rangeForMatch = useCallback(
+    (m: { start: number; end: number }) => {
+      const content = contentRef.current;
+      if (!content) return null;
+      const row = rowOfOffset(m.start);
+      const el = content.querySelectorAll<HTMLElement>("[data-msg-row]")[row];
+      if (!el || el.children.length === 0) return null;
+      const base = rowStarts.current[row] ?? 0;
+      return rangeForOffsets(el, m.start - base, m.end - base, FIND_SKIP);
+    },
+    [rowOfOffset],
+  );
+
+  // Paint the matches near the viewport. Every range added to a Highlight
+  // invalidates paint document-wide, so a broad query in a long chat costs
+  // milliseconds per match; the count and next/prev still use every match.
   useEffect(() => {
     const hl = getFindHighlights();
     if (!hl) return;
     hl.match.clear();
     hl.current.clear();
     if (!find.open) return;
+    const root = parentRef.current;
+    const content = contentRef.current;
+    if (!root || !content) return;
+    const rows = content.querySelectorAll<HTMLElement>("[data-msg-row]");
+    const base = content.offsetTop;
+    const top = root.scrollTop - root.clientHeight;
+    const bottom = root.scrollTop + 2 * root.clientHeight;
     find.matches.forEach((m, i) => {
-      const r = rangeFromSegments(findSegsRef.current, m.start, m.end);
+      const rowIdx = rowOfOffset(m.start);
+      const el = rows[rowIdx];
+      if (!el || el.children.length === 0) return;
+      const elTop = el.offsetTop - base;
+      if (
+        i !== find.current &&
+        (elTop + el.offsetHeight < top || elTop > bottom)
+      )
+        return;
+      const r = rangeForMatch(m);
       if (r) (i === find.current ? hl.current : hl.match).add(r);
     });
-  }, [find.open, find.matches, find.current, findDomText]);
+  }, [
+    find.open,
+    find.matches,
+    find.current,
+    findText,
+    findPaintNonce,
+    rowOfOffset,
+    rangeForMatch,
+  ]);
 
-  // Center the active match in the viewport as the user steps through.
+  // Repaint the band as the reader scrolls, so matches appear as they arrive.
   useEffect(() => {
-    if (!find.open || find.current < 0) return;
-    const root = parentRef.current;
+    const el = parentRef.current;
+    if (!el || !find.open) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setFindPaintNonce((n) => n + 1);
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [find.open]);
+
+  // Bring the active match into view on NAVIGATION only. Typing reselects the
+  // nearest match so the counter reads right, and scrolling on every keystroke
+  // is what made the chat jump to another message mid-word.
+  const revealedSeq = useRef(0);
+  useEffect(() => {
+    if (!find.open || find.current < 0 || indexing) return;
+    // Only an INCREASE means the reader just pressed next/prev. Comparing
+    // against zero replays the previous session's last jump on reopen.
+    if (find.navSeq === revealedSeq.current) return;
+    revealedSeq.current = find.navSeq;
     const m = find.matches[find.current];
-    if (!root || !m) return;
-    const r = rangeFromSegments(findSegsRef.current, m.start, m.end);
-    const rect = r?.getBoundingClientRect();
-    if (!rect) return;
-    const pr = root.getBoundingClientRect();
-    if (rect.top < pr.top || rect.bottom > pr.bottom) {
-      root.scrollTop += rect.top - pr.top - pr.height / 2 + rect.height / 2;
-    }
+    const root = parentRef.current;
+    if (!m || !root) return;
+    const rowIdx = rowOfOffset(m.start);
+    const message = items[rowIdx] as { uuid?: string } | undefined;
+    const uuid = message?.uuid;
+    let tries = 0;
+    let raf = 0;
+    const settle = () => {
+      const r = rangeForMatch(m);
+      const rect = r?.getBoundingClientRect();
+      if (rect && rect.height > 0) {
+        const pr = root.getBoundingClientRect();
+        if (rect.top < pr.top || rect.bottom > pr.bottom) {
+          root.scrollTop += rect.top - pr.top - pr.height / 2 + rect.height / 2;
+        }
+        setFindPaintNonce((n) => n + 1);
+        return;
+      }
+      if (tries === 0 && uuid) rowWindow.scrollToRow(uuid);
+      if (tries++ < 20) raf = requestAnimationFrame(settle);
+    };
+    raf = requestAnimationFrame(settle);
+    return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [find.open, find.current, find.matches]);
+  }, [find.open, find.navSeq, indexing]);
 
   // Clear the painted highlights when this component unmounts.
   useEffect(() => {
@@ -2185,18 +2384,32 @@ export const MessageList = memo(function MessageList({
   return (
     <>
       <div className="relative h-full">
-        <FindWidget find={find} revealTrigger={findReveal} />
-        {!find.open && (
+        {/* Clear of the message rail (26px wide, 12px inset) so neither the
+            rail nor the widget has to move when find opens. */}
+        <FindWidget
+          find={find}
+          revealTrigger={findReveal}
+          rightPx={48}
+          status={
+            indexing
+              ? `Indexing ${Math.min(99, Math.round((indexCursor / Math.max(1, items.length)) * 100))}%`
+              : undefined
+          }
+        />
+        {items.length > 0 && (
           <UserMessageOverview
             messages={items}
             abortedUuids={abortedPrompts}
             scrollRef={parentRef}
+            onJump={rowWindow.scrollToRow}
           />
         )}
         <div
           ref={parentRef}
           data-tight-selection
-          className="chat-transcript h-full overflow-auto pt-3 pb-6"
+          // overflow-anchor:none — useRowWindow absorbs height changes above the
+          // reader itself; Blink correcting the same shift again doubles it.
+          className="chat-transcript h-full overflow-auto pt-3 pb-6 [overflow-anchor:none]"
         >
           {/* Reading column (ChatGPT-style): each row centers itself and caps
             its width for readability while the scrollbar stays at the pane edge.
@@ -2204,6 +2417,19 @@ export const MessageList = memo(function MessageList({
             can opt out and run full-width, like the diff/file tabs do. */}
           <div ref={contentRef} className="w-full">
             {items.map((m, idx) => {
+              // Rows far from the viewport render nothing and just hold their
+              // place. Building every row's content up front is what froze the
+              // click that opens a chat, so nothing above this line may do
+              // per-row work.
+              if (!rowWindow.shows(idx)) {
+                return (
+                  <div
+                    key={m.uuid || idx}
+                    data-msg-row={m.uuid}
+                    style={rowWindow.reserve(idx)}
+                  />
+                );
+              }
               const partMap = annotationsByMessage.get(m.uuid);
               const showHeader = showHeaderForRow[idx];
               // A plan card that has a prior version opens on its diff; let that
@@ -2223,11 +2449,8 @@ export const MessageList = memo(function MessageList({
                   key={m.uuid || idx}
                   data-msg-row={m.uuid}
                   className={cn(
-                    // content-visibility lets the browser skip layout/paint of
-                    // off-screen rows — width changes (sidebar toggles) would
-                    // otherwise reflow the entire transcript.
                     // scroll-mt keeps a jumped-to message off the very top edge.
-                    "group flex w-full justify-center px-4 scroll-mt-3 [content-visibility:auto] [contain-intrinsic-block-size:auto_140px]",
+                    "group flex w-full justify-center px-4 scroll-mt-3",
                     showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
                     // Assistant rows: the whole full-width band is a selection
                     // surface (not just the text), so a drag started in the empty

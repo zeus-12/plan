@@ -14,9 +14,18 @@ import type { TextFind } from "../lib/text/use-text-find";
 export function FindWidget({
   find,
   revealTrigger,
+  rightPx = 12,
+  status,
 }: {
   find: TextFind;
   revealTrigger: number;
+  /** Shown in place of the count while the surface is still building its
+   *  index, so a long chat reads as working rather than as empty. */
+  status?: string;
+  /** Distance from the pane's right edge. Panes with their own right-edge
+   *  furniture (the chat's message rail) push the widget clear of it, so
+   *  neither has to move when find opens. */
+  rightPx?: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,7 +52,8 @@ export function FindWidget({
 
   return (
     <div
-      className="absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-1 shadow-xl"
+      className="absolute top-3 z-30 flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-1 shadow-xl"
+      style={{ right: rightPx }}
       // Keep clicks/selection inside the widget from bubbling to the pane.
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -90,8 +100,13 @@ export function FindWidget({
         </Toggle>
       </div>
 
-      <span className="min-w-[64px] px-1 text-center font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-[var(--text-tertiary)]">
-        {count}
+      <span
+        className={cn(
+          "w-[78px] shrink-0 whitespace-nowrap px-1 text-center font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-[var(--text-tertiary)]",
+          status && "animate-pulse",
+        )}
+      >
+        {status ?? count}
       </span>
 
       <IconBtn

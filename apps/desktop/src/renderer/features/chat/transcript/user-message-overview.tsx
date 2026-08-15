@@ -34,6 +34,8 @@ interface Props {
   abortedUuids: Set<string>;
   /** Ref to the transcript's scrollable element (the one holding the rows). */
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  /** Jumps to a message and holds it there while the rows around it render. */
+  onJump: (uuid: string) => void;
 }
 
 function previewText(m: ConversationMessage): string {
@@ -62,6 +64,7 @@ export function UserMessageOverview({
   messages,
   abortedUuids,
   scrollRef,
+  onJump,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [activeUuid, setActiveUuid] = useState<string | null>(null);
@@ -188,15 +191,15 @@ export function UserMessageOverview({
     };
   }, [scrollRef, userMessages, uuidSet]);
 
+  // Not scrollIntoView: rows outside the render window sit at an estimated
+  // offset, so a one-shot jump lands near the target and then slides as the
+  // real heights arrive. The transcript owns the correction.
   const scrollTo = useCallback(
     (uuid: string) => {
-      const row = scrollRef.current?.querySelector<HTMLElement>(
-        `[data-msg-row="${CSS.escape(uuid)}"]`,
-      );
-      row?.scrollIntoView({ behavior: "smooth", block: "start" });
+      onJump(uuid);
       setOpen(false);
     },
-    [scrollRef],
+    [onJump],
   );
 
   const cancelClose = useCallback(() => {
