@@ -48,6 +48,7 @@ import { FindWidget } from "../find-widget";
 import { LineContent, EMPTY_TOKENS, EMPTY_HLS, type Hl } from "./line-content";
 import { MergeOverlay } from "./merge-overlay";
 import type { ExpandedSeparators } from "../../lib/diff/expanded-separators";
+import { useLineWindow } from "../../lib/diff/use-line-window";
 import { useReadonlyCaretHost } from "../../lib/diff/use-readonly-caret-host";
 
 /** Re-exported: HunkRange is part of the hunkActions contract below. */
@@ -463,6 +464,15 @@ export function InteractiveDiff({
     [expandedFiltered],
   );
 
+  // The element the diff scrolls inside. It is an ancestor the diff does not
+  // own, so it is resolved when the content node attaches — an effect can run
+  // before that node exists, and would then latch null forever.
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
+  const attachContent = useCallback((node: HTMLDivElement | null) => {
+    contentRef.current = node;
+    setScrollEl(node ? findScrollParent(node) : null);
+  }, []);
+
   // Per-view fold ranges over the displayed rows: which rows begin a fold and
   // which rows are hidden by the current collapse set. `key` is the row's
   // representative DiffLine.idx (−1 for separators, which never begin a fold).
@@ -490,6 +500,83 @@ export function InteractiveDiff({
       ),
     [splitRows, collapsedFolds],
   );
+
+  /**
+   * Rows that would actually render, after folds. Windowing counts these rather
+   * than raw indices: a collapsed fold removes rows from the document, and
+   * spacer heights computed from raw indices would reserve space for rows that
+   * are not there.
+   */
+  const unifiedVisible = useMemo(
+    () =>
+      expandedFiltered
+        .map((_, i) => i)
+        .filter((i) => !unifiedFold.hidden.has(i)),
+    [expandedFiltered, unifiedFold],
+  );
+  const splitVisible = useMemo(
+    () => splitRows.map((_, i) => i).filter((i) => !splitFold.hidden.has(i)),
+    [splitRows, splitFold],
+  );
+
+  // One window per view. Only the active one drives anything, but both are
+  // hooks, so both are called every render.
+  // Everything that changes a row's height without changing which row it is.
+  const rowLayoutToken = `${settings.fontSize}|${settings.lineWrap}|${annotations.length}`;
+  const unifiedWindow = useLineWindow(
+    scrollEl,
+    unifiedVisible,
+    expandedFiltered,
+    rowLayoutToken,
+    "data-urow",
+    effectiveViewMode !== "split",
+  );
+  const splitWindow = useLineWindow(
+    scrollEl,
+    splitVisible,
+    splitRows,
+    rowLayoutToken,
+    "data-srow",
+    effectiveViewMode === "split",
+  );
+
+  const unifiedVisiblePos = useMemo(
+    () => new Map(unifiedVisible.map((rowIdx, pos) => [rowIdx, pos])),
+    [unifiedVisible],
+  );
+  const splitVisiblePos = useMemo(
+    () => new Map(splitVisible.map((rowIdx, pos) => [rowIdx, pos])),
+    [splitVisible],
+  );
+
+  // A diff line's index → the window index of the row that shows it. Anything
+  // that jumps to a line needs this: outside the window the row has no element
+  // to scroll to, so the window has to be moved first.
+  const windowIndexOfLine = useMemo(() => {
+    const map = new Map<number, number>();
+    if (effectiveViewMode === "split") {
+      splitRows.forEach((row, i) => {
+        if (row.type === "separator") return;
+        const pos = splitVisiblePos.get(i);
+        if (pos === undefined) return;
+        if (row.left) map.set(row.left.idx, pos);
+        if (row.right) map.set(row.right.idx, pos);
+      });
+    } else {
+      expandedFiltered.forEach((item, i) => {
+        if (item.type === "separator") return;
+        const pos = unifiedVisiblePos.get(i);
+        if (pos !== undefined) map.set(item.idx, pos);
+      });
+    }
+    return map;
+  }, [
+    effectiveViewMode,
+    splitRows,
+    splitVisiblePos,
+    expandedFiltered,
+    unifiedVisiblePos,
+  ]);
 
   /* ── In-view find (⌘F) ─────────────────────────────────────── */
 
@@ -604,16 +691,28 @@ export function InteractiveDiff({
     return () => window.removeEventListener("keydown", handler);
   }, [findEnabled, find]);
 
-  // Scroll the active match into view as the user steps through (not virtualized,
-  // so locate its row by data-dline and let the browser scroll it centered).
+  // Scroll the active match into view as the user steps through. The match can
+  // be thousands of rows away and therefore outside the render window, so ask
+  // the window to reveal it rather than looking for an element.
+  //
+  // Only when the ROW changes. Typing recomputes the match list on every
+  // keystroke, and re-revealing a row already on screen costs two forced
+  // layouts per character for no visible effect.
+  const revealedRow = useRef<number | null>(null);
   useEffect(() => {
-    if (!find.open || find.current < 0) return;
+    if (!find.open || find.current < 0) {
+      revealedRow.current = null;
+      return;
+    }
     const m = find.matches[find.current];
     if (!m) return;
     const li = visibleLines[findLineOfOffset(m.start)]?.idx;
     if (li == null) return;
-    const el = contentRef.current?.querySelector(`[data-dline="${li}"]`);
-    el?.scrollIntoView({ block: "center", behavior: "auto" });
+    const wi = windowIndexOfLine.get(li);
+    if (wi === undefined || wi === revealedRow.current) return;
+    revealedRow.current = wi;
+    if (effectiveViewMode === "split") splitWindow.reveal(wi);
+    else unifiedWindow.reveal(wi);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [find.open, find.current, find.matches]);
 
@@ -1322,6 +1421,18 @@ export function InteractiveDiff({
   useEffect(() => {
     if (!revealAnnotation) return;
     const { id } = revealAnnotation;
+    // Move the window onto the mark's row first. Outside it the row has no
+    // element, and no number of retries would make one appear.
+    const ann = annotationsRef.current.find((a) => a.id === id);
+    if (ann) {
+      const wi = windowIndexOfLine.get(
+        getDiffLineForOffset(ann.startOffset, dLines),
+      );
+      if (wi !== undefined) {
+        if (effectiveViewMode === "split") splitWindow.reveal(wi);
+        else unifiedWindow.reveal(wi);
+      }
+    }
     let expandTried = false;
     let frames = 0;
     let raf = requestAnimationFrame(function find() {
@@ -1559,11 +1670,29 @@ export function InteractiveDiff({
       <div ref={unifiedRef} {...editableHostProps} className={hostClassName}>
         <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
           <tbody>
+            {unifiedWindow.padTop > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={colCount}
+                  style={{ height: unifiedWindow.padTop }}
+                />
+              </tr>
+            )}
             {expandedFiltered.map((item, i) => {
               if (unifiedFold.hidden.has(i)) return null;
+              // Outside the window: the spacers above and below stand in for it,
+              // so the document keeps its height and the scrollbar its meaning.
+              const vi = unifiedVisiblePos.get(i);
+              if (
+                vi === undefined ||
+                vi < unifiedWindow.first ||
+                vi > unifiedWindow.last
+              ) {
+                return null;
+              }
               if (item.type === "separator") {
                 return (
-                  <tr key={`us${i}`}>
+                  <tr key={`us${i}`} data-urow={i}>
                     {renderSeparatorTd(
                       colCount,
                       item.hiddenCount,
@@ -1579,7 +1708,7 @@ export function InteractiveDiff({
 
               return (
                 <Fragment key={`u${i}`}>
-                  <tr data-dline={item.idx} className="group">
+                  <tr data-dline={item.idx} data-urow={i} className="group">
                     <td contentEditable={false} style={barCellStyle(vt)} />
                     {!isFirstVersion && (
                       <td
@@ -1632,7 +1761,7 @@ export function InteractiveDiff({
                     </td>
                   </tr>
                   {lineAnns?.map(({ annotation: ann, index }) => (
-                    <tr key={`cmt-${ann.id}`}>
+                    <tr key={`cmt-${ann.id}`} data-urow={i}>
                       <td
                         colSpan={colCount}
                         className="border-y border-[var(--border)] p-0"
@@ -1644,6 +1773,14 @@ export function InteractiveDiff({
                 </Fragment>
               );
             })}
+            {unifiedWindow.padBottom > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={colCount}
+                  style={{ height: unifiedWindow.padBottom }}
+                />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1657,10 +1794,11 @@ export function InteractiveDiff({
     side: "left" | "right",
     key: string,
     foldKey: number | null,
+    rowKey: number,
   ) {
     if (!line) {
       return (
-        <tr key={key}>
+        <tr key={key} data-srow={rowKey}>
           <td
             contentEditable={false}
             style={{
@@ -1689,7 +1827,7 @@ export function InteractiveDiff({
     const vt = visualType(line);
 
     return (
-      <tr key={key} data-dline={line.idx} className="group">
+      <tr key={key} data-dline={line.idx} data-srow={rowKey} className="group">
         <td
           contentEditable={false}
           className="diff-linenum"
@@ -1851,13 +1989,28 @@ export function InteractiveDiff({
       >
         <table className="min-w-full border-separate border-spacing-0 font-[family-name:var(--font-mono)]">
           <tbody>
+            {splitWindow.padTop > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={3} style={{ height: splitWindow.padTop }} />
+              </tr>
+            )}
             {splitRows.map((row, i) => {
               // Hidden by a fold — drop from BOTH columns (same index) so the
               // two panes stay aligned.
               if (splitFold.hidden.has(i)) return null;
+              // Outside the window: the spacers stand in for it. Both columns
+              // window identically, so the panes stay row-aligned.
+              const vi = splitVisiblePos.get(i);
+              if (
+                vi === undefined ||
+                vi < splitWindow.first ||
+                vi > splitWindow.last
+              ) {
+                return null;
+              }
               if (row.type === "separator") {
                 return (
-                  <tr key={`s${side}${i}`}>
+                  <tr key={`s${side}${i}`} data-srow={i}>
                     {renderSeparatorTd(3, row.hiddenCount, splitSepIndices[i])}
                   </tr>
                 );
@@ -1873,9 +2026,9 @@ export function InteractiveDiff({
 
               return (
                 <Fragment key={`${side}${i}`}>
-                  {renderSplitRow(line, side, `r${side}${i}`, foldKey)}
+                  {renderSplitRow(line, side, `r${side}${i}`, foldKey, i)}
                   {comments.map(({ annotation: ann, index: idx }) => (
-                    <tr key={`cmt-${side}-${ann.id}`}>
+                    <tr key={`cmt-${side}-${ann.id}`} data-srow={i}>
                       <td
                         colSpan={3}
                         className="border-y border-[var(--border)] p-0"
@@ -1894,6 +2047,11 @@ export function InteractiveDiff({
                 </Fragment>
               );
             })}
+            {splitWindow.padBottom > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={3} style={{ height: splitWindow.padBottom }} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1916,6 +2074,11 @@ export function InteractiveDiff({
     () => (effectiveViewMode === "unified" ? renderUnified() : null),
     [
       effectiveViewMode,
+      unifiedWindow.first,
+      unifiedWindow.last,
+      unifiedWindow.padTop,
+      unifiedWindow.padBottom,
+      unifiedVisiblePos,
       expandedFiltered,
       unifiedFold,
       isFirstVersion,
@@ -1940,6 +2103,11 @@ export function InteractiveDiff({
     () => (effectiveViewMode === "split" ? renderColumn("left") : null),
     [
       effectiveViewMode,
+      splitWindow.first,
+      splitWindow.last,
+      splitWindow.padTop,
+      splitWindow.padBottom,
+      splitVisiblePos,
       splitRows,
       splitFold,
       splitSepIndices,
@@ -1964,6 +2132,11 @@ export function InteractiveDiff({
     () => (effectiveViewMode === "split" ? renderColumn("right") : null),
     [
       effectiveViewMode,
+      splitWindow.first,
+      splitWindow.last,
+      splitWindow.padTop,
+      splitWindow.padBottom,
+      splitVisiblePos,
       splitRows,
       splitFold,
       splitSepIndices,
@@ -2108,7 +2281,7 @@ export function InteractiveDiff({
         </div>
       )}
       <div
-        ref={contentRef}
+        ref={attachContent}
         // Opt into the desktop tight drag-selection paint (live-selection-
         // mirror.ts): native ::selection is suppressed here and mirrored onto a
         // custom highlight so the drag reads tight, matching the committed

@@ -16,12 +16,23 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, sleep, type Session } from "./src/cdp.ts";
 import { launch, stop } from "./src/app.ts";
-import { coverage, drift, measureOpen } from "./src/checks.ts";
+import {
+  coverage,
+  drift,
+  foldHold,
+  foldSettle,
+  jumpBlank,
+  measureOpen,
+  parkReport,
+  parkWatch,
+} from "./src/checks.ts";
 import { findToggle, findType } from "./src/find.ts";
-import { CHAT, type SurfaceSpec } from "./src/surface.ts";
+import { applyConfig, describe, type DiffConfig } from "./src/settings.ts";
+import { CHAT, DIFF, type SurfaceSpec } from "./src/surface.ts";
 import {
   chatSession,
   repoFiles,
+  repoWithDiff,
   workspace,
   type Workspace,
 } from "./src/fixture.ts";
@@ -153,6 +164,15 @@ async function chatSuite(cdp: Session, s: SurfaceSpec) {
     },
   );
 
+  // A fling must never paint an empty band.
+  const jump = await jumpBlank(cdp, s, 40000);
+  check("a long scroll never paints a blank band", jump.blankFrames === 0, {
+    blankFrames: jump.blankFrames,
+    firstFramePct: jump.firstFramePct,
+    worstPct: jump.worstPct,
+    frames: jump.frames,
+  });
+
   // If this starts failing, the window stopped windowing and every timing above
   // is measuring the wrong thing.
   const windowed = await cdp.evaluate<{
@@ -175,11 +195,166 @@ async function chatSuite(cdp: Session, s: SurfaceSpec) {
   );
 }
 
+const FONT_SIZES = [11, 12, 13, 14, 15, 16];
+
+/**
+ * Every combination of the settings that change how a row is laid out.
+ *
+ * These are not independent. Wrap makes rows different heights; "All lines"
+ * makes the document twenty times longer; split runs two tables down one
+ * scroller; font size changes every height at once. A window is only correct if
+ * it is correct in all sixteen, so the matrix is exhaustive rather than
+ * sampled, and font size rotates through so each size appears.
+ */
+const MATRIX: DiffConfig[] = (() => {
+  const out: DiffConfig[] = [];
+  let n = 0;
+  for (const view of ["split", "unified"] as const)
+    for (const lines of ["changes", "all"] as const)
+      for (const wrap of [false, true])
+        for (const whitespace of [false, true])
+          out.push({
+            view,
+            lines,
+            wrap,
+            whitespace,
+            fontSize: FONT_SIZES[n++ % FONT_SIZES.length],
+          });
+  return out;
+})();
+
+/** Open the fixture's diff. */
+async function openDiff(cdp: Session) {
+  await clickText(cdp, "Diffs", 1500);
+  await clickText(cdp, "large.ts", 4000);
+}
+
+/** Send the reader deep into the file so checks run on a scrolled document. */
+async function scrollDeep(cdp: Session, s: SurfaceSpec, fraction = 0.45) {
+  await cdp.evaluate(`(() => {
+    const el = ${s.scroller};
+    if (el) el.scrollTop = Math.round((el.scrollHeight - el.clientHeight) * ${fraction});
+  })()`);
+  await sleep(1200);
+}
+
+/**
+ * The diff suite: every settings combination, then the heavy checks on the
+ * configurations that actually hurt.
+ */
+async function diffSuite(cdp: Session, s: SurfaceSpec) {
+  await openDiff(cdp);
+
+  for (const want of MATRIX) {
+    const label = describe(want);
+    const got = await applyConfig(cdp, want);
+    check(
+      `settings hold: ${label}`,
+      JSON.stringify(got) === JSON.stringify(want),
+      got,
+    );
+
+    await scrollDeep(cdp, s);
+
+    const cov = await coverage(cdp, s);
+    check(`no blank rows: ${label}`, cov.PASS, {
+      viewportRows: cov.viewportRows,
+      empty: cov.emptyInViewport,
+      rendered: cov.renderedRows,
+      scrollHeight: cov.scrollHeight,
+    });
+
+    // Left alone, the diff must be completely still. A window whose reserved
+    // heights depend on where the window is oscillates forever right here.
+    await parkWatch(cdp, s);
+    await sleep(2500);
+    const park = await parkReport(cdp);
+    check(
+      `stands still when parked: ${label}`,
+      park.distinctTopRows === 1 &&
+        park.scrollTopMoved === 0 &&
+        park.docHeightChanged === 0,
+      {
+        distinctTopRows: park.distinctTopRows,
+        scrollTopMoved: park.scrollTopMoved,
+        docHeightChanged: park.docHeightChanged,
+        frames: park.frames,
+      },
+    );
+  }
+
+  // The heavy checks, on "All lines" where the document is the whole file.
+  for (const view of ["unified", "split"] as const)
+    for (const wrap of [false, true]) {
+      const want: DiffConfig = {
+        view,
+        lines: "all",
+        wrap,
+        whitespace: false,
+        fontSize: 13,
+      };
+      const label = describe(want);
+      await applyConfig(cdp, want);
+      await scrollDeep(cdp, s, 0.5);
+
+      const fold = await foldHold(cdp, s);
+      check(
+        `folding leaves the reader in place: ${label}`,
+        fold.PASS === true || fold.skipped !== undefined,
+        fold,
+      );
+
+      // Where it ends up and how it gets there are different questions, and a
+      // view that lurches and comes back answers the first one perfectly.
+      for (const where of ["top", "below"] as const) {
+        await scrollDeep(cdp, s, 0.45);
+        const settle = await foldSettle(cdp, s, where);
+        check(
+          `folding never lurches (${where}): ${label}`,
+          settle.PASS === true || settle.skipped !== undefined,
+          settle.skipped
+            ? { skipped: settle.skipped }
+            : {
+                excursionPx: settle.excursionPx,
+                reversals: settle.reversals,
+                distinctOffsets: settle.distinctOffsets,
+                restPx: settle.restPx,
+              },
+        );
+      }
+
+      const jump = await jumpBlank(cdp, s, 40000);
+      check(
+        `a long scroll never paints a blank band: ${label}`,
+        jump.blankFrames === 0,
+        {
+          blankFrames: jump.blankFrames,
+          firstFramePct: jump.firstFramePct,
+          worstPct: jump.worstPct,
+        },
+      );
+
+      const typed = await findType(cdp, s, "reservation");
+      check(
+        `typing in find stays responsive: ${label}`,
+        typed.worstBlockedMs <= num("budget-key", 250),
+        {
+          worstBlockedMs: typed.worstBlockedMs,
+          counter: typed.counter,
+          rendered: typed.renderedRows,
+        },
+      );
+      await cdp.key("Escape");
+      await sleep(400);
+    }
+}
+
 async function main() {
   console.log(`building fixture: ${ROWS} rows -> ${DIR}`);
   const ws: Workspace = await workspace(DIR);
   const { sessionId } = await chatSession(ws, ROWS);
   await repoFiles(ws);
+  await repoWithDiff(ws, { lines: num("diff-lines", 3000), changed: 30 });
   const { writeProjects } = await import("./src/fixture.ts");
   await writeProjects(ws, { [sessionId]: "Fixture Chat" });
 
@@ -204,6 +379,7 @@ async function main() {
       throw new Error("not the fixture world — refusing to continue");
 
     await chatSuite(cdp, CHAT);
+    await diffSuite(cdp, DIFF);
   } finally {
     cdp.close();
     if (!KEEP) await stop(PORT).catch(() => undefined);

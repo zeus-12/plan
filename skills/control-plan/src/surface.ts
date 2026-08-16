@@ -22,6 +22,12 @@ export interface SurfaceSpec {
    * empty box for rows that are far away; this is what tells them apart.
    */
   filled: string;
+  /**
+   * Attribute naming a row's identity. A check that has to recognise the same
+   * row twice — across a scroll, a fold, a rewrite — reads this rather than
+   * holding the element, which windowing is free to unmount.
+   */
+  rowKey: string;
 }
 
 /** The chat transcript. */
@@ -30,6 +36,7 @@ export const CHAT: SurfaceSpec = {
   scroller: `[...document.querySelectorAll(".chat-transcript")].find((e) => e.clientHeight > 0)`,
   row: "[data-msg-row]",
   filled: "row.children.length > 0",
+  rowKey: "data-msg-row",
 };
 
 /**
@@ -47,8 +54,12 @@ export const DIFF: SurfaceSpec = {
     });
     return all.sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
   })()`,
-  row: "[data-dline]",
+  // `tr`, not any `[data-dline]`: the attribute is on the content cell too, and
+  // a cell is not a row — measuring one where a row is meant reads the wrong
+  // height and, in split view, picks a different element each time.
+  row: "tr[data-dline]",
   filled: "row.children.length > 0 || (row.textContent || '').length > 0",
+  rowKey: "data-dline",
 };
 
 export const SURFACES: Record<string, SurfaceSpec> = {

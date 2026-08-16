@@ -19,9 +19,27 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { connect, GuardFailure, sleep, type Session } from "./src/cdp.ts";
 import { doctor, launch, stop } from "./src/app.ts";
-import { coverage, drift, measureOpen } from "./src/checks.ts";
+import {
+  coverage,
+  drift,
+  foldHold,
+  foldSettle,
+  measureOpen,
+} from "./src/checks.ts";
 import { findToggle, findType } from "./src/find.ts";
+import {
+  applyConfig,
+  DEFAULT_CONFIG,
+  type DiffConfig,
+} from "./src/settings.ts";
 import { CHAT, surfaceByName, type SurfaceSpec } from "./src/surface.ts";
+import {
+  chatSession,
+  repoFiles,
+  repoWithDiff,
+  workspace,
+  writeProjects,
+} from "./src/fixture.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** This file ships inside the repo it drives: skills/control-plan → root. */
@@ -114,6 +132,23 @@ const commands: Record<string, () => Promise<void>> = {
 
   async stop() {
     out(await stop(PORT));
+  },
+
+  /** Build a synthetic world to launch against. Never touches real data. */
+  async fixture() {
+    const dir = str("dir", "/tmp/plan-fixture");
+    const ws = await workspace(dir);
+    const { sessionId, rows } = await chatSession(ws, num("rows", 1800));
+    await repoFiles(ws);
+    const diff =
+      flag("diff") === true
+        ? await repoWithDiff(ws, {
+            lines: num("diff-lines", 3000),
+            changed: num("diff-changed", 30),
+          })
+        : null;
+    await writeProjects(ws, { [sessionId]: "Fixture Chat" });
+    out({ ...ws, sessionId, rows, diff });
   },
 
   async doctor() {
@@ -245,6 +280,37 @@ const commands: Record<string, () => Promise<void>> = {
     const r = await withSession((cdp) => coverage(cdp, SURFACE));
     out({ surface: SURFACE.name, ...r });
     if (!r.PASS) process.exitCode = 1;
+  },
+
+  async settings() {
+    const on = (name: string, fallback: boolean) => {
+      const v = flag(name);
+      return v === undefined ? fallback : v === true || v === "on";
+    };
+    out(
+      await withSession((cdp) =>
+        applyConfig(cdp, {
+          view: str("view", DEFAULT_CONFIG.view) as DiffConfig["view"],
+          lines: str("lines", DEFAULT_CONFIG.lines) as DiffConfig["lines"],
+          wrap: on("wrap", DEFAULT_CONFIG.wrap),
+          whitespace: on("whitespace", DEFAULT_CONFIG.whitespace),
+          fontSize: num("font", DEFAULT_CONFIG.fontSize),
+        }),
+      ),
+    );
+  },
+
+  async fold() {
+    const r = await withSession((cdp) => foldHold(cdp, SURFACE));
+    out({ surface: SURFACE.name, ...r });
+    if (r.PASS === false) process.exitCode = 1;
+  },
+
+  async settle() {
+    const where = flag("where", "below") as "below" | "above";
+    const r = await withSession((cdp) => foldSettle(cdp, SURFACE, where));
+    out({ surface: SURFACE.name, where, ...r });
+    if (r.PASS === false) process.exitCode = 1;
   },
 
   async drift() {
@@ -394,6 +460,13 @@ LIFECYCLE
   launch [--mode dev|preview] [--build] [--home DIR]
   stop
   doctor                       read-only: visible? rAF live? which build?
+  settings [--view split|unified] [--lines changes|all]
+           [--wrap on|off] [--whitespace on|off] [--font N]
+  fold                         collapse a region; does the reader stay put?
+  settle [--where below|above] collapse a region; does the reader stay put on
+                               every frame, or lurch and come back?
+  fixture [--dir D] [--rows N] [--diff]
+                               build a synthetic world; pass its home to launch
 
 DRIVE
   eval --expr "<js>"           run JS in the page, print the value

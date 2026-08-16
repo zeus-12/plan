@@ -12,8 +12,12 @@
  * runs produce byte-identical fixtures and a timing is comparable across days.
  */
 
+import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
+
+const exec = promisify(execFile);
 
 /** Claude's cwd → project-dir encoding: every non-alphanumeric char becomes "-". */
 export const encodeCwd = (cwd: string): string =>
@@ -160,4 +164,84 @@ export async function repoFiles(ws: Workspace, lines = 400): Promise<void> {
       (_, k) => `export const line${k} = ${k}; // ${body(k, 5)}`,
     ).join("\n") + "\n",
   );
+}
+
+/**
+ * The file the diff fixture diffs. Two properties the renderer has to survive
+ * are built in deliberately:
+ *
+ * - every fourth body line is long enough to wrap at a normal pane width, so
+ *   rows are non-uniform once line wrap is on;
+ * - the file is a run of indented function blocks, so the indentation folder
+ *   finds regions and a fold test has something to collapse.
+ *
+ * Trailing whitespace on a fixed cadence gives "Ignore whitespace" something to
+ * actually change.
+ */
+const fileOf = (lines: number, seed: number) => {
+  const out: string[] = [];
+  let k = 0;
+  while (out.length < lines) {
+    const fn = out.length;
+    out.push(`export function block${fn}(input: number) {`);
+    for (let j = 0; j < 10 && out.length < lines - 1; j++, k++) {
+      const trail = k % 9 === 0 ? "   " : "";
+      out.push(
+        k % 4 === 0
+          ? `  const line${k} = ${k + seed}; // ${body(k + seed, 40)}${trail}`
+          : `  const line${k} = ${k + seed}; // ${body(k + seed, 6)}${trail}`,
+      );
+    }
+    out.push(`  return input + ${fn};`);
+    if (out.length < lines) out.push("}");
+    if (out.length < lines) out.push("");
+  }
+  return out.slice(0, lines).join("\n") + "\n";
+};
+
+/**
+ * A git repo with an uncommitted change, so the Diffs tab has something real to
+ * open. `lines` is the file size and `changed` how many lines differ — a big
+ * file with few changes is the case that hurts, because "All lines" renders the
+ * whole file while "Changes only" renders almost none of it.
+ */
+export async function repoWithDiff(
+  ws: Workspace,
+  { lines = 3000, changed = 30, file = "large.ts" } = {},
+): Promise<{ file: string; lines: number; changed: number }> {
+  const git = (...args: string[]) =>
+    exec("git", ["-C", ws.cwd, ...args], {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "fixture",
+        GIT_AUTHOR_EMAIL: "fixture@example.com",
+        GIT_COMMITTER_NAME: "fixture",
+        GIT_COMMITTER_EMAIL: "fixture@example.com",
+      },
+    });
+
+  await git("init", "-q", "-b", "main");
+  await writeFile(join(ws.cwd, file), fileOf(lines, 0));
+  await git("add", "-A");
+  await git("commit", "-q", "-m", "fixture base");
+
+  // Change a handful of lines spread through the file, so the diff has hunks
+  // scattered across it rather than one block at the top. Only indented body
+  // lines are touched: rewriting a `function` or `}` line would dissolve the
+  // block, and with it the folds this fixture exists to provide.
+  const edited = fileOf(lines, 0).split("\n");
+  const stride = Math.max(1, Math.floor(lines / changed));
+  for (let k = 0; k < changed; k++) {
+    for (
+      let at = k * stride;
+      at < Math.min(edited.length, (k + 1) * stride);
+      at++
+    ) {
+      if (!/^ {2}const line/.test(edited[at])) continue;
+      edited[at] = `  const line${at} = ${at + 1}; // CHANGED ${body(at, 6)}`;
+      break;
+    }
+  }
+  await writeFile(join(ws.cwd, file), edited.join("\n"));
+  return { file, lines, changed };
 }

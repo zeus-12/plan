@@ -91,6 +91,19 @@ windowed too. The same driver works interactively for investigation — `doctor`
 `skills/control-plan/SKILL.md`. It is symlinked into `~/.claude/skills` so Claude
 can load it by name, while the source stays here.
 
+## Chasing a felt symptom (`skills/chase-jank`)
+
+`control-plan` is the instrument. `skills/chase-jank` is the procedure for
+pointing it at a complaint that has no stack trace — "it stutters", "it lags",
+"it feels janky". It forces the order: name the unit the complaint is in,
+reproduce it mechanically, write a check that is red before the fix exists,
+diagnose from a trace rather than intuition, agree on the fix, then re-run the
+same unedited check and report both numbers.
+
+The unit matters more than it sounds. A fold can land the reader on exactly the
+right pixel and still drop eighteen frames getting there; a check that measures
+displacement passes it forever.
+
 ---
 
 Shared diff/comment logic lives in `shared/`. The whole thing is built almost entirely with Claude Code (this README included, this time :p).
