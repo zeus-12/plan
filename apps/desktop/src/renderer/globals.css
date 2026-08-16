@@ -226,3 +226,51 @@ aside.plan-right-sidebar {
 .content-card--flush-left {
   border-left-width: 0;
 }
+
+/* ------------------------------------------------------------------ *
+ * Message rail (chat transcript, right edge).
+ *
+ * Tick width comes from two custom properties — `--h`, the line under the
+ * pointer, and each tick's own `--i` — so a scrub writes one inline style on
+ * the rail instead of re-rendering every tick. `max()` stands in for abs():
+ * the distance is |i - h|.
+ * ------------------------------------------------------------------ */
+.msg-rail-tick > span {
+  --d: max(calc(var(--i) - var(--h, 0)), calc(var(--h, 0) - var(--i)));
+  transform: scaleX(max(0.25, calc(1 - 0.28 * var(--d))));
+  opacity: max(0.35, calc(1 - 0.22 * var(--d)));
+  transition:
+    transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 260ms ease-out;
+}
+
+/* No overshoot here, unlike the ticks: this bar reports where the reader IS,
+   and a position report that sails past its target and comes back reads as a
+   bug rather than as a spring. */
+.msg-rail-active {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Closed, the card keeps sliding to the tick under the pointer while invisible,
+   so it is already in place when it fades in — the same move framer-motion's
+   `layoutId` makes, without the library. */
+.msg-rail-card {
+  opacity: 0;
+  translate: 0 4px;
+  transition:
+    opacity 180ms ease-out,
+    translate 180ms ease-out,
+    transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.msg-rail-card[data-open="true"] {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-rail-tick > span,
+  .msg-rail-active,
+  .msg-rail-card {
+    transition-duration: 1ms;
+  }
+}

@@ -69,7 +69,7 @@ import {
   useToolPreviewHover,
 } from "./tool-preview-card";
 import { ImageLightbox } from "@/renderer/components/image-lightbox";
-import { UserMessageOverview } from "./user-message-overview";
+import { MessageRail } from "./message-rail";
 import { TimeAgo } from "@/renderer/components/time-ago";
 import type { ConversationMessage, MessagePart } from "@/common/shared-types";
 import type { AnnotationContext } from "@plan/shared/lib/comments/store";
@@ -2388,7 +2388,7 @@ export const MessageList = memo(function MessageList({
   return (
     <>
       <div className="relative h-full">
-        {/* Clear of the message rail (26px wide, 12px inset) so neither the
+        {/* Clear of the message rail (28px wide, 12px inset) so neither the
             rail nor the widget has to move when find opens. */}
         <FindWidget
           find={find}
@@ -2401,7 +2401,7 @@ export const MessageList = memo(function MessageList({
           }
         />
         {items.length > 0 && (
-          <UserMessageOverview
+          <MessageRail
             messages={items}
             abortedUuids={abortedPrompts}
             scrollRef={parentRef}
