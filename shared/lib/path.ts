@@ -20,3 +20,21 @@ export function dirname(path: string): string {
 export function lastSegment(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
+
+/** Project-relative path, or null when the file lives outside the project (a
+ *  scratchpad, another repo) and a project-scoped read can't reach it. */
+export function relativeToCwd(path: string, cwd: string | null): string | null {
+  if (!cwd) return null;
+  const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
+  return path.startsWith(root) ? path.slice(root.length) : null;
+}
+
+/**
+ * How a path reads in the UI: "./" for a file inside the project, the absolute
+ * path for anything else. The leading character is then the answer to "where is
+ * this file" — a write into a temp dir or another repo cannot look local.
+ */
+export function displayPath(path: string, cwd: string | null): string {
+  const rel = relativeToCwd(path, cwd);
+  return rel === null ? path : `./${rel}`;
+}

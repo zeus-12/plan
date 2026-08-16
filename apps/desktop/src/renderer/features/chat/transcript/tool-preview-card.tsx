@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -21,8 +22,9 @@ import {
   useShikiReady,
   type SyntaxToken,
 } from "@plan/shared/lib/syntax/highlight";
-import { basename } from "@plan/shared/lib/path";
+import { basename, displayPath } from "@plan/shared/lib/path";
 import { cn } from "@plan/shared/lib/utils";
+import { SessionCwdContext } from "./session-cwd";
 
 /**
  * What a tool call is worth previewing on hover: an Edit/MultiEdit becomes a
@@ -818,6 +820,7 @@ export function ToolPreviewCard({
   onMouseLeave: () => void;
 }) {
   const shikiReady = useShikiReady();
+  const cwd = useContext(SessionCwdContext);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<CSSProperties>({
     top: 0,
@@ -853,7 +856,9 @@ export function ToolPreviewCard({
     };
   }, [place, preview]);
 
-  const name = preview.path ? basename(preview.path) : "";
+  const shown = displayPath(preview.path, cwd);
+  const name = shown ? basename(shown) : "";
+  const dir = shown.slice(0, shown.length - name.length);
   // A sent file states what the read actually covered ("first 200 rows · 412
   // MB") in place of the kind label.
   const meta = "meta" in preview ? preview.meta : undefined;
@@ -892,12 +897,20 @@ export function ToolPreviewCard({
       }}
     >
       <div className="flex shrink-0 items-baseline gap-2 border-b border-[var(--border)] px-3 py-1.5 font-[family-name:var(--font-mono)]">
-        <span className="truncate text-[11px] text-[var(--text-secondary)]">
-          {name}
+        {/* The directory shrinks and ellipsizes, the filename never does, so a
+            long path loses its middle rather than its end. */}
+        <span
+          className="flex min-w-0 flex-1 overflow-hidden text-[11px]"
+          title={preview.path}
+        >
+          <span className="min-w-0 truncate text-[var(--text-tertiary)]">
+            {dir}
+          </span>
+          <span className="shrink-0 text-[var(--text-secondary)]">{name}</span>
         </span>
         <span
           className={cn(
-            "ml-auto shrink-0 text-[10px] text-[var(--text-tertiary)]",
+            "shrink-0 text-[10px] text-[var(--text-tertiary)]",
             !meta && "uppercase tracking-wider",
           )}
         >

@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { buildDiffLines } from "@plan/shared/lib/diff/diff";
-import { basename } from "@plan/shared/lib/path";
+import { basename, relativeToCwd } from "@plan/shared/lib/path";
 import { languageFromPath } from "@plan/shared/lib/syntax/highlight";
 import type { ConversationMessage } from "@/common/shared-types";
 import { isRealUserTurn } from "./message-kind";
@@ -137,14 +137,6 @@ function fragmentPreview(file: TurnFileChange): ToolPreview {
     language: file.language,
     edits: file.ops.slice(file.firstOp, file.lastOp + 1).map(opFragment),
   };
-}
-
-/** Project-relative path, or null when the file lives outside the project (a
- *  scratchpad, another repo) and the project-scoped read can't reach it. */
-function relativeToCwd(path: string, cwd: string | null): string | null {
-  if (!cwd) return null;
-  const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
-  return path.startsWith(root) ? path.slice(root.length) : null;
 }
 
 function FilePill({

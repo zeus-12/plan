@@ -68,6 +68,7 @@ import {
   toolPreview,
   useToolPreviewHover,
 } from "./tool-preview-card";
+import { SessionCwdContext } from "./session-cwd";
 import { ImageLightbox } from "@/renderer/components/image-lightbox";
 import { MessageRail } from "./message-rail";
 import { TimeAgo } from "@/renderer/components/time-ago";
@@ -2386,7 +2387,7 @@ export const MessageList = memo(function MessageList({
   }
 
   return (
-    <>
+    <SessionCwdContext.Provider value={cwd}>
       <div className="relative h-full">
         {/* Clear of the message rail (28px wide, 12px inset) so neither the
             rail nor the widget has to move when find opens. */}
@@ -2689,7 +2690,7 @@ export const MessageList = memo(function MessageList({
           }}
         />
       )}
-    </>
+    </SessionCwdContext.Provider>
   );
 });
 
