@@ -24,6 +24,9 @@
     // Same deal for test/**: it sits outside both src projects, so without this
     // the editor falls back to an inferred project with no `paths` and every
     // `@/…` import in a test reads as unresolved.
-    { "path": "apps/desktop/tsconfig.test.json" }
+    { "path": "apps/desktop/tsconfig.test.json" },
+    // The CDP harness: its own project because it is the only code here that
+    // runs directly under Node with both DOM and node types in scope.
+    { "path": "skills/control-plan" }
   ]
 }

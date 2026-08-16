@@ -8,10 +8,10 @@
     "build:web": "pnpm --filter @plan/web build",
     "build:desktop": "pnpm --filter @plan/desktop build",
     "validate": "npm run typecheck && npm test && npm run lint && npm run format:check",
-    "typecheck": "npm --prefix shared run typecheck && npm --prefix apps/web run typecheck && npm --prefix apps/desktop run typecheck",
+    "typecheck": "npm --prefix shared run typecheck && npm --prefix apps/web run typecheck && npm --prefix apps/desktop run typecheck && npm --prefix skills/control-plan run typecheck",
     "lint": "npm --prefix apps/web run lint",
-    "format": "npm --prefix apps/web run format && npm --prefix apps/desktop run format && npm --prefix shared run format",
-    "format:check": "npm --prefix apps/web run format:check && npm --prefix apps/desktop run format:check && npm --prefix shared run format:check",
+    "format": "npm --prefix apps/web run format && npm --prefix apps/desktop run format && npm --prefix shared run format && npm --prefix skills/control-plan run format",
+    "format:check": "npm --prefix apps/web run format:check && npm --prefix apps/desktop run format:check && npm --prefix shared run format:check && npm --prefix skills/control-plan run format:check",
     "release": "bash scripts/release.sh",
     "test": "npm --prefix apps/desktop run test"
   },

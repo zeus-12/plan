@@ -22,7 +22,7 @@ Anything you select — in a chat, a diff, a file, or a plan — can be turned i
 The app drives the **terminal version** of Claude (the `claude` CLI) rather than talking to an SDK or API. That's a deliberate choice:
 
 - **It can't be taken away from under you.** Providers can restrict or revoke programmatic SDK/API access with little notice — Claude itself nearly did, announcing a change and reversing it only a few days before it was scheduled to land. Building on the CLI that ships with your normal subscription means the app keeps working regardless of how the API terms shift.
-- **It's harness-agnostic.** Because we're just driving a terminal program, the same UI can sit on top of *any* terminal-based coding agent — Claude Code today, and others like [Pi](https://github.com/earendil-works/pi), [OpenCode](https://github.com/anomalyco/opencode), and whatever comes next tomorrow. Swap the harness, keep the cockpit.
+- **It's harness-agnostic.** Because we're just driving a terminal program, the same UI can sit on top of _any_ terminal-based coding agent — Claude Code today, and others like [Pi](https://github.com/earendil-works/pi), [OpenCode](https://github.com/anomalyco/opencode), and whatever comes next tomorrow. Swap the harness, keep the cockpit.
 - **Everything is saved, everywhere.** One UI for chats, diffs, files, search, and comments across all those harnesses — your review workflow and history live in one place no matter which agent you're driving.
 
 In short: this is the way to go. The terminal is the most stable, most portable surface to build on.
@@ -55,6 +55,41 @@ It runs, in order and stopping at the first failure:
 Run any step on its own while iterating. For a single test file, `pnpm --filter @plan/desktop exec vitest run test/<name>.test.ts`. `pnpm run format` rewrites files instead of just checking them.
 
 The release workflow runs `validate` as its first job and refuses to build or publish if it fails.
+
+## Measuring the renderer (`skills/control-plan`)
+
+`validate` proves the code is correct. It says nothing about whether the app
+still feels fast, which needs a real window driven at real speed.
+
+```
+pnpm -C skills/control-plan test
+```
+
+TypeScript run straight through Node — no build step, no dependency. It builds a
+synthetic fixture (its own `HOME`, one project, an 1,800-message chat generated
+from row indices so two runs are byte-identical), launches the built app against
+it, and asserts seven things before tearing it down. It never
+reads or writes real chats, projects or comments. Non-zero exit on failure, so
+it can gate a change.
+
+| Check                           | Fails when                                                |
+| ------------------------------- | --------------------------------------------------------- |
+| opens a large chat              | the longest blocked frame exceeds `--budget-open` (400ms) |
+| no blank rows in the viewport   | a visible row has no content                              |
+| scrolling holds content still   | the anchor row drifts more than 40px                      |
+| find opens/closes cleanly       | the page shifts or wanders                                |
+| typing in find stays responsive | a frame blocks longer than `--budget-key` (250ms)         |
+| windowing is in effect          | far rows are being rendered anyway                        |
+
+Behaviour is asserted before any budget: a blank transcript passes every timing
+check ever written.
+
+The checks are written against a `SurfaceSpec` rather than against chat
+selectors, so the diff viewer reuses them with `--surface diff` once it is
+windowed too. The same driver works interactively for investigation — `doctor`,
+`trace`, `profile`, `screenshot`, `open`, `drift`, `coverage`. See
+`skills/control-plan/SKILL.md`. It is symlinked into `~/.claude/skills` so Claude
+can load it by name, while the source stays here.
 
 ---
 

@@ -2070,6 +2070,11 @@ export const MessageList = memo(function MessageList({
     if (!revealAnnotation) return;
     const ann = annotations.find((a) => a.id === revealAnnotation.id);
     if (!ann) return;
+    // The row is usually outside the render window — the chip opens the tab and
+    // asks for the comment in the same breath, so the transcript has just
+    // mounted somewhere else entirely. Ask the window to bring that row up;
+    // without this the query below never matches and the editor never opens.
+    rowWindow.scrollToRow(ann.start.messageUuid);
     let frames = 0;
     let raf = requestAnimationFrame(function find() {
       const part = parentRef.current?.querySelector<HTMLElement>(
@@ -2078,7 +2083,6 @@ export const MessageList = memo(function MessageList({
         )}"][data-part-index="${ann.start.partIndex}"]`,
       );
       if (part) {
-        part.scrollIntoView({ block: "center" });
         const sameSpan =
           ann.end.messageUuid === ann.start.messageUuid &&
           ann.end.partIndex === ann.start.partIndex;
@@ -2094,7 +2098,7 @@ export const MessageList = memo(function MessageList({
         });
         return;
       }
-      if (frames++ < 30) raf = requestAnimationFrame(find);
+      if (frames++ < 90) raf = requestAnimationFrame(find);
     });
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
