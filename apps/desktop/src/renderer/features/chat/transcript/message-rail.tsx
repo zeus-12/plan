@@ -121,28 +121,36 @@ export function MessageRail({
     const el = scrollRef.current;
     if (!el || userMessages.length === 0) return;
     const visible = new Set<string>();
+    /** The rail's rows in document order, for the bracket search below. */
+    const userRows: HTMLElement[] = [];
     let raf = 0;
 
-    // One-time fallback when no user row is on screen and nothing was ever
-    // highlighted (opened mid-way through a long assistant stretch): nearest
-    // off-screen turn. A single measured pass, not per-frame.
-    const nearestOffscreen = () => {
+    /**
+     * The turns immediately above and below the viewport.
+     *
+     * Binary search, because the rows are in document order: ~8 rect reads
+     * rather than one per turn. It runs only when nothing is on screen, so an
+     * ordinary scroll never pays for it at all.
+     */
+    const bracket = () => {
       const containerTop = el.getBoundingClientRect().top;
-      let lastAbove: string | null = null;
-      let firstBelow: string | null = null;
-      for (const row of el.querySelectorAll<HTMLElement>("[data-msg-row]")) {
-        const uuid = row.dataset.msgRow;
-        if (!uuid || !uuidSet.has(uuid)) continue;
-        const r = row.getBoundingClientRect();
-        if (r.bottom - containerTop <= VISIBLE_MARGIN_PX) lastAbove = uuid;
-        else if (firstBelow === null) firstBelow = uuid;
+      const isAbove = (i: number) =>
+        userRows[i]!.getBoundingClientRect().bottom - containerTop <=
+        VISIBLE_MARGIN_PX;
+      let lo = 0;
+      let hi = userRows.length - 1;
+      let last = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (isAbove(mid)) {
+          last = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
       }
-      return (
-        lastAbove ??
-        firstBelow ??
-        userMessages[userMessages.length - 1]?.uuid ??
-        null
-      );
+      return {
+        above: last >= 0 ? userRows[last]!.dataset.msgRow : undefined,
+        below: userRows[last + 1]?.dataset.msgRow,
+      };
     };
 
     const choose = () => {
@@ -155,9 +163,22 @@ export function MessageRail({
         lastVisible = m.uuid;
       }
       const chosen = directionRef.current === "up" ? firstVisible : lastVisible;
-      // When no user message is on screen (scrolling through a long stretch of
-      // assistant/tool output) keep the last highlight — don't snap.
-      setActiveUuid((prev) => chosen ?? prev ?? nearestOffscreen());
+      if (chosen) {
+        setActiveUuid(chosen);
+        return;
+      }
+      // Nothing on screen: the reader is inside one long answer. Keep the
+      // highlight while it is still the turn on one side of the viewport —
+      // that is the case worth not snapping. A jump lands with it on neither
+      // side, and keeping it there left "Scroll to latest" marking wherever
+      // the reader came from.
+      setActiveUuid((prev) => {
+        const { above, below } = bracket();
+        if (prev && (prev === above || prev === below)) return prev;
+        return (
+          above ?? below ?? userMessages[userMessages.length - 1]?.uuid ?? null
+        );
+      });
     };
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(choose);
@@ -179,7 +200,9 @@ export function MessageRail({
     );
     for (const row of el.querySelectorAll<HTMLElement>("[data-msg-row]")) {
       const uuid = row.dataset.msgRow;
-      if (uuid && uuidSet.has(uuid)) io.observe(row);
+      if (!uuid || !uuidSet.has(uuid)) continue;
+      userRows.push(row);
+      io.observe(row);
     }
 
     const onScroll = () => {
