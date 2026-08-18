@@ -149,7 +149,7 @@ const revokeIfBlob = (url: string) => {
 };
 
 /**
- * Message composer. Enter sends, Shift+Enter inserts a newline.
+ * Message composer. ⌘Enter sends, Enter inserts a newline.
  *
  * Built on a Lexical contenteditable so `@file` / `/skill` references render as
  * atomic, clickable chips (see {@link ReferenceNode}) while still serializing to
@@ -551,7 +551,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                   ? "Waiting for Claude to finish loading…"
                   : pendingSaves
                     ? "Saving image…"
-                    : "Send (Enter)"
+                    : "Send (⌘↵)"
               }
               className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--bg)] transition-opacity hover:opacity-90 disabled:opacity-40"
             >
@@ -719,7 +719,7 @@ function SessionMemoryPlugin({
   return <HistoryPlugin externalHistoryState={history} />;
 }
 
-/** Enter→send, Shift+Enter→newline, and ⌘Z on an empty box→restore-last-sent. */
+/** ⌘Enter→send, Enter→newline, and ⌘Z on an empty box→restore-last-sent. */
 function CommandsPlugin({
   sendRef,
   sessionIdRef,
@@ -735,16 +735,16 @@ function CommandsPlugin({
       (e) => {
         // A mention menu is open — let the typeahead handle Enter (select).
         if (isMentionMenuOpen()) return false;
-        if (e?.shiftKey) {
+        if (e?.metaKey || e?.ctrlKey) {
           e.preventDefault();
-          editor.update(() => {
-            const sel = $getSelection();
-            if ($isRangeSelection(sel)) sel.insertLineBreak();
-          });
+          sendRef.current();
           return true;
         }
         e?.preventDefault();
-        sendRef.current();
+        editor.update(() => {
+          const sel = $getSelection();
+          if ($isRangeSelection(sel)) sel.insertLineBreak();
+        });
         return true;
       },
       COMMAND_PRIORITY_LOW,
