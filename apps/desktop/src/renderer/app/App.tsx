@@ -893,6 +893,7 @@ function Shell() {
           <NewWorktreeModal
             defaults={worktrees.defaults}
             projectEncoded={selected.encoded}
+            initialRepos={reposByProject.get(selected.encoded) ?? null}
             onCreate={async (input) => {
               const rec = await worktrees.create(input);
               await allWorktrees.refresh();

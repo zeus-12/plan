@@ -18,6 +18,9 @@ interface Props {
   defaults: ProjectDefaults;
   /** Project whose repos the worktree will span (for per-repo base selection). */
   projectEncoded: string;
+  /** Repos App already knows for this project, so the first frame is the final
+   * layout instead of the single-repo one. Refreshed by this modal's own fetch. */
+  initialRepos: DiscoveredRepo[] | null;
   onCreate: (input: CreateWorktreeInput) => Promise<unknown>;
   onClose: () => void;
 }
@@ -35,6 +38,7 @@ const overrideCls = (overridden: boolean) =>
 export function NewWorktreeModal({
   defaults,
   projectEncoded,
+  initialRepos,
   onCreate,
   onClose,
 }: Props) {
@@ -47,7 +51,7 @@ export function NewWorktreeModal({
   // override falls back to the shared `base` when blank, so editing the shared
   // base flows to every repo that hasn't been touched. `selected` holds the
   // repos the user ticked — nothing is selected by default.
-  const [repos, setRepos] = useState<DiscoveredRepo[] | null>(null);
+  const [repos, setRepos] = useState<DiscoveredRepo[] | null>(initialRepos);
   const [branchesByRepo, setBranchesByRepo] = useState<
     Record<string, string[]>
   >({});
@@ -163,11 +167,14 @@ export function NewWorktreeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       onClick={onClose}
     >
       <div
-        className="w-[440px] rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4 shadow-lg"
+        className={
+          "flex max-h-[85vh] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] shadow-lg " +
+          (multiRepo ? "w-[min(760px,92vw)]" : "w-[min(440px,92vw)]")
+        }
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           // Keys the modal owns must not leak to listeners outside it (e.g.
@@ -188,11 +195,11 @@ export function NewWorktreeModal({
           }
         }}
       >
-        <div className="mb-3 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text)]">
+        <div className="shrink-0 px-4 pb-3 pt-4 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text)]">
           New worktree
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-1">
           <div>
             <label className={labelCls}>Branch</label>
             <input
@@ -235,7 +242,7 @@ export function NewWorktreeModal({
                   </span>
                 )}
               </label>
-              <div className="flex flex-col gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
                 {repos!.map((r) => {
                   const sp = r.subPath;
                   const label = sp || "repo root";
@@ -246,7 +253,9 @@ export function NewWorktreeModal({
                       className={
                         // Fixed height so ticking a repo (which reveals the base
                         // field) never grows the row — only the highlight changes.
-                        "flex h-10 items-center gap-2 rounded-lg border px-3 transition-colors " +
+                        // No padding here: the toggle button carries it, so the
+                        // whole row is clickable.
+                        "flex h-10 items-center rounded-lg border transition-colors " +
                         (on
                           ? ""
                           : "border-[var(--border)] bg-[var(--bg)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-hover)]")
@@ -266,7 +275,7 @@ export function NewWorktreeModal({
                         type="button"
                         onClick={() => toggleRepo(sp)}
                         aria-pressed={on}
-                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left"
                       >
                         <span
                           className="grid h-4 w-4 shrink-0 place-items-center rounded-[5px] border transition-colors"
@@ -296,7 +305,7 @@ export function NewWorktreeModal({
                         </span>
                       </button>
                       {on && (
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1 pr-3">
                           <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                             base
                           </span>
@@ -337,38 +346,40 @@ export function NewWorktreeModal({
           )}
         </div>
 
-        {error && (
-          <div className="mt-3 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--removed-text)]/40 bg-[var(--diff-remove-bg)] px-3 py-2 text-[11px] text-[var(--removed-text)]">
-            {error}
-          </div>
-        )}
+        <div className="shrink-0 px-4 pb-4">
+          {error && (
+            <div className="mt-3 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--removed-text)]/40 bg-[var(--diff-remove-bg)] px-3 py-2 text-[11px] text-[var(--removed-text)]">
+              {error}
+            </div>
+          )}
 
-        <div className="mt-4 flex items-center justify-between">
-          <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-            {multiRepo
-              ? `Spans ${selectedRepos.length} of ${repos!.length} repos`
-              : ""}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void submit()}
-              disabled={!canSubmit}
-            >
-              {busy ? (
-                <TextShimmer duration={2.4} style={onAccentShimmer}>
-                  Creating…
-                </TextShimmer>
-              ) : (
-                <>
-                  Create
-                  <Kbd keys={["⌘", "↵"]} />
-                </>
-              )}
-            </Button>
+          <div className="mt-4 flex items-center justify-between">
+            <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+              {multiRepo
+                ? `Spans ${selectedRepos.length} of ${repos!.length} repos`
+                : ""}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void submit()}
+                disabled={!canSubmit}
+              >
+                {busy ? (
+                  <TextShimmer duration={2.4} style={onAccentShimmer}>
+                    Creating…
+                  </TextShimmer>
+                ) : (
+                  <>
+                    Create
+                    <Kbd keys={["⌘", "↵"]} />
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

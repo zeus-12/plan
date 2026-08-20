@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 interface Props {
   value: string;
@@ -15,6 +15,16 @@ interface Props {
 }
 
 const MAX = 8;
+// Keep in step with the list's max-h-44, so the flip-up test is accurate.
+const LIST_MAX_H = 176;
+
+interface Anchor {
+  left: number;
+  top: number;
+  bottom: number;
+  width: number;
+  viewportH: number;
+}
 
 /**
  * A branch-name text input with lightweight autocomplete. The field is always
@@ -36,6 +46,8 @@ export function BranchCombo({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   const matches = useMemo(() => {
     const q = value.trim().toLowerCase();
@@ -48,6 +60,41 @@ export function BranchCombo({
   }, [branches, value]);
 
   const showList = open && matches.length > 0;
+
+  // The list is fixed so a scrolling parent (the worktree modals) cannot clip
+  // it. That costs the CSS anchor, so measure the input instead. A `transform`
+  // or `filter` on any ancestor would make the list fixed to that ancestor
+  // instead of the viewport — none exists on the paths that use this.
+  useLayoutEffect(() => {
+    if (!showList) {
+      setAnchor(null);
+      return;
+    }
+    const measure = () => {
+      const el = inputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setAnchor({
+        left: r.left,
+        top: r.top,
+        bottom: r.bottom,
+        width: r.width,
+        viewportH: window.innerHeight,
+      });
+    };
+    measure();
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [showList]);
+
+  const flipUp =
+    anchor !== null &&
+    anchor.bottom + LIST_MAX_H + 8 > anchor.viewportH &&
+    anchor.top > LIST_MAX_H;
 
   const pick = (b: string) => {
     onChange(b);
@@ -62,6 +109,7 @@ export function BranchCombo({
       onClick={stopRowClick ? (e) => e.stopPropagation() : undefined}
     >
       <input
+        ref={inputRef}
         value={value}
         placeholder={placeholder}
         aria-label={ariaLabel}
@@ -104,14 +152,23 @@ export function BranchCombo({
           }
         }}
       />
-      {showList && (
-        <ul className="absolute left-0 top-full z-50 mt-1 max-h-44 w-full min-w-[8rem] overflow-auto rounded-md border border-[var(--border-strong)] bg-[var(--popover-bg)] p-1 shadow-lg">
+      {showList && anchor !== null && (
+        <ul
+          className="fixed z-[60] max-h-44 min-w-[8rem] overflow-auto rounded-md border border-[var(--border-strong)] bg-[var(--popover-bg)] p-1 shadow-lg"
+          style={{
+            left: anchor.left,
+            width: anchor.width,
+            ...(flipUp
+              ? { bottom: anchor.viewportH - anchor.top + 4 }
+              : { top: anchor.bottom + 4 }),
+          }}
+        >
           {matches.map((b, i) => (
             <li key={b}>
               <button
                 type="button"
-                // preventDefault keeps focus on the input so onBlur doesn't fire
-                // before the click registers.
+                // preventDefault keeps focus on the input so onBlur doesn't
+                // fire before the click registers.
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
