@@ -6,7 +6,10 @@ import {
   useRef,
   useState,
 } from "react";
-import ReactMarkdown, { type Options } from "react-markdown";
+import ReactMarkdown, {
+  defaultUrlTransform,
+  type Options,
+} from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSendToTerminal } from "./send-to-terminal";
 import {
@@ -436,10 +439,25 @@ function CheckIcon() {
 export const Markdown = memo(function Markdown({
   content,
   className,
+  resolveAssetSrc,
 }: {
   content: string;
   className?: string;
+  /**
+   * Rewrites an image `src` — a document read off disk carries paths relative to
+   * itself, which mean nothing to the renderer's own URL. Only `src` goes
+   * through it; every other URL keeps react-markdown's own sanitizer.
+   */
+  resolveAssetSrc?: (src: string) => string;
 }) {
+  const urlTransform = useMemo<Options["urlTransform"] | undefined>(
+    () =>
+      resolveAssetSrc
+        ? (url, key) =>
+            key === "src" ? resolveAssetSrc(url) : defaultUrlTransform(url)
+        : undefined,
+    [resolveAssetSrc],
+  );
   return (
     <div
       className={cn(
@@ -455,7 +473,11 @@ export const Markdown = memo(function Markdown({
         color: "var(--prose-fg, var(--text))",
       }}
     >
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        components={COMPONENTS}
+        urlTransform={urlTransform}
+      >
         {content}
       </ReactMarkdown>
     </div>

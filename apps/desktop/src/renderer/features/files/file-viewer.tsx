@@ -49,7 +49,13 @@ import { FindWidget } from "@plan/shared/components/find-widget";
 import { buildDocUrl } from "@plan/shared/lib/share/doc-share-url";
 import { cn, toggleInSet } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
+import { Markdown } from "@plan/shared/components/markdown";
 import { isImagePath } from "./image-paths";
+import {
+  markdownAssetBase,
+  resolveMarkdownAssetSrc,
+  type MarkdownAssetBase,
+} from "./markdown-assets";
 import { createPersistedValue } from "@/renderer/lib/external-value";
 import { FileIcon } from "@/renderer/components/file-icon";
 import { ImageLightbox } from "@/renderer/components/image-lightbox";
@@ -367,6 +373,10 @@ function FileViewerImpl({
   const setLineWrap = (v: boolean) =>
     buffer ? setBufferWrap(v) : lineWrapSetting.set(v);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Markdown preview: renders the file as a document instead of source. Per
+  // viewer (each file tab owns one) rather than a global setting, so opening a
+  // second markdown file still starts on the source.
+  const [preview, setPreview] = useState(false);
   // Scroll viewport height, tracked so we can reserve empty space below the last
   // line (VS Code "scroll beyond last line"): the final line can scroll up to the
   // top of the viewport instead of being pinned to the bottom edge.
@@ -486,6 +496,39 @@ function FileViewerImpl({
   // highlighting / editing / find the same way a file does.
   const isTextContent = buffer ? true : !!data && !data.binary;
   const allowTyping = !!buffer;
+  // A scratch buffer is excluded: its point is typing, and the header already
+  // carries its own language picker.
+  const isMarkdown = !buffer && !isImage && language === "markdown";
+  const previewing = preview && isMarkdown && status === "ok" && isTextContent;
+
+  // Markdown preview asset base: image sources in the file are relative to the
+  // file, so the preview needs its absolute location. Null while it resolves —
+  // rendering earlier would flash a broken image for every relative source.
+  const [assetBase, setAssetBase] = useState<MarkdownAssetBase | null>(null);
+  useEffect(() => {
+    setAssetBase(null);
+    if (!previewing) return;
+    let cancelled = false;
+    window.electronAPI.projectFilePath(encoded, path).then((abs) => {
+      if (cancelled) return;
+      // No absolute path (a project that can't be resolved): an empty base
+      // leaves every source untouched instead of inventing a location.
+      setAssetBase(
+        abs
+          ? markdownAssetBase(abs, path, revision)
+          : { dirAbs: "", rootAbs: null, revision },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewing, encoded, path, revision]);
+
+  const resolveAssetSrc = useCallback(
+    (src: string) =>
+      assetBase ? resolveMarkdownAssetSrc(src, assetBase) : src,
+    [assetBase],
+  );
 
   // In-view find (⌘F). Surface paints `find.matches` and scrolls `find.current`.
   const find = useTextFind(text);
@@ -773,6 +816,7 @@ function FileViewerImpl({
     ENABLE_EDITOR_CARET &&
     status === "ok" &&
     !isImage &&
+    !previewing &&
     isTextContent &&
     lines.length <= EDITOR_MAX_LINES &&
     (liveCollapsed.size === 0 || !!buffer) &&
@@ -1071,7 +1115,7 @@ function FileViewerImpl({
   );
 
   const selection = useCommentSelection<FileAnchor>({
-    enabled: active && status === "ok" && !editorMode,
+    enabled: active && status === "ok" && !editorMode && !previewing,
     resolve: resolveSelection,
     onCreate: createAnnotation,
   });
@@ -1296,6 +1340,8 @@ function FileViewerImpl({
   const revealNonce = revealTarget?.nonce;
   useEffect(() => {
     if (!revealTarget || status !== "ok") return;
+    // A hit is a line of source — preview has no lines to scroll to.
+    setPreview(false);
     const idx = Math.min(Math.max(revealTarget.line - 1, 0), lines.length - 1);
     const ls = lineStarts[idx] ?? 0;
     const caret = ls + revealTarget.colStart;
@@ -1327,6 +1373,7 @@ function FileViewerImpl({
     if (!revealAnnotation || status !== "ok") return;
     const target = annotations.find((a) => a.id === revealAnnotation.id);
     if (!target) return;
+    setPreview(false);
     selection.cancel();
     setEditorPopover(null);
     commentRequestRef.current = target.id;
@@ -1378,7 +1425,8 @@ function FileViewerImpl({
   }, [pendingScrollLine, visibleLineIndices]);
 
   // ⌘F opens the find widget for the visible file, seeded with any selection.
-  const searchable = status === "ok" && !isImage && isTextContent;
+  const searchable =
+    status === "ok" && !isImage && isTextContent && !previewing;
   useEffect(() => {
     if (!active || !searchable) return;
     const handler = (e: KeyboardEvent) => {
@@ -1408,6 +1456,14 @@ function FileViewerImpl({
   useEffect(() => {
     if (editorMode) setSelectAllActive(false);
   }, [editorMode]);
+
+  // Preview replaces the line surface, so the read-only view's select-all paint
+  // and the find widget (which highlights line ranges) have nothing to act on.
+  useEffect(() => {
+    if (!previewing) return;
+    setSelectAllActive(false);
+    find.close();
+  }, [previewing, find.close]);
 
   // ⌘A — select all, virtualized read-only view only (see `selectAllActive`).
   useEffect(() => {
@@ -1879,6 +1935,33 @@ function FileViewerImpl({
               )}
             </>
           )}
+          {isMarkdown && isTextContent && (
+            <div className="flex h-7 items-center rounded-md border border-[var(--border)] p-[2px]">
+              {(
+                [
+                  ["Code", false],
+                  ["Preview", true],
+                ] as const
+              ).map(([label, on]) => (
+                <button
+                  key={label}
+                  onClick={() => setPreview(on)}
+                  aria-pressed={preview === on}
+                  title={
+                    on ? "Render the markdown" : "Show the markdown source"
+                  }
+                  className={cn(
+                    "flex h-full items-center rounded px-2 transition-colors",
+                    preview === on
+                      ? "bg-[var(--accent)] text-[var(--bg)]"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text)]",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {!buffer && !isImage && text.length > 0 && (
             <button
               onClick={() =>
@@ -1994,6 +2077,22 @@ function FileViewerImpl({
         </div>
       ) : data?.binary ? (
         <Centered>Binary file — can&apos;t preview</Centered>
+      ) : previewing ? (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {assetBase ? (
+            <div className="mx-auto max-w-[76ch] px-8 py-6">
+              <Markdown
+                content={text}
+                resolveAssetSrc={resolveAssetSrc}
+                className="[&_img]:max-w-full [&_img]:rounded-md"
+              />
+            </div>
+          ) : (
+            <Centered>
+              <TextShimmer duration={2.4}>Loading…</TextShimmer>
+            </Centered>
+          )}
+        </div>
       ) : (
         /*
          * One virtualized highlighted layer for both modes. In editor mode a
