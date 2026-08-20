@@ -1253,6 +1253,8 @@ function FileViewerImpl({
   // overlay textarea is nudged down by the same amount (see its `top`).
   const bufferTopPad = buffer ? 8 : 0;
 
+  const reactivatingMeasureRef = useRef(false);
+
   const virtualizer = useVirtualizer({
     count: visibleLineIndices.length,
     getScrollElement: () => parentRef.current,
@@ -1261,6 +1263,8 @@ function FileViewerImpl({
     paddingStart: bufferTopPad,
     paddingEnd: scrollBeyondEnd,
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () =>
+    !reactivatingMeasureRef.current;
 
   // Toggling wrap flips every row between a fixed 20px height and a measured,
   // variable height — drop the cached sizes so the next layout re-measures.
@@ -1268,12 +1272,26 @@ function FileViewerImpl({
     virtualizer.measure();
   }, [lineWrapEnabled, virtualizer]);
 
-  // Re-measure when the tab becomes visible again. While hidden (display:none)
-  // the scroll element has 0 height and the virtualizer's range/sizes go stale;
-  // without this the layer can render overlapping rows and the scroll extent is
-  // wrong (the "combined text / can't scroll up" bug after switching tabs).
+  // display:none invalidates wrapped-row geometry. Remeasure on return, but
+  // don't let delayed size corrections move scrollTop.
   useEffect(() => {
-    if (active) virtualizer.measure();
+    if (!active) return;
+    reactivatingMeasureRef.current = true;
+    virtualizer.measure();
+
+    let frame = 0;
+    const settle = (framesLeft: number) => {
+      if (framesLeft === 0) {
+        reactivatingMeasureRef.current = false;
+        return;
+      }
+      frame = requestAnimationFrame(() => settle(framesLeft - 1));
+    };
+    settle(5);
+    return () => {
+      cancelAnimationFrame(frame);
+      reactivatingMeasureRef.current = false;
+    };
   }, [active, virtualizer]);
 
   // Auto-focus the buffer editor when it first opens, caret at the end (last
