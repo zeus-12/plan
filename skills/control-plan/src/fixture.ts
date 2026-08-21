@@ -118,17 +118,38 @@ function messageText(i: number): string {
 
 export const FIXTURE_SESSION_ID = "00000000-0000-4000-8000-000000000001";
 
-/** A synthetic chat transcript in the format the app reads. */
+/** A second session in the SAME project, so a switch between two chats — the
+ *  Ctrl+Tab gesture — has somewhere to land. Both are full size: the complaint
+ *  is about big sessions, and a switch onto a small one measures nothing. */
+export const FIXTURE_SESSION_ID_2 = "00000000-0000-4000-8000-000000000002";
+
+/** A third, deliberately never opened. The switcher lists open tabs first and
+ *  unopened sessions last, so a BACKWARD step always lands on this one however
+ *  many stray tabs earlier checks left behind. */
+export const FIXTURE_SESSION_ID_3 = "00000000-0000-4000-8000-000000000003";
+
+/**
+ * A synthetic chat transcript in the format the app reads.
+ *
+ * `seed` shifts the generated text so two sessions are not byte-identical —
+ * identical content would let a shared cache serve the second one and hide
+ * exactly the cost a switch is supposed to pay.
+ */
 export async function chatSession(
   ws: Workspace,
   rows: number,
+  { sessionId = FIXTURE_SESSION_ID, seed = 0 } = {},
 ): Promise<{ sessionId: string; rows: number }> {
   // A fixed start time keeps rendered timestamps identical between runs.
   const t0 = Date.parse("2026-01-01T00:00:00.000Z");
   const lines: string[] = [];
   let parent: string | null = null;
+  // Message uuids must not collide across sessions: the transcript's height
+  // cache is keyed on the uuid, and a collision would let one session inherit
+  // the other's measurements.
+  const ns = sessionId.slice(-1);
   for (let i = 0; i < rows; i++) {
-    const uuid = `00000000-0000-4000-9000-${String(i).padStart(12, "0")}`;
+    const uuid = `00000000-0000-4000-900${ns}-${String(i).padStart(12, "0")}`;
     lines.push(
       JSON.stringify({
         type: i % 2 === 0 ? "user" : "assistant",
@@ -136,23 +157,17 @@ export async function chatSession(
         parentUuid: parent,
         timestamp: new Date(t0 + i * 60_000).toISOString(),
         cwd: ws.cwd,
-        sessionId: FIXTURE_SESSION_ID,
-        message: { content: [{ type: "text", text: messageText(i) }] },
+        sessionId,
+        message: { content: [{ type: "text", text: messageText(i + seed) }] },
       }),
     );
     parent = uuid;
   }
   await writeFile(
-    join(
-      ws.home,
-      ".claude",
-      "projects",
-      ws.encoded,
-      `${FIXTURE_SESSION_ID}.jsonl`,
-    ),
+    join(ws.home, ".claude", "projects", ws.encoded, `${sessionId}.jsonl`),
     lines.join("\n") + "\n",
   );
-  return { sessionId: FIXTURE_SESSION_ID, rows };
+  return { sessionId, rows };
 }
 
 /** Files for the diff and file tabs to open. */

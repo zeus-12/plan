@@ -25,6 +25,7 @@ import {
   measureOpen,
   parkReport,
   parkWatch,
+  tabSwitch,
 } from "./src/checks.ts";
 import { findToggle, findType } from "./src/find.ts";
 import { applyConfig, describe, type DiffConfig } from "./src/settings.ts";
@@ -34,6 +35,9 @@ import {
   repoFiles,
   repoWithDiff,
   workspace,
+  FIXTURE_SESSION_ID,
+  FIXTURE_SESSION_ID_2,
+  FIXTURE_SESSION_ID_3,
   type Workspace,
 } from "./src/fixture.ts";
 
@@ -104,9 +108,9 @@ async function chatSuite(cdp: Session, s: SurfaceSpec) {
           .map((e) => { const r = e.getBoundingClientRect();
             return { x: Math.round(r.left+r.width/2), y: Math.round(r.top+r.height/2),
                      w: r.width, h: r.height, text: (e.innerText||"").trim() }; })
-          .filter((e) => e.w > 40 && e.text.startsWith("Fixture Chat"))[0] ?? null;
+          .filter((e) => e.w > 40 && e.text.startsWith("Fixture Chat A"))[0] ?? null;
       })()`);
-      if (!hit) throw new Error("fixture chat not in the rail");
+      if (!hit) throw new Error("fixture chat A not in the rail");
       runs.push(await measureOpen(cdp, s, hit, 7000));
       await sleep(800);
     }
@@ -195,6 +199,85 @@ async function chatSuite(cdp: Session, s: SurfaceSpec) {
   );
 }
 
+/**
+ * Ctrl+Tab between two chats in the same project.
+ *
+ * Two landings, and they cost different things. COLD is the switcher's second
+ * kind of entry — a session with no open tab, so the pane is mounted for the
+ * first time. HOT is two open tabs, where both panes are already mounted and
+ * the switch is only meant to swap which one is displayed.
+ *
+ * Both are graded on two numbers, because the complaint has two halves: how
+ * long until the chat you asked for is on screen, and how long the app is
+ * unresponsive once it is. A switch can paint quickly and then freeze.
+ */
+async function tabSwitchSuite(cdp: Session, s: SurfaceSpec) {
+  // chatSuite leaves find open; a switcher gesture on top of that measures a
+  // different thing.
+  await cdp.key("Escape");
+  await sleep(800);
+
+  const land = num("budget-switch-land", 150);
+  const block = num("budget-switch-block", 100);
+  const median = (xs: number[]) => xs.sort((a, b) => a - b)[xs.length >> 1];
+
+  // Neither case may depend on what earlier checks left open. chatSuite opens
+  // several "New chat" tabs, and a switch that lands on an empty one measures
+  // nothing — which is how this suite first went wrong.
+  //
+  // Hot: make B, then A, the two most recent tabs, so one forward step lands on
+  // B, whose pane is already mounted.
+  await clickText(cdp, "Fixture Chat B", 8000);
+  await clickText(cdp, "Fixture Chat A", 8000);
+
+  const runs = [];
+  for (let i = 0; i < 3; i++) runs.push(await tabSwitch(cdp, s));
+  const ok = runs.filter((r) => r.VALID && r.switched);
+  const landed = ok.map((r) => r.landedMs ?? Infinity);
+  const blocked = ok.map((r) => r.longestBlockedMs);
+  check(
+    "Ctrl+Tab between two open chats shows the other one promptly",
+    ok.length === runs.length && median(landed) <= land,
+    {
+      medianLandedMs: median(landed),
+      switched: ok.length,
+      ofRuns: runs.length,
+    },
+  );
+  check(
+    "Ctrl+Tab between two open chats does not freeze the app",
+    ok.length === runs.length && median(blocked) <= block,
+    {
+      medianBlockedMs: median(blocked),
+      worstBlockedMs: Math.max(...blocked),
+      switched: ok.length,
+      ofRuns: runs.length,
+    },
+  );
+
+  // Cold: chat C is open nowhere, and unopened sessions sort last, so one
+  // BACKWARD step reaches it whatever else is in the list. Its pane mounts for
+  // the first time here — the same work as clicking it in the rail, so it is
+  // graded against the open budget rather than a frame.
+  const open = num("budget-open", 400);
+  const cold = await tabSwitch(cdp, s, { back: true, settleMs: 6000 });
+  check(
+    "Ctrl+Shift+Tab onto an unopened chat shows it promptly",
+    cold.VALID && cold.switched && (cold.landedMs ?? Infinity) <= open,
+    { landedMs: cold.landedMs, switched: cold.switched, error: cold.error },
+  );
+  check(
+    "Ctrl+Shift+Tab onto an unopened chat does not freeze the app",
+    cold.VALID && cold.switched && cold.longestBlockedMs <= open,
+    {
+      longestBlockedMs: cold.longestBlockedMs,
+      atMs: cold.longestBlockedAtMs,
+      framesOver100ms: cold.framesOver100ms,
+    },
+  );
+}
+
+/** Every font size the diff offers, so none of them is only ever untested. */
 const FONT_SIZES = [11, 12, 13, 14, 15, 16];
 
 /**
@@ -352,11 +435,19 @@ async function diffSuite(cdp: Session, s: SurfaceSpec) {
 async function main() {
   console.log(`building fixture: ${ROWS} rows -> ${DIR}`);
   const ws: Workspace = await workspace(DIR);
-  const { sessionId } = await chatSession(ws, ROWS);
+  // Two sessions in the one project: a switch needs somewhere to land, and both
+  // are full size because a switch onto a small chat measures nothing.
+  await chatSession(ws, ROWS, { sessionId: FIXTURE_SESSION_ID, seed: 0 });
+  await chatSession(ws, ROWS, { sessionId: FIXTURE_SESSION_ID_2, seed: 7 });
+  await chatSession(ws, ROWS, { sessionId: FIXTURE_SESSION_ID_3, seed: 13 });
   await repoFiles(ws);
   await repoWithDiff(ws, { lines: num("diff-lines", 3000), changed: 30 });
   const { writeProjects } = await import("./src/fixture.ts");
-  await writeProjects(ws, { [sessionId]: "Fixture Chat" });
+  await writeProjects(ws, {
+    [FIXTURE_SESSION_ID]: "Fixture Chat A",
+    [FIXTURE_SESSION_ID_2]: "Fixture Chat B",
+    [FIXTURE_SESSION_ID_3]: "Fixture Chat C",
+  });
 
   await stop(PORT).catch(() => undefined);
   await sleep(1500);
@@ -378,8 +469,14 @@ async function main() {
     if (!world.hasFixtureChat)
       throw new Error("not the fixture world — refusing to continue");
 
-    await chatSuite(cdp, CHAT);
-    await diffSuite(cdp, DIFF);
+    // `--only` narrows the run while chasing one number. A suite left out is
+    // reported as not run, never as passed.
+    const only = str("only", "all");
+    const wanted = (name: string) => only === "all" || only === name;
+    if (wanted("chat")) await chatSuite(cdp, CHAT);
+    if (wanted("switch")) await tabSwitchSuite(cdp, CHAT);
+    if (wanted("diff")) await diffSuite(cdp, DIFF);
+    if (only !== "all") console.log(`\n(--only ${only}: other suites NOT run)`);
   } finally {
     cdp.close();
     if (!KEEP) await stop(PORT).catch(() => undefined);

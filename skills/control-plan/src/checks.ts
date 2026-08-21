@@ -7,7 +7,7 @@
  */
 
 import type { Session } from "./cdp.ts";
-import { sleep } from "./cdp.ts";
+import { MOD, sleep } from "./cdp.ts";
 import type { SurfaceSpec } from "./surface.ts";
 
 /** Records a frame timeline in the page. A gap means the main thread was
@@ -534,4 +534,135 @@ export async function parkReport(cdp: Session): Promise<ParkResult> {
       docHeightChanged: p[p.length-1][3] - p[0][3],
     };
   })()`);
+}
+
+export interface TabSwitchResult {
+  VALID: boolean;
+  switched: boolean;
+  /** Input to the first painted frame that shows the surface switched to. */
+  landedMs: number | null;
+  /** The longest frame after the commit — the stretch where nothing responds. */
+  longestBlockedMs: number;
+  longestBlockedAtMs: number;
+  framesOver100ms: number;
+  framesAfter: number;
+  error?: string;
+}
+
+const CTRL = { key: "Control", code: "ControlLeft", vk: 17 };
+const SHIFT = { key: "Shift", code: "ShiftLeft", vk: 16 };
+const TAB_KEY = { key: "Tab", code: "Tab", vk: 9 };
+
+/**
+ * Watch what the reader sees while a held-modifier switcher commits.
+ *
+ * Two things are sampled every frame, and they are not the same question:
+ * WHICH surface is on screen, and whether the middle of it has real content.
+ * A pane can be swapped in and still be a grey box for another frame.
+ *
+ * The surface is identified by element identity, not by anything it contains,
+ * so this stays surface-agnostic — a switch is "the visible scroller is a
+ * different element than the one that was there when the key was released".
+ *
+ * Sampling is a single hit test at the pane's centre, not a walk over its rows:
+ * at a few thousand rows the walk costs more than the frame it is measuring.
+ */
+const tabSwitchWatch = (s: SurfaceSpec) => `(() => {
+  window.__cpTS = [];
+  window.__cpTSt0 = null;
+  // e.timeStamp, not performance.now() inside the listener: the app's own
+  // handler runs first and does the work being measured, so a clock read here
+  // would start the stopwatch AFTER the freeze it is timing. timeStamp is when
+  // the input happened.
+  window.__cpTSup = (e) => {
+    if (e.key === "Control" && window.__cpTSt0 === null) window.__cpTSt0 = e.timeStamp;
+  };
+  window.addEventListener("keyup", window.__cpTSup, true);
+  window.__cpPaneSeq = 0;
+  window.__cpPaneIds = new WeakMap();
+  const paneId = (el) => {
+    let id = window.__cpPaneIds.get(el);
+    if (!id) { id = ++window.__cpPaneSeq; window.__cpPaneIds.set(el, id); }
+    return id;
+  };
+  const tick = (t) => {
+    const el = ${s.scroller};
+    let pane = 0, filled = 0;
+    if (el) {
+      pane = paneId(el);
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+      const row = hit && hit.closest ? hit.closest("${s.row}") : null;
+      if (row && (${s.filled})) filled = 1;
+    }
+    window.__cpTS.push([t, pane, filled]);
+    window.__cpTSraf = requestAnimationFrame(tick);
+  };
+  window.__cpTSraf = requestAnimationFrame(tick);
+  return 1;
+})()`;
+
+const TAB_SWITCH_REPORT = `(() => {
+  cancelAnimationFrame(window.__cpTSraf);
+  window.removeEventListener("keyup", window.__cpTSup, true);
+  const g = window.__cpTS, t0 = window.__cpTSt0;
+  const dead = { VALID: false, switched: false, landedMs: null,
+    longestBlockedMs: 0, longestBlockedAtMs: 0, framesOver100ms: 0, framesAfter: 0 };
+  if (t0 === null)
+    return { ...dead, error: "no Control keyup reached the page — the gesture never happened" };
+  const before = g.filter((f) => f[0] < t0);
+  const after = g.filter((f) => f[0] >= t0);
+  if (!after.length) return { ...dead, error: "no frames after the release" };
+  const wasPane = before.length ? before[before.length - 1][1] : 0;
+  const landed = after.find((f) => f[1] !== 0 && f[1] !== wasPane && f[2] === 1);
+  let worst = 0, worstAt = 0, over100 = 0;
+  for (let i = 1; i < after.length; i++) {
+    const dt = after[i][0] - after[i-1][0];
+    if (dt > 100) over100++;
+    if (dt > worst) { worst = dt; worstAt = Math.round(after[i][0] - t0); }
+  }
+  return {
+    VALID: !document.hidden,
+    switched: !!landed,
+    landedMs: landed ? Math.round(landed[0] - t0) : null,
+    longestBlockedMs: Math.round(worst),
+    longestBlockedAtMs: worstAt,
+    framesOver100ms: over100,
+    framesAfter: after.length,
+  };
+})()`;
+
+/**
+ * One Ctrl+Tab: hold Ctrl, tap Tab, release.
+ *
+ * The release is the moment that matters — the switcher only commits there, so
+ * the down and the up are dispatched separately and everything is measured from
+ * the release. Chromium swallows Ctrl+Tab before the page sees it, so the app
+ * intercepts it in the main process and forwards a cycle over IPC; the hold has
+ * to outlast that hop or the release commits nothing.
+ *
+ * `back` adds Shift, which steps the other way — onto the LAST entry in the
+ * list rather than the second.
+ */
+export async function tabSwitch(
+  cdp: Session,
+  s: SurfaceSpec,
+  { holdMs = 300, settleMs = 4000, back = false } = {},
+): Promise<TabSwitchResult> {
+  const mods = MOD.ctrl | (back ? MOD.shift : 0);
+  await cdp.evaluate(tabSwitchWatch(s));
+  await sleep(200);
+  await cdp.keyEvent("rawKeyDown", CTRL, MOD.ctrl);
+  await sleep(40);
+  if (back) await cdp.keyEvent("rawKeyDown", SHIFT, mods);
+  await sleep(40);
+  await cdp.keyEvent("rawKeyDown", TAB_KEY, mods);
+  await sleep(holdMs);
+  // Control last: the release of Control is what commits, so Shift must still
+  // be down when it happens or the gesture reads as a plain forward step.
+  await cdp.keyEvent("keyUp", CTRL, back ? MOD.shift : 0);
+  if (back) await cdp.keyEvent("keyUp", SHIFT, 0);
+  await sleep(settleMs);
+  return cdp.evaluate<TabSwitchResult>(TAB_SWITCH_REPORT);
 }

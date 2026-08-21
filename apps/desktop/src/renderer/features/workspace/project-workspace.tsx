@@ -521,7 +521,14 @@ const ChatTabPane = memo(function ChatTabPane({
   onSendKeys: (keys: string[]) => void;
 }) {
   return (
-    <div className={cn("absolute inset-0", !active && "hidden")}>
+    // Keep inactive chat panes mounted so switching back does not rebuild a
+    // large transcript. The pane keeps its box, so it must not receive input.
+    <div
+      className={cn(
+        "absolute inset-0",
+        !active && "pointer-events-none [content-visibility:hidden]",
+      )}
+    >
       {transcript ? (
         <MessageList
           messages={transcript.messages}

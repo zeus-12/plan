@@ -100,7 +100,7 @@ export function useRowWindow(
   const sync = useCallback(() => {
     const el = scrollRef.current;
     const content = contentRef.current;
-    if (!el || !content || el.clientHeight === 0 || inPass.current) return;
+    if (!el || !content || !el.checkVisibility() || inPass.current) return;
     inPass.current = true;
     try {
       const rows = content.querySelectorAll<HTMLElement>("[data-msg-row]");

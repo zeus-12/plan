@@ -33,7 +33,9 @@ export interface SurfaceSpec {
 /** The chat transcript. */
 export const CHAT: SurfaceSpec = {
   name: "chat",
-  scroller: `[...document.querySelectorAll(".chat-transcript")].find((e) => e.clientHeight > 0)`,
+  // checkVisibility, not clientHeight: an inactive pane is skipped with
+  // content-visibility, which keeps its layout box and so its height.
+  scroller: `[...document.querySelectorAll(".chat-transcript")].find((e) => e.checkVisibility())`,
   row: "[data-msg-row]",
   filled: "row.children.length > 0",
   rowKey: "data-msg-row",
@@ -49,6 +51,7 @@ export const DIFF: SurfaceSpec = {
   scroller: `(() => {
     const all = [...document.querySelectorAll("*")].filter((e) => {
       if (e.classList.contains("chat-transcript")) return false;
+      if (!e.checkVisibility()) return false;
       const cs = getComputedStyle(e);
       return e.scrollHeight > e.clientHeight + 100 && /auto|scroll/.test(cs.overflowY);
     });

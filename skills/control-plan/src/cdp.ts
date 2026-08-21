@@ -28,9 +28,22 @@ export interface Session {
   click(x: number, y: number): Promise<void>;
   wheel(x: number, y: number, deltaY: number): Promise<void>;
   key(name: string, opts?: { meta?: boolean }): Promise<void>;
+  /**
+   * One half of a keystroke. A gesture that HOLDS a modifier needs the down and
+   * the up as separate calls: Ctrl+Tab cycles on the taps but commits on the
+   * Ctrl release, so a fused press-and-release measures the wrong moment.
+   */
+  keyEvent(
+    type: "rawKeyDown" | "keyUp",
+    key: { key: string; code: string; vk: number },
+    modifiers?: number,
+  ): Promise<void>;
   type(text: string): Promise<void>;
   close(): void;
 }
+
+/** CDP's modifier bitmask. */
+export const MOD = { alt: 1, ctrl: 2, meta: 4, shift: 8 } as const;
 
 export class GuardFailure extends Error {
   readonly state: Guard;
@@ -174,6 +187,17 @@ export async function connect(port: number): Promise<Session> {
     await send("Input.dispatchKeyEvent", { ...base, type: "keyUp" });
   };
 
+  const keyEvent: Session["keyEvent"] = async (type, k, modifiers = 0) => {
+    await send("Input.dispatchKeyEvent", {
+      type,
+      modifiers,
+      key: k.key,
+      code: k.code,
+      windowsVirtualKeyCode: k.vk,
+      nativeVirtualKeyCode: k.vk,
+    });
+  };
+
   const type: Session["type"] = async (text) => {
     for (const ch of text) {
       await send("Input.dispatchKeyEvent", { type: "char", text: ch });
@@ -191,6 +215,7 @@ export async function connect(port: number): Promise<Session> {
     click,
     wheel,
     key,
+    keyEvent,
     type,
     close: () => ws.close(),
   };

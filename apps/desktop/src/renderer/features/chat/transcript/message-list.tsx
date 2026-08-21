@@ -1770,7 +1770,7 @@ export const MessageList = memo(function MessageList({
   // Where the restore wants the scroller, applied against the CURRENT layout.
   const applyScrollTarget = useCallback(() => {
     const el = parentRef.current;
-    if (!el || el.clientHeight === 0) return;
+    if (!el || !el.checkVisibility()) return;
     const pos = savedRef.current;
     if (followingBottomRef.current) {
       el.scrollTop = el.scrollHeight;
