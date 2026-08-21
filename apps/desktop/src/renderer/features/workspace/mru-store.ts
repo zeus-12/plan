@@ -1,5 +1,5 @@
 /**
- * In-memory most-recently-used ordering for the Ctrl+Tab / Ctrl+` switchers.
+ * In-memory most-recently-used ordering for the Ctrl+Tab / Ctrl+1 switchers.
  *
  * Windows Alt-Tab semantics: items are ordered by when they were last
  * activated, newest first. A single tap-release of the switcher jumps to the

@@ -13,7 +13,7 @@ import { SWITCHER_FORWARDED_CODES } from "@/common/shared-types";
  * cancels too (so it can't get stuck).
  *
  * Several channels coexist — content-pane tabs (Ctrl+Tab) and the unified
- * projects+worktrees switcher (Ctrl+`) — but there
+ * projects+worktrees switcher (Ctrl+1) — but there
  * is a SINGLE window listener and a SINGLE active-state, so there's no
  * effect-ordering race or stuck-lock between component instances: on the
  * opening keystroke we pick the enabled channel whose trigger key matches.
@@ -25,7 +25,7 @@ import { SWITCHER_FORWARDED_CODES } from "@/common/shared-types";
 
 interface Channel {
   id: string;
-  /** KeyboardEvent.code that opens this channel, e.g. "Tab" | "Backquote". */
+  /** KeyboardEvent.code that opens this channel, e.g. "Tab" | "Digit1". */
   triggerCode: string;
   isEnabled: () => boolean;
   getItems: () => unknown[];
@@ -132,13 +132,12 @@ function onKeyDown(e: KeyboardEvent) {
   // The lone Ctrl keydown that precedes the trigger arms modDown, which the
   // first (async, IPC-delivered) cycle of the gesture is gated on.
   syncMod(e);
-  // Renderer-side path: suppress the combo's default (a ` or Tab reaching an
+  // Renderer-side path: suppress the combo's default (a 1 or Tab reaching an
   // input/terminal) for whichever registered channel claims this key code.
   // Cycling for main-forwarded codes happens ONLY via the IPC path (see
   // MAIN_FORWARDED_CODES); other codes cycle from this native keydown.
-  // Ctrl drives every channel. Cmd also drives the backtick project+worktree
-  // switcher since that's the macOS-natural key — but NOT Tab (Cmd+Tab is the OS
-  // app switcher) and NOT digits (Cmd+1‑4 switch sidebar tabs).
+  // Ctrl drives every channel. Cmd is excluded for Tab (the OS app switcher)
+  // and digits (the app's sidebar shortcuts).
   const mod =
     e.ctrlKey || (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
   if (mod && !e.altKey && channels.some((c) => c.triggerCode === e.code)) {
@@ -206,7 +205,7 @@ function subscribe(l: () => void) {
 interface Options<T> {
   id: string;
   enabled: boolean;
-  /** KeyboardEvent.code that opens this channel: "Tab" or "Backquote". */
+  /** KeyboardEvent.code that opens this channel: "Tab" or "Digit1". */
   triggerCode: string;
   /** Items in display order — MRU-ordered, current item first. */
   items: T[];

@@ -175,19 +175,12 @@ function sendToRenderer<K extends keyof IpcEventContract>(
 
 // ── Menu ───────────────────────────────────────────────────────────
 
-// Which modifiers arm each forwarded switcher trigger. Keyed by the shared
-// SWITCHER_FORWARDED_CODES union, so forwarding a new code here without the
-// renderer knowing (or vice versa) is a compile error, not a silent
-// double-step. Tab stays Ctrl-only because Cmd+Tab is the macOS app switcher
-// and must not be hijacked; Backquote accepts Ctrl or Cmd because Cmd+` is the
-// key macOS users reach for, and overriding the OS "cycle windows" shortcut is
-// harmless in a single-window app.
 const switcherModifierOk: Record<
   SwitcherForwardedCode,
   (input: Electron.Input) => boolean
 > = {
   Tab: (input) => input.control && !input.meta,
-  Backquote: (input) => input.control || input.meta,
+  Digit1: (input) => input.control && !input.meta,
 };
 
 function buildMenu() {
@@ -294,7 +287,7 @@ function createMainWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  // Ctrl+Tab (sessions) / Ctrl+` (projects) switcher; Shift reverses direction.
+  // Ctrl+Tab (sessions) / Ctrl+1 (projects) switcher; Shift reverses direction.
   // Chromium swallows plain Ctrl+Tab before the page's keydown sees it, and a
   // macOS menu accelerator for Tab is unreliable (often consumed by AppKit
   // without firing). before-input-event is the dependable interception point:

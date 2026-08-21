@@ -691,5 +691,5 @@ export interface SentFile {
  * cycling for exactly these codes so main's forward is the ONLY cycle driver.
  * One keystroke must never step twice.
  */
-export const SWITCHER_FORWARDED_CODES = ["Tab", "Backquote"] as const;
+export const SWITCHER_FORWARDED_CODES = ["Tab", "Digit1"] as const;
 export type SwitcherForwardedCode = (typeof SWITCHER_FORWARDED_CODES)[number];

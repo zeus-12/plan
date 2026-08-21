@@ -435,7 +435,7 @@ export interface IpcSendContract {
 /** Main→renderer push channels: `webContents.send` ↔ `ipcRenderer.on`. */
 export interface IpcEventContract {
   "watcher:event": [e: SessionEvent];
-  /** Ctrl+Tab / Ctrl+` cycle forwarded from main's before-input-event. */
+  /** Ctrl+Tab / Ctrl+1 cycle forwarded from main's before-input-event. */
   "switcher:cycle": [e: { key: string; shift: boolean }];
   /** ⌘R pressed; renderer force-refreshes a data page or reloads the app. */
   "app:reload-request": [];
