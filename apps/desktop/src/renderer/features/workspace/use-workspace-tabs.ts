@@ -45,10 +45,29 @@ export function useWorkspaceTabs(
     title: string | null;
     archived: boolean;
   }[],
+  showChats: boolean,
 ) {
-  const [tab, setTab] = useState<WorkTab>("chat");
-  const { tabs, activeId, openTab, closeTab, closeActive, setActive } =
-    useProjectTabs(encoded);
+  const [tab, setTab] = useState<WorkTab>(() => (showChats ? "chat" : "diffs"));
+  const {
+    tabs: storedTabs,
+    activeId: storedActiveId,
+    openTab,
+    closeTab,
+    setActive,
+  } = useProjectTabs(encoded);
+
+  useEffect(() => {
+    if (!showChats && tab === "chat") setTab("diffs");
+  }, [showChats, tab]);
+
+  const tabs = useMemo(
+    () =>
+      showChats ? storedTabs : storedTabs.filter((t) => t.kind !== "chat"),
+    [showChats, storedTabs],
+  );
+  const activeId = tabs.some((t) => t.id === storedActiveId)
+    ? storedActiveId
+    : (tabs[tabs.length - 1]?.id ?? null);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeId) ?? null,
@@ -109,6 +128,10 @@ export function useWorkspaceTabs(
     [openTab],
   );
 
+  const closeActive = useCallback(() => {
+    if (activeId) closeTab(activeId);
+  }, [activeId, closeTab]);
+
   // ── Ctrl+Tab ordering (per-worktree MRU + sessions without a tab) ──
   const tabsMruScope = `tabs:${encoded}`;
   // Subscribe to THIS worktree's tab scope only — a project switch elsewhere
@@ -145,16 +168,18 @@ export function useWorkspaceTabs(
       id: t.id,
       tab: t,
     }));
-    const sessionEntries: SwitcherEntry[] = sessions
-      .filter((s) => !s.archived && !openSessionIds.has(s.sessionId))
-      .map((s) => ({
-        type: "session",
-        id: `switch-session:${s.sessionId}`,
-        sessionId: s.sessionId,
-        title: s.title ?? "Chat",
-      }));
+    const sessionEntries: SwitcherEntry[] = showChats
+      ? sessions
+          .filter((s) => !s.archived && !openSessionIds.has(s.sessionId))
+          .map((s) => ({
+            type: "session" as const,
+            id: `switch-session:${s.sessionId}`,
+            sessionId: s.sessionId,
+            title: s.title ?? "Chat",
+          }))
+      : [];
     return [...tabEntries, ...sessionEntries];
-  }, [tabsByMru, tabs, sessions]);
+  }, [tabsByMru, tabs, sessions, showChats]);
 
   // Index of the active tab, or -1 when nothing is open so the first tap lands
   // on the first entry rather than skipping it.
@@ -172,8 +197,9 @@ export function useWorkspaceTabs(
   // there is no selected session) should land on: the most recently used open
   // chat tab, which IS the active tab whenever that tab is a chat. Null when
   // the worktree has no chat tab open at all.
-  const mruChatSessionId =
-    tabsByMru.find((t) => t.kind === "chat")?.sessionId ?? null;
+  const mruChatSessionId = showChats
+    ? (tabsByMru.find((t) => t.kind === "chat")?.sessionId ?? null)
+    : null;
 
   return {
     /** Which sidebar list shows. */

@@ -53,6 +53,7 @@ import { StatusDots } from "@/renderer/features/sessions/status-dots";
 import { ChevronLeft } from "@/renderer/components/chevron";
 
 interface Props {
+  showChats: boolean;
   projects: ProjectEntry[];
   reposByProject: Map<string, DiscoveredRepo[]>;
   /** file:// icon URL per project (repo favicon / GitHub avatar); absent = none. */
@@ -230,6 +231,7 @@ function ProjectIcon({ url, name }: { url: string | undefined; name: string }) {
 }
 
 export function ProjectSidebar({
+  showChats,
   projects,
   reposByProject,
   iconsByProject,
@@ -401,7 +403,9 @@ export function ProjectSidebar({
     if (confirmTarget.kind === "archive") {
       return {
         title: `Archive "${name}"?`,
-        body: "It will move to the Archived section. You can restore it from there at any time. Sessions continue to be tracked in the background.",
+        body: showChats
+          ? "It will move to the Archived section. You can restore it from there at any time. Sessions continue to be tracked in the background."
+          : "It will move to the Archived section. You can restore it from there at any time.",
         action: "Archive",
       };
     }
@@ -410,7 +414,7 @@ export function ProjectSidebar({
       body: "It will return to the main project list.",
       action: "Unarchive",
     };
-  }, [confirmTarget]);
+  }, [confirmTarget, showChats]);
 
   const [width, setWidth] = usePersistentNumber(
     "plan.projectSidebar.width",
@@ -430,36 +434,40 @@ export function ProjectSidebar({
           plan
         </span>
         <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onOpenDashboard}
-                aria-label="Running Claude sessions"
-              >
-                <GaugeIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <span>Running Claude sessions</span>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onOpenClaudeConfig}
-                aria-label="Claude instructions & memory"
-              >
-                <GlobeIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <span>Claude instructions &amp; memory</span>
-            </TooltipContent>
-          </Tooltip>
+          {showChats && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onOpenDashboard}
+                  aria-label="Running Claude sessions"
+                >
+                  <GaugeIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <span>Running Claude sessions</span>
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {showChats && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onOpenClaudeConfig}
+                  aria-label="Claude instructions & memory"
+                >
+                  <GlobeIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <span>Claude instructions &amp; memory</span>
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -563,12 +571,14 @@ export function ProjectSidebar({
                         <span className="min-w-0 flex-1 truncate">
                           {row.node.name}
                         </span>
-                        <StatusDots
-                          approval={groupNeedsApproval}
-                          unread={groupHasUnread}
-                          working={groupWorking}
-                          className="mr-0.5"
-                        />
+                        {showChats && (
+                          <StatusDots
+                            approval={groupNeedsApproval}
+                            unread={groupHasUnread}
+                            working={groupWorking}
+                            className="mr-0.5"
+                          />
+                        )}
                         <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
                           {row.node.children.length}
                         </span>
@@ -657,11 +667,13 @@ export function ProjectSidebar({
                               )}
                             </span>
                           </button>
-                          <StatusDots
-                            approval={wtNeedsApproval}
-                            unread={wtHasUnread}
-                            working={wtWorking}
-                          />
+                          {showChats && (
+                            <StatusDots
+                              approval={wtNeedsApproval}
+                              unread={wtHasUnread}
+                              working={wtWorking}
+                            />
+                          )}
                         </div>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
@@ -798,11 +810,13 @@ export function ProjectSidebar({
                                 {row.worktrees.length}
                               </span>
                             )}
-                            <StatusDots
-                              approval={projNeedsApproval}
-                              unread={projHasUnread}
-                              working={projWorking}
-                            />
+                            {showChats && (
+                              <StatusDots
+                                approval={projNeedsApproval}
+                                unread={projHasUnread}
+                                working={projWorking}
+                              />
+                            )}
                             {!p.archived && (
                               <div
                                 className={cn(

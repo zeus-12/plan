@@ -35,6 +35,7 @@ interface Props {
   target: MountTarget;
   /** Whether this host is the one on screen (drives visibility + input gating). */
   active: boolean;
+  showChats: boolean;
   /** All projects — for the ⌘K palette and resolving a working copy's entry. */
   projects: ProjectEntry[];
   /** Working-copy repos, keyed by project encoded. */
@@ -64,6 +65,7 @@ interface Props {
 function WorkspaceHostImpl({
   target,
   active,
+  showChats,
   projects,
   reposByProject,
   worktreeRecord,
@@ -173,6 +175,7 @@ function WorkspaceHostImpl({
           project={project}
           repos={repos}
           active={active}
+          showChats={showChats}
           projectsSidebarOpen={projectsSidebarOpen}
           projects={projects}
           onSelectProject={onSelectProject}

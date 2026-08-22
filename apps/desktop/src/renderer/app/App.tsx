@@ -106,6 +106,7 @@ import {
 } from "@/renderer/features/sessions/notifications/session-notify";
 import { getCachedSessions } from "@/renderer/features/sessions/session-cache";
 import { parseChatTerminalId } from "@/common/terminal-ids";
+import { useShowChatsEnabled } from "@/renderer/features/chat/chat-visibility-settings";
 
 const SELECTED_PROJECT_KEY = "plan.selectedProject";
 // The focused worktree persists alongside it so a relaunch lands back on the
@@ -129,6 +130,7 @@ const getSwitchMruVersion = () => getMruScopeVersion(SWITCH_MRU_SCOPE);
 
 function Shell() {
   const projectsSidebar = useSidebar();
+  const showChats = useShowChatsEnabled();
   // Apply the reader's transcript font/size/brightness prefs before first paint.
   useApplyTranscriptPrefs();
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -552,22 +554,40 @@ function Shell() {
   // Pull the chat-engine table up front, so what an engine can do is a known
   // fact by the time a session's UI depends on it rather than something the
   // first chat has to wait on.
-  useEffect(() => preloadChatEngines(), []);
+  useEffect(() => {
+    if (showChats) preloadChatEngines();
+  }, [showChats]);
   // Detecting installed apps shells out once per candidate bundle id; do it at
   // startup so the "Open in" control resolves before it's first rendered.
   useEffect(() => preloadExternalApps(), []);
   // Watch every live Claude session for completion and notify globally. Started
   // once here at the app root so it covers background sessions too, not just the
   // one on screen.
-  useEffect(() => startSessionDoneNotifier(), []);
+  useEffect(() => {
+    if (!showChats) return;
+    return startSessionDoneNotifier();
+  }, [showChats]);
   // And watch every live session for an approval/selection menu, so a session
   // that parks on a prompt raises a notification even when it's in a project or
   // worktree that isn't on screen. Sidebar badges read the same store.
-  useEffect(() => startSessionApprovalNotifier(), []);
+  useEffect(() => {
+    if (!showChats) return;
+    return startSessionApprovalNotifier();
+  }, [showChats]);
   // And watch every live session for a turn that died on a transient API error,
   // so one that drops mid-response gets nudged back instead of parking until
   // it's noticed. Gated on the auto-continue setting, checked when it fires.
-  useEffect(() => startAutoContinueWatcher(), []);
+  useEffect(() => {
+    if (!showChats) return;
+    return startAutoContinueWatcher();
+  }, [showChats]);
+
+  useEffect(() => {
+    if (!showChats) {
+      setDashboardOpen(false);
+      setClaudeConfigScope(null);
+    }
+  }, [showChats]);
   // Notification body: the chat's own title, falling back to the repo it lives
   // in. Titles are only known for worktrees loaded this launch and a fresh chat
   // has none — never fabricated, so those cases get the repo name instead.
@@ -805,6 +825,7 @@ function Shell() {
       <Toaster position="bottom-right" closeButton />
       <UpdateBanner />
       <ProjectSidebar
+        showChats={showChats}
         projects={projects}
         reposByProject={reposByProject}
         iconsByProject={iconsByProject}
@@ -832,6 +853,7 @@ function Shell() {
             <WorkspaceHost
               key={t.encoded}
               target={t}
+              showChats={showChats}
               // Visibility follows the DEFERRED target: the old workspace
               // stays on screen (and interactive) until the new one has
               // actually rendered — never a blank flash mid-switch.
@@ -857,7 +879,7 @@ function Shell() {
         )}
       </main>
       <Suspense fallback={null}>
-        {dashboardOpen && (
+        {showChats && dashboardOpen && (
           <SessionsDashboard
             open
             onClose={() => setDashboardOpen(false)}
@@ -882,7 +904,7 @@ function Shell() {
             onClose={() => setShortcutsOpen(false)}
           />
         )}
-        {claudeConfigScope && (
+        {showChats && claudeConfigScope && (
           <ClaudeConfigModal
             encoded={selectedEncoded}
             initialScope={claudeConfigScope}
@@ -961,11 +983,13 @@ function Shell() {
           }))}
         />
       )}
-      <AttentionSwitcher
-        projects={activeProjects}
-        worktreesByProject={allWorktrees.byProject}
-        onNavigate={handleAttentionNavigate}
-      />
+      {showChats && (
+        <AttentionSwitcher
+          projects={activeProjects}
+          worktreesByProject={allWorktrees.byProject}
+          onNavigate={handleAttentionNavigate}
+        />
+      )}
       {confirmDialog}
     </div>
   );

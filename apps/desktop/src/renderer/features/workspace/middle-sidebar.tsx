@@ -42,9 +42,13 @@ import type { WorkTab } from "./use-workspace-tabs";
 
 export type { WorkTab };
 
+const REVIEW_TABS: readonly WorkTab[] = ["diffs", "files", "search", "pr"];
+const ALL_WORK_TABS: readonly WorkTab[] = ["chat", ...REVIEW_TABS];
+
 interface Props {
   tab: WorkTab;
   onTabChange: (t: WorkTab) => void;
+  showChats: boolean;
 
   repos: DiscoveredRepo[];
   repoGroups: RepoFileGroup[];
@@ -194,9 +198,11 @@ function PlusIcon() {
 function WorkTabStrip({
   tab,
   diffsRefreshing,
+  showChats,
 }: {
   tab: WorkTab;
   diffsRefreshing: boolean;
+  showChats: boolean;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: false, end: false });
@@ -242,7 +248,7 @@ function WorkTabStrip({
         {/* Auto margins center it while it fits and collapse to 0 once it
             overflows, so the first tab is never scrolled out of reach. */}
         <TabsList className="mx-auto w-max">
-          <TabsTrigger value="chat">Chat</TabsTrigger>
+          {showChats && <TabsTrigger value="chat">Chat</TabsTrigger>}
           <TabsTrigger value="diffs">
             {/* Shimmer rather than an icon: it's the app's existing "working"
                 language and costs no width, so the strip can't shift. */}
@@ -275,6 +281,7 @@ function WorkTabStrip({
 export const MiddleSidebar = memo(function MiddleSidebar({
   tab,
   onTabChange,
+  showChats,
   repos,
   repoGroups,
   selectedFile,
@@ -383,26 +390,15 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         return;
       }
       if (e.shiftKey) return;
-      if (e.key === "1") {
-        e.preventDefault();
-        onTabChange("chat");
-      } else if (e.key === "2") {
-        e.preventDefault();
-        onTabChange("diffs");
-      } else if (e.key === "3") {
-        e.preventDefault();
-        onTabChange("files");
-      } else if (e.key === "4") {
-        e.preventDefault();
-        onTabChange("search");
-      } else if (e.key === "5") {
-        e.preventDefault();
-        onTabChange("pr");
-      }
+      const tabs = showChats ? ALL_WORK_TABS : REVIEW_TABS;
+      const nextTab = tabs[Number(e.key) - 1];
+      if (!nextTab) return;
+      e.preventDefault();
+      onTabChange(nextTab);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onTabChange]);
+  }, [onTabChange, showChats]);
 
   // ⌘T → toggle the embedded terminal pane (⌘J stays the coding-agent dock).
   // Reveals a hidden sidebar and spawns a first shell when there are none, so
@@ -470,7 +466,11 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       >
         <SidebarHeader className="h-[44px] px-3 pt-2 pb-2 [-webkit-app-region:drag]">
           <div className="flex w-full min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
-            <WorkTabStrip tab={tab} diffsRefreshing={diffsRefreshing} />
+            <WorkTabStrip
+              tab={tab}
+              diffsRefreshing={diffsRefreshing}
+              showChats={showChats}
+            />
             {/* Detached from the tab group: opens the scratchpad as a center-pane
                 tab rather than switching this sidebar's view. */}
             <button
@@ -534,23 +534,25 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             )}
           </TabsContent>
 
-          <TabsContent
-            value="chat"
-            forceMount
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-          >
-            <SessionList
-              sessions={sessions}
-              selected={selectedSession}
-              encoded={encoded}
-              onSelect={onSelectSession}
-              onSetArchived={onSetSessionArchived}
-              onRename={onRenameSession}
-              onMoveSession={onMoveSession}
-              onNewChat={onNewChat}
-              loading={sessionsLoading}
-            />
-          </TabsContent>
+          {showChats && (
+            <TabsContent
+              value="chat"
+              forceMount
+              className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+            >
+              <SessionList
+                sessions={sessions}
+                selected={selectedSession}
+                encoded={encoded}
+                onSelect={onSelectSession}
+                onSetArchived={onSetSessionArchived}
+                onRename={onRenameSession}
+                onMoveSession={onMoveSession}
+                onNewChat={onNewChat}
+                loading={sessionsLoading}
+              />
+            </TabsContent>
+          )}
 
           <TabsContent
             value="files"

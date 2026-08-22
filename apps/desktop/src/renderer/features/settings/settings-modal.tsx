@@ -22,6 +22,7 @@ import {
 } from "@/renderer/features/chat/session/chat-engine-settings";
 import type { ChatEngineId } from "@/common/chat-engines";
 import { useAutoContinueEnabled } from "@/renderer/features/chat/session/auto-continue-settings";
+import { useShowChats } from "@/renderer/features/chat/chat-visibility-settings";
 import { useDebugMode } from "@/renderer/features/debug/debug-mode";
 import {
   PROSE_BRIGHTNESS,
@@ -52,6 +53,7 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [autoContinue, setAutoContinue] = useAutoContinueEnabled();
   const [prose, setProse] = useTranscriptPrefs();
   const [debugMode, setDebugMode] = useDebugMode();
+  const [showChats, setShowChats] = useShowChats();
 
   useEffect(() => {
     if (!open) return;
@@ -91,6 +93,28 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <section className="mb-6 flex flex-col gap-3">
+            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+              Conversations
+            </h3>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-[12px] text-[var(--text)]">
+                  Show chats
+                </span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Show Claude chats and session controls in the workspace.
+                </span>
+              </div>
+              <Switch
+                aria-label="Show chats"
+                checked={showChats}
+                onCheckedChange={setShowChats}
+              />
+            </div>
+            <div className="mt-2 h-px bg-[var(--border)]" />
+          </section>
+
           <section className="mb-6 flex flex-col gap-3">
             <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
               Reading
@@ -177,7 +201,7 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
           {/* Which engine drives new chats. Rendered only once there's an
               actual choice to make — with a single engine registered there's
               nothing to pick, and a one-option select would just be noise. */}
-          {engines.length > 1 && (
+          {showChats && engines.length > 1 && (
             <section className="mb-6 flex flex-col gap-3">
               <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
                 Engine
@@ -207,92 +231,96 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
             </section>
           )}
 
-          <section className="mb-6 flex flex-col gap-3">
-            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
-              Auto mode
-            </h3>
+          {showChats && (
+            <section className="mb-6 flex flex-col gap-3">
+              <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+                Auto mode
+              </h3>
 
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-col">
-                <span className="text-[12px] text-[var(--text)]">
-                  Run Claude Code in auto mode
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)]">
-                  New sessions start with{" "}
-                  <code className="font-[family-name:var(--font-mono)] text-[10px]">
-                    --permission-mode auto
-                  </code>
-                  .
-                </span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-[12px] text-[var(--text)]">
+                    Run Claude Code in auto mode
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    New sessions start with{" "}
+                    <code className="font-[family-name:var(--font-mono)] text-[10px]">
+                      --permission-mode auto
+                    </code>
+                    .
+                  </span>
+                </div>
+                <Switch checked={autoMode} onCheckedChange={setAutoMode} />
               </div>
-              <Switch checked={autoMode} onCheckedChange={setAutoMode} />
-            </div>
 
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-col">
-                <span className="text-[12px] text-[var(--text)]">
-                  Auto-continue on error
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)]">
-                  When a response dies mid-stream, send &ldquo;Please
-                  continue&rdquo; once. Rate limits and login errors are left
-                  alone.
-                </span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-[12px] text-[var(--text)]">
+                    Auto-continue on error
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    When a response dies mid-stream, send &ldquo;Please
+                    continue&rdquo; once. Rate limits and login errors are left
+                    alone.
+                  </span>
+                </div>
+                <Switch
+                  checked={autoContinue}
+                  onCheckedChange={setAutoContinue}
+                />
               </div>
-              <Switch
-                checked={autoContinue}
-                onCheckedChange={setAutoContinue}
-              />
-            </div>
-          </section>
+            </section>
+          )}
 
-          <section className="flex flex-col gap-3">
-            <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
-              Notifications
-            </h3>
+          {showChats && (
+            <section className="flex flex-col gap-3">
+              <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">
+                Notifications
+              </h3>
 
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-col">
-                <span className="text-[12px] text-[var(--text)]">
-                  Notify when a session finishes
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)]">
-                  Any running Claude session, whether or not it&apos;s on
-                  screen.
-                </span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-[12px] text-[var(--text)]">
+                    Notify when a session finishes
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    Any running Claude session, whether or not it&apos;s on
+                    screen.
+                  </span>
+                </div>
+                <Switch
+                  checked={settings.enabled}
+                  onCheckedChange={(on) => update({ enabled: on })}
+                />
               </div>
-              <Switch
-                checked={settings.enabled}
-                onCheckedChange={(on) => update({ enabled: on })}
-              />
-            </div>
 
-            <div
-              className={cn(
-                "flex flex-col gap-1.5",
-                !settings.enabled && "pointer-events-none opacity-40",
-              )}
-            >
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                Sound
-              </span>
-              <Select
-                value={settings.sound}
-                onValueChange={(v) => pickSound(v as SoundId)}
+              <div
+                className={cn(
+                  "flex flex-col gap-1.5",
+                  !settings.enabled && "pointer-events-none opacity-40",
+                )}
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SOUND_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.id} value={opt.id}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </section>
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Sound
+                </span>
+                <Select
+                  value={settings.sound}
+                  onValueChange={(v) => pickSound(v as SoundId)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SOUND_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </section>
+          )}
 
           <section className="mt-6 flex flex-col gap-3">
             <h3 className="font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--text)]">

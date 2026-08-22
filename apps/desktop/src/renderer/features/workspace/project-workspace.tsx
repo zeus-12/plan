@@ -162,6 +162,7 @@ interface Props {
    * don't need gating.
    */
   active: boolean;
+  showChats: boolean;
   projectsSidebarOpen: boolean;
   /** All projects + a switch callback — drives the ⌘K palette. */
   projects: ProjectEntry[];
@@ -564,6 +565,7 @@ function ProjectWorkspaceImpl({
   project,
   repos,
   active,
+  showChats,
   projectsSidebarOpen,
   projects,
   onSelectProject,
@@ -621,7 +623,7 @@ function ProjectWorkspaceImpl({
     switcherCurrentIndex,
     firstSessionSwitcherId,
     hasOpenTabs,
-  } = useWorkspaceTabs(project.encoded, sessions);
+  } = useWorkspaceTabs(project.encoded, sessions, showChats);
 
   // Panes stay mounted once created (scroll position, expanded diffs, undo
   // history survive tab switches) — but they are created LAZILY: a tab's pane
@@ -807,6 +809,10 @@ function ProjectWorkspaceImpl({
   const followBranchRef = useRef<(candidateSids: string[]) => void>(() => {});
 
   const refreshSessions = useCallback(async () => {
+    if (!showChats) {
+      setSessionsLoading(false);
+      return;
+    }
     try {
       // List metadata comes straight from main's mtime cache — never fetch
       // full transcripts here (that froze the renderer on every watcher tick).
@@ -846,7 +852,7 @@ function ProjectWorkspaceImpl({
       // so background refreshes don't re-render through this.
       setSessionsLoading(false);
     }
-  }, [project.encoded]);
+  }, [project.encoded, showChats]);
 
   const handleSetSessionArchived = useCallback(
     async (sessionId: string, archived: boolean) => {
@@ -974,8 +980,9 @@ function ProjectWorkspaceImpl({
   useEffect(() => {
     // The workspace remounts per project (keyed by encoded), so initial state
     // is already fresh — don't clear the persisted session/annotations here.
-    refreshSessions();
-  }, [refreshSessions]);
+    if (showChats) void refreshSessions();
+    else setSessionsLoading(false);
+  }, [refreshSessions, showChats]);
 
   // Load a transcript for every open chat tab (and drop ones whose tab closed)
   // so each chat tab's MessageList stays mounted with live content.
@@ -1051,7 +1058,8 @@ function ProjectWorkspaceImpl({
 
     const off = window.electronAPI.onWatcherEvent((e) => {
       if (e.encoded !== project.encoded) return;
-      if (e.kind === "new-session" && e.sessionId) newSids.add(e.sessionId);
+      if (showChats && e.kind === "new-session" && e.sessionId)
+        newSids.add(e.sessionId);
       // A worktree change (file edit / git op on disk) bumps the content
       // revision so open diff/file/image panes re-fetch — refreshDiff below
       // covers the sidebar status, this covers the mounted content panes.
@@ -1064,14 +1072,20 @@ function ProjectWorkspaceImpl({
       if (e.sessionId && chatSessionIdsRef.current.includes(e.sessionId)) {
         changedSids.add(e.sessionId);
       }
-      scheduleSession();
+      if (showChats) scheduleSession();
     });
     return () => {
       off();
       if (gitTimer) clearTimeout(gitTimer);
       if (sessionTimer) clearTimeout(sessionTimer);
     };
-  }, [project.encoded, refreshDiff, refreshSessions, refreshTranscript]);
+  }, [
+    project.encoded,
+    refreshDiff,
+    refreshSessions,
+    refreshTranscript,
+    showChats,
+  ]);
 
   // Catch-up on window focus: whatever the watcher missed while we were in the
   // background is reconciled the moment the user comes back. One read per
@@ -1730,6 +1744,7 @@ function ProjectWorkspaceImpl({
     (item: CommentListItem) => {
       const target = item.target;
       if (!target) return;
+      if (!showChats && target.kind === "chat") return;
       const tab =
         target.kind === "file"
           ? makeFileTab(target.path)
@@ -1746,7 +1761,7 @@ function ProjectWorkspaceImpl({
         file: target.kind === "pr" ? target.file : undefined,
       }));
     },
-    [openTab],
+    [openTab, showChats],
   );
 
   // Writing a comment means you're about to send one, so warm the session it
@@ -2405,88 +2420,90 @@ function ProjectWorkspaceImpl({
                     {/* Chat tabs: each keeps a mounted MessageList (transcript scroll
                     survives switching); the composer binds to the ACTIVE chat,
                     since you only type into one chat at a time. */}
-                    <div
-                      className={cn(
-                        "absolute inset-0 flex min-h-0 flex-col",
-                        activeTab?.kind !== "chat" && "hidden",
-                      )}
-                    >
-                      <div className="relative min-h-0 flex-1">
-                        {tabs.map((t) => {
-                          if (t.kind !== "chat" || !paneMounted(t.id))
-                            return null;
-                          // Active only when this workspace is the visible one AND
-                          // this is its active tab — so a hidden (keep-alive) chat
-                          // stops driving its terminal/working signals.
-                          const tabActive = active && t.id === activeId;
-                          // Active-only signals (working/terminalReady) are passed as
-                          // `false` to inactive panes, so a working-state flip on the
-                          // live chat re-renders only that one transcript — not all.
-                          return (
-                            <ChatTabPane
-                              key={t.id}
-                              tab={t}
-                              active={tabActive}
-                              encoded={project.encoded}
-                              transcript={transcripts.get(t.sessionId)}
-                              annotations={chatAnnotations}
-                              working={tabActive ? chatWorking : false}
-                              terminalReady={
-                                tabActive ? chatTerminalReady : false
-                              }
-                              isNew={isNewSession(t.sessionId)}
-                              revealAnnotation={
-                                commentReveal?.tabId === t.id
-                                  ? commentReveal
-                                  : null
-                              }
-                              onAddAnnotation={addChatAnnotation}
-                              onUpdateAnnotation={updateChatAnnotation}
-                              onRemoveAnnotation={removeChatAnnotation}
-                              onSendKeys={sendKeysToChat}
-                            />
-                          );
-                        })}
-                      </div>
-                      {comments.length > 0 && (
-                        <div className="shrink-0 px-3 pb-1.5">
-                          <div className="mx-auto w-full max-w-[820px]">
-                            <CommentChip
-                              comments={comments}
-                              message={composedMessage}
-                              onClear={handleClearComments}
-                              onOpen={handleOpenComment}
-                            />
-                          </div>
+                    {showChats && (
+                      <div
+                        className={cn(
+                          "absolute inset-0 flex min-h-0 flex-col",
+                          activeTab?.kind !== "chat" && "hidden",
+                        )}
+                      >
+                        <div className="relative min-h-0 flex-1">
+                          {tabs.map((t) => {
+                            if (t.kind !== "chat" || !paneMounted(t.id))
+                              return null;
+                            // Active only when this workspace is the visible one AND
+                            // this is its active tab — so a hidden (keep-alive) chat
+                            // stops driving its terminal/working signals.
+                            const tabActive = active && t.id === activeId;
+                            // Active-only signals (working/terminalReady) are passed as
+                            // `false` to inactive panes, so a working-state flip on the
+                            // live chat re-renders only that one transcript — not all.
+                            return (
+                              <ChatTabPane
+                                key={t.id}
+                                tab={t}
+                                active={tabActive}
+                                encoded={project.encoded}
+                                transcript={transcripts.get(t.sessionId)}
+                                annotations={chatAnnotations}
+                                working={tabActive ? chatWorking : false}
+                                terminalReady={
+                                  tabActive ? chatTerminalReady : false
+                                }
+                                isNew={isNewSession(t.sessionId)}
+                                revealAnnotation={
+                                  commentReveal?.tabId === t.id
+                                    ? commentReveal
+                                    : null
+                                }
+                                onAddAnnotation={addChatAnnotation}
+                                onUpdateAnnotation={updateChatAnnotation}
+                                onRemoveAnnotation={removeChatAnnotation}
+                                onSendKeys={sendKeysToChat}
+                              />
+                            );
+                          })}
                         </div>
-                      )}
-                      {activeTab?.kind === "chat" && selectedSessionId && (
-                        <ChatInput
-                          ref={chatInputRef}
-                          sessionId={selectedSessionId}
-                          projectEncoded={project.encoded}
-                          inactive={!chatTerminalReady}
-                          notReady={chatTerminalReady && !agentLive}
-                          onStart={connectChat}
-                          onSend={handleSendChat}
-                          blocked={awaitingSelection}
-                          onBlocked={() =>
-                            revealChatTerminal(selectedSessionId)
-                          }
-                          autoFocus={isNewSession(selectedSessionId)}
-                          commentsPending={totalComments > 0}
-                          canContinue={
-                            stalledOnApiError &&
-                            !chatWorking &&
-                            !continueInFlight
-                          }
-                          atSessionLimit={!!sessionLimitReset && !chatWorking}
-                          sessionLimitReset={sessionLimitReset?.text ?? null}
-                          continueStarting={continueStarting}
-                          onContinue={handleContinue}
-                        />
-                      )}
-                    </div>
+                        {comments.length > 0 && (
+                          <div className="shrink-0 px-3 pb-1.5">
+                            <div className="mx-auto w-full max-w-[820px]">
+                              <CommentChip
+                                comments={comments}
+                                message={composedMessage}
+                                onClear={handleClearComments}
+                                onOpen={handleOpenComment}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {activeTab?.kind === "chat" && selectedSessionId && (
+                          <ChatInput
+                            ref={chatInputRef}
+                            sessionId={selectedSessionId}
+                            projectEncoded={project.encoded}
+                            inactive={!chatTerminalReady}
+                            notReady={chatTerminalReady && !agentLive}
+                            onStart={connectChat}
+                            onSend={handleSendChat}
+                            blocked={awaitingSelection}
+                            onBlocked={() =>
+                              revealChatTerminal(selectedSessionId)
+                            }
+                            autoFocus={isNewSession(selectedSessionId)}
+                            commentsPending={totalComments > 0}
+                            canContinue={
+                              stalledOnApiError &&
+                              !chatWorking &&
+                              !continueInFlight
+                            }
+                            atSessionLimit={!!sessionLimitReset && !chatWorking}
+                            sessionLimitReset={sessionLimitReset?.text ?? null}
+                            continueStarting={continueStarting}
+                            onContinue={handleContinue}
+                          />
+                        )}
+                      </div>
+                    )}
                     {/* The same chip on a diff/file tab, floating over the bottom of
                     the content: there's no chat in context to stage into, so it
                     only tallies and navigates. The margins around it stay
@@ -2560,6 +2577,7 @@ function ProjectWorkspaceImpl({
             <MiddleSidebar
               tab={tab}
               onTabChange={setTab}
+              showChats={showChats}
               repos={repos}
               repoGroups={repoGroups}
               selectedFile={openKind === "diffs" ? selectedFile : null}
