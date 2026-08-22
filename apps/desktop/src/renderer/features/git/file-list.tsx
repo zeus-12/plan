@@ -10,6 +10,7 @@ import {
 import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 import { usePersistentString } from "./use-persistent-string";
 import type { SyncTarget } from "./use-working-tree";
+import { shouldShowOtherReposHeading } from "./file-list-footer";
 import {
   buildFileTree,
   flattenFileTree,
@@ -62,8 +63,8 @@ interface Props {
   /** Repo-wide bulk actions on the Changes group. */
   onDiscardAll: (subPath: string) => void;
   onStashAll: (subPath: string) => void;
-  /** Push/pull status for every repo, shown as a pinned "Other repos" footer
-   * for repos that have no local changes to list above. */
+  /** Push/pull status for every repo, shown in a pinned footer for repos that
+   * have no local changes to list above. */
   syncTargets: SyncTarget[];
   onPush: (subPath: string) => void;
 }
@@ -390,6 +391,7 @@ export function FileList({
     const shown = new Set(nonEmpty.map((g) => g.subPath || "/"));
     return syncTargets.filter((t) => !shown.has(t.subPath || "/"));
   }, [syncTargets, nonEmpty]);
+  const showOtherReposHeading = shouldShowOtherReposHeading(groups.length);
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -759,29 +761,35 @@ export function FileList({
           above can never overlap it. */}
       {otherRepos.length > 0 && (
         <div className="shrink-0 border-t border-[var(--border)]">
-          <button
-            onClick={() => setSyncCollapsed((v) => !v)}
-            className="flex w-full items-center justify-between gap-2 bg-[var(--bg-surface-hover)] px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface)]"
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <Chevron
-                open={!syncCollapsed}
-                className="text-[var(--text-tertiary)]"
-              />
-              <span className="truncate font-semibold">Other repos</span>
-            </div>
-            <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
-              {otherRepos.length}
-            </span>
-          </button>
-          {!syncCollapsed && (
+          {showOtherReposHeading && (
+            <button
+              onClick={() => setSyncCollapsed((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 bg-[var(--bg-surface-hover)] px-3 py-1.5 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface)]"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Chevron
+                  open={!syncCollapsed}
+                  className="text-[var(--text-tertiary)]"
+                />
+                <span className="truncate font-semibold">Other repos</span>
+              </div>
+              <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                {otherRepos.length}
+              </span>
+            </button>
+          )}
+          {(!showOtherReposHeading || !syncCollapsed) && (
             <div className="max-h-[240px] overflow-y-auto">
-              {otherRepos.map((t) => (
+              {otherRepos.map((t, index) => (
                 <button
                   key={t.subPath || "/"}
                   onClick={() => onPush(t.subPath)}
                   disabled={t.pushing || (t.hasUpstream && t.ahead === 0)}
-                  className="flex w-full shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-chrome,var(--bg-surface))] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-chrome,var(--bg-surface))]"
+                  className={cn(
+                    "flex w-full shrink-0 items-center justify-between gap-2 bg-[var(--bg-chrome,var(--bg-surface))] px-3 py-2 text-left font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--row-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--bg-chrome,var(--bg-surface))]",
+                    (showOtherReposHeading || index > 0) &&
+                      "border-t border-[var(--border)]",
+                  )}
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     <UploadIcon />
