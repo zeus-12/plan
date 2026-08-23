@@ -23,20 +23,19 @@ import { detectLanguage } from "@plan/shared/lib/syntax/highlight";
 import { canFormat } from "@plan/shared/lib/format";
 import { formatCodeAsync } from "@/features/diff/format-async";
 import {
-  decodeState,
-  encodeState,
-  type SharedState,
-} from "@/features/diff/share-url";
+  decodeDiffState,
+  DIFF_HASH_PREFIX,
+  encodeDiffState,
+  type SharedDiffState,
+} from "@plan/shared/lib/share/diff-share-url";
 import { SectionNav } from "@/components/section-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 
-const HASH_PREFIX = "#d=";
-
-function readHashState(): SharedState | null {
+function readHashState(): SharedDiffState | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash;
-  if (!hash.startsWith(HASH_PREFIX)) return null;
-  return decodeState(hash.slice(HASH_PREFIX.length));
+  if (!hash.startsWith(DIFF_HASH_PREFIX)) return null;
+  return decodeDiffState(hash.slice(DIFF_HASH_PREFIX.length));
 }
 
 export default function Home() {
@@ -174,12 +173,12 @@ export default function Home() {
   // Share link: stash the diff in the URL hash and copy the URL.
   const handleShareLink = useCallback(async () => {
     setShareOpen(false);
-    const encoded = encodeState({
+    const encoded = encodeDiffState({
       left: leftText,
       right: rightText,
       language: language === "auto" ? undefined : language,
     });
-    const newHash = HASH_PREFIX + encoded;
+    const newHash = DIFF_HASH_PREFIX + encoded;
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", newHash);
       const url = window.location.href;

@@ -423,6 +423,22 @@ export function useLineWindow(
 
   const first = Math.min(range.first, Math.max(0, count - 1));
   const last = Math.min(range.last, Math.max(0, count - 1));
+
+  // A host is not required to provide its own overflow container. The web diff
+  // page, for example, scrolls with the document. In that case there is no
+  // element whose local scrollTop this hook can use, so render the complete
+  // row set instead of leaving the window at its initial single-row range.
+  // The desktop still takes the virtualized path through its overflow pane.
+  if (!scroller) {
+    return {
+      first: 0,
+      last: Math.max(0, count - 1),
+      padTop: 0,
+      padBottom: 0,
+      reveal,
+    };
+  }
+
   const p = prefix.current;
   const doc = p[count] ?? 0;
   return {

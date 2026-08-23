@@ -38,6 +38,7 @@ import {
   parseFileDiff,
   type HunkRange,
 } from "@plan/shared/lib/diff/git-hunks";
+import { buildDiffUrl } from "@plan/shared/lib/share/diff-share-url";
 
 interface Props {
   encoded: string;
@@ -435,6 +436,19 @@ function FileDiffViewerImpl({
           ? "Preview only · click to revert"
           : "Preview only · file isn't touched";
 
+  const handleShareClick = useCallback(() => {
+    if (!contents || contents.binary) return;
+    window.open(
+      buildDiffUrl({
+        left: viewOldText,
+        right: viewNewText,
+        language: effectiveLanguage,
+      }),
+      "_blank",
+      "noopener",
+    );
+  }, [contents, viewOldText, viewNewText, effectiveLanguage]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2">
@@ -490,6 +504,16 @@ function FileDiffViewerImpl({
               </Button>
             </>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 active:scale-[0.96] transition-transform"
+            onClick={handleShareClick}
+            disabled={!diffMounted}
+            title="Open this diff on the web and create a shareable link"
+          >
+            Share
+          </Button>
           <LanguageToolbar
             language={language}
             onLanguageChange={setLanguage}
