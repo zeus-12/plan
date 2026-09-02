@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Copy } from "lucide-react";
+import { Check, ChevronDown, Copy, Wrench } from "lucide-react";
 import { cn } from "@plan/shared/lib/utils";
 import { basename } from "@plan/shared/lib/path";
 import { useCommentSelection } from "@plan/shared/lib/comments/use-comment-selection";
@@ -57,6 +57,7 @@ import {
   type PlanVersionInfo,
 } from "./plan-card";
 import { useRowWindow } from "./row-window";
+import { findToolRuns, type ToolRun } from "./tool-runs";
 import { TurnFilesStrip, turnFileChangesByRow } from "./turn-files";
 import { parseSendUserFile } from "./sent-file";
 import { SentFileBlock } from "./sent-file-row";
@@ -626,6 +627,63 @@ function ToolCallBlock({
           />,
           document.body,
         )}
+    </div>
+  );
+}
+
+/**
+ * The one-line summary a run of tool rows folds into. Shaped like the rows it
+ * replaces — same mono size, same muted palette — so an open run reads as the
+ * same column of activity lines it was before, under a heading.
+ */
+function ToolRunHeader({
+  label,
+  open,
+  onToggle,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={toggleUnlessSelecting(onToggle)}
+      className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
+    >
+      <Wrench size={11} className="shrink-0 text-[var(--text-tertiary)]" />
+      <span className="min-w-0 truncate text-[var(--text-secondary)]">
+        {label}
+      </span>
+      <Chevron
+        open={open}
+        size={12}
+        className="text-[var(--text-tertiary)] duration-200"
+      />
+    </button>
+  );
+}
+
+/**
+ * The foot of a run held at the peek cap: the rows below it are rendered as
+ * nothing (not clipped — see tool-runs for why height may not be capped in
+ * pixels), so the fade is drawn here rather than by an overflow box.
+ */
+function ToolRunMore({
+  hidden,
+  onShowAll,
+}: {
+  hidden: number;
+  onShowAll: () => void;
+}) {
+  return (
+    <div className="relative">
+      <div className="pointer-events-none absolute inset-x-0 -top-7 h-7 bg-gradient-to-b from-transparent to-[var(--bg)]" />
+      <button
+        onClick={toggleUnlessSelecting(onShowAll)}
+        className="relative flex items-center gap-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+      >
+        Show {hidden} more
+      </button>
     </div>
   );
 }
@@ -1470,6 +1528,7 @@ function sameResult(a?: ToolResult, b?: ToolResult): boolean {
 // Stable reference for non-plan parts so the memoized part view doesn't re-render
 // every time `messages` changes (only plan parts read the versions array).
 const EMPTY_PLAN_VERSIONS: PlanVersionInfo[] = [];
+const EMPTY_RUN_KEYS: ReadonlySet<string> = new Set();
 
 /**
  * Memoized: the composer's state lives in the workspace, so without this every
@@ -1694,6 +1753,62 @@ export const MessageList = memo(function MessageList({
     return map;
   }, [annotations, deferredMessages, partOrder]);
 
+  // Runs of consecutive tool/thinking rows fold behind one summary line. A part
+  // that renders as a card (plan, question, delivered file) is content, not
+  // machinery, so it breaks the run rather than folding into it.
+  const toolRuns = useMemo(
+    () =>
+      findToolRuns(items, (m, i, p) => {
+        const key = `${m.uuid}:${i}`;
+        if (hiddenParts.has(key) || planVersionByPart.has(key)) return true;
+        if (p.kind !== "tool_use") return false;
+        if (p.tool === "AskUserQuestion")
+          return parseAskInput(p.input) !== null;
+        if (p.tool === "SendUserFile")
+          return (
+            resultByToolUseId.get(p.id)?.isError !== true &&
+            parseSendUserFile(p.input) !== null
+          );
+        return false;
+      }),
+    [items, hiddenParts, planVersionByPart, resultByToolUseId],
+  );
+  const [openRunKeys, setOpenRunKeys] =
+    useState<ReadonlySet<string>>(EMPTY_RUN_KEYS);
+  const [fullRunKeys, setFullRunKeys] =
+    useState<ReadonlySet<string>>(EMPTY_RUN_KEYS);
+
+  const toggleRun = useCallback((key: string) => {
+    setOpenRunKeys((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }, []);
+  const showWholeRun = useCallback((key: string) => {
+    setFullRunKeys((prev) => new Set(prev).add(key));
+  }, []);
+
+  /** Runs that may not fold, whatever the reader clicked. */
+  const forcedRunKeys = useMemo(() => {
+    const out = new Set<string>();
+    for (const run of toolRuns.runs) {
+      for (let i = run.start; i <= run.end; i++) {
+        // A comment anchors to a part inside this run; folded, it would have
+        // nothing to paint and the comment would read as lost.
+        if (annotationsByMessage.has(items[i].uuid)) {
+          out.add(run.key);
+          break;
+        }
+      }
+    }
+    // The run Claude is still adding to: folding it hides the only progress the
+    // transcript shows while a reply is in flight.
+    const last = toolRuns.runs[toolRuns.runs.length - 1];
+    if (working && last && last.end === items.length - 1) out.add(last.key);
+    return out;
+  }, [toolRuns, items, annotationsByMessage, working]);
+
   /** Per-row "should we show the role header here?" */
   const showHeaderForRow = useMemo(() => {
     const out: boolean[] = [];
@@ -1730,6 +1845,11 @@ export const MessageList = memo(function MessageList({
     findForceRange,
     indexing,
   );
+  // Folding a run resizes the document under the reader. The window's own
+  // anchor absorbs that, but only on a pass — so ask for one.
+  useLayoutEffect(() => {
+    rowWindow.schedule();
+  }, [openRunKeys, fullRunKeys, rowWindow.schedule]);
   const scrollKey = sessionId ? chatScrollKey(encoded, sessionId) : null;
   const scrollKeyRef = useRef<string | null>(null);
   // Anchor to restore to (null = never scrolled this session, or it was left at
@@ -2422,6 +2542,27 @@ export const MessageList = memo(function MessageList({
             can opt out and run full-width, like the diff/file tabs do. */}
           <div ref={contentRef} className="w-full">
             {items.map((m, idx) => {
+              const runIndex = toolRuns.runOfRow[idx];
+              const run = runIndex >= 0 ? toolRuns.runs[runIndex] : null;
+              // Find reads the rendered rows, so it holds every run open for as
+              // long as the widget is up — otherwise a search would quietly
+              // stop covering the folded parts of the chat.
+              const runOpen =
+                !run ||
+                find.open ||
+                openRunKeys.has(run.key) ||
+                forcedRunKeys.has(run.key);
+              const runCapped =
+                !!run && !find.open && !fullRunKeys.has(run.key);
+              // A folded row holds no space, so it must not consult the row
+              // window: a reserved height is for a row that will render.
+              if (
+                run &&
+                idx !== run.start &&
+                (!runOpen || (runCapped && idx > run.peekEnd))
+              ) {
+                return <div key={m.uuid || idx} data-msg-row={m.uuid} />;
+              }
               // Rows far from the viewport render nothing and just hold their
               // place. Building every row's content up front is what froze the
               // click that opens a chat, so nothing above this line may do
@@ -2433,6 +2574,23 @@ export const MessageList = memo(function MessageList({
                     data-msg-row={m.uuid}
                     style={rowWindow.reserve(idx)}
                   />
+                );
+              }
+              if (run && !runOpen) {
+                return (
+                  <div
+                    key={m.uuid || idx}
+                    data-msg-row={m.uuid}
+                    className="flex w-full justify-center px-4 pt-1 pb-2 scroll-mt-3"
+                  >
+                    <div className="flex w-full max-w-[820px] justify-start">
+                      <ToolRunHeader
+                        label={run.label}
+                        open={false}
+                        onToggle={() => toggleRun(run.key)}
+                      />
+                    </div>
+                  </div>
                 );
               }
               const partMap = annotationsByMessage.get(m.uuid);
@@ -2524,9 +2682,25 @@ export const MessageList = memo(function MessageList({
                       if (!isUser) {
                         return (
                           <div className="flex w-full flex-col gap-1">
+                            {run && idx === run.start && (
+                              <ToolRunHeader
+                                label={run.label}
+                                open
+                                onToggle={() => toggleRun(run.key)}
+                              />
+                            )}
                             <div className="flex w-full flex-col gap-1.5">
                               {partNodes}
                             </div>
+                            {run &&
+                              runCapped &&
+                              idx === run.peekEnd &&
+                              run.peekEnd < run.end && (
+                                <ToolRunMore
+                                  hidden={run.end - run.peekEnd}
+                                  onShowAll={() => showWholeRun(run.key)}
+                                />
+                              )}
                             {turnFilesByRow.has(idx) && (
                               <TurnFilesStrip
                                 files={turnFilesByRow.get(idx)!}
