@@ -73,6 +73,22 @@ const ContextMenuLabel = React.forwardRef<
 ));
 ContextMenuLabel.displayName = ContextMenuPrimitive.Label.displayName;
 
+/** Right-aligned key hint on a menu item (⌘C, Space…). Purely a label. */
+function ContextMenuShortcut({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span
+      className={cn(
+        "ml-auto pl-4 text-[10px] tracking-wide text-[var(--text-tertiary)]",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 export {
   ContextMenu,
   ContextMenuTrigger,
@@ -80,6 +96,7 @@ export {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuGroup,
   ContextMenuPortal,
 };
