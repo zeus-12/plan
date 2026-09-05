@@ -27,9 +27,9 @@ import { pushToast } from "@/renderer/lib/toast-store";
  * (whatever its status), and the highlight defaults to item 1 — alt-tab style.
  * When nothing else needs you, a toast says so instead of opening.
  *
- * A "tap" is Control pressed and released quickly with no NON-modifier key in
- * between, so Ctrl+Tab / Ctrl+C / holding Control as a modifier never trip it —
- * that's what keeps this from colliding with the hold-to-cycle switchers.
+ * A "tap" is Control pressed and released quickly with NO other key held at any
+ * point — Alt/Meta/Shift included, whichever order they were pressed in. So
+ * Ctrl+Tab, Ctrl+C, and other apps' Ctrl+Opt shortcuts never trip it.
  *
  * Data comes from the two fleet-wide stores (approval = orange "waiting on you",
  * unread = green "replied"), both driven by verified TUI state — so every row is
@@ -198,6 +198,8 @@ export function attentionDismiss() {
 let ctrlDown = false;
 let ctrlDownAt = 0;
 let otherKeyDuringCtrl = false;
+let altOrMetaDuringCtrl = false;
+let shiftDuringCtrl = false;
 let lastTapAt = 0;
 
 function onKeyDown(e: KeyboardEvent) {
@@ -235,10 +237,16 @@ function onKeyDown(e: KeyboardEvent) {
       ctrlDown = true;
       ctrlDownAt = performance.now();
       otherKeyDuringCtrl = false;
+      // Seeded from live modifier state: a modifier pressed BEFORE Control has
+      // no keydown left to observe during the hold.
+      altOrMetaDuringCtrl = e.altKey || e.metaKey;
+      shiftDuringCtrl = e.shiftKey;
     }
-  } else if (e.key !== "Shift") {
-    // A non-modifier key while Control is down means Control is being used as a
-    // modifier, not tapped. Shift is exempt so Shift+Control can reverse.
+  } else if (e.key === "Alt" || e.key === "Meta") {
+    altOrMetaDuringCtrl = true;
+  } else if (e.key === "Shift") {
+    shiftDuringCtrl = true;
+  } else {
     otherKeyDuringCtrl = true;
   }
 }
@@ -249,14 +257,24 @@ function onKeyUp(e: KeyboardEvent) {
   ctrlDown = false;
   if (!wasDown) return;
   const cleanTap =
-    !otherKeyDuringCtrl && performance.now() - ctrlDownAt <= TAP_MAX_HOLD_MS;
+    !otherKeyDuringCtrl &&
+    !altOrMetaDuringCtrl &&
+    !e.altKey &&
+    !e.metaKey &&
+    performance.now() - ctrlDownAt <= TAP_MAX_HOLD_MS;
   if (!cleanTap) {
     lastTapAt = 0;
     return;
   }
+  const withShift = shiftDuringCtrl || e.shiftKey;
   if (session) {
     // Open: each tap traverses (Shift reverses); the dwell timer then commits.
-    move(e.shiftKey ? -1 : 1);
+    move(withShift ? -1 : 1);
+    lastTapAt = 0;
+    return;
+  }
+  if (withShift) {
+    // Opening takes a bare Control only.
     lastTapAt = 0;
     return;
   }
@@ -278,6 +296,8 @@ function install() {
   // Losing focus mid-gesture: reset detection and don't leave the palette stuck.
   window.addEventListener("blur", () => {
     ctrlDown = false;
+    altOrMetaDuringCtrl = false;
+    shiftDuringCtrl = false;
     lastTapAt = 0;
     closePalette();
   });
