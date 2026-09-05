@@ -4,14 +4,14 @@ import { Button } from "@plan/shared/components/ui/button";
 import { Kbd } from "@plan/shared/components/ui/kbd";
 import { BranchCombo } from "@/renderer/features/git/branch-combo";
 import type {
-  WorktreeRecord,
+  ManagedWorktreeRecord,
   AddReposToWorktreeInput,
   DiscoveredRepo,
 } from "@/common/shared-types";
 
 interface Props {
   /** The worktree to extend. */
-  worktree: WorktreeRecord;
+  worktree: ManagedWorktreeRecord;
   /** The parent project, whose repos we diff against the worktree's. */
   projectEncoded: string;
   onAdd: (input: AddReposToWorktreeInput) => Promise<unknown>;

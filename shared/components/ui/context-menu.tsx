@@ -4,7 +4,23 @@ import * as React from "react";
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import { cn } from "../../lib/utils";
 
-const ContextMenu = ContextMenuPrimitive.Root;
+/**
+ * Non-modal by default. A modal menu wraps its content in a *trapped*
+ * FocusScope, which listens for `focusin` anywhere in the document and drags
+ * focus back inside itself. The content stays mounted through its close
+ * animation, so a dialog opened from a menu item mounts and focuses its input
+ * while that trap is still live, and the trap immediately takes it away — the
+ * dialog opens unfocused. Non-modal drops the trap (Radix's own
+ * MenuRootContentNonModal passes `trapFocus: false`) and keeps dismiss-on-
+ * outside-click and Escape. Overridable per call site.
+ */
+const ContextMenu = ({
+  modal = false,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Root>) => (
+  <ContextMenuPrimitive.Root modal={modal} {...props} />
+);
+ContextMenu.displayName = "ContextMenu";
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 const ContextMenuGroup = ContextMenuPrimitive.Group;
 const ContextMenuPortal = ContextMenuPrimitive.Portal;
@@ -16,6 +32,12 @@ const ContextMenuContent = React.forwardRef<
   <ContextMenuPrimitive.Portal>
     <ContextMenuPrimitive.Content
       ref={ref}
+      // The other half of the same problem: on unmount FocusScope refocuses
+      // whatever was focused before the menu opened, in a setTimeout(0) that
+      // lands after a dialog the item opened has focused its input. Our
+      // triggers are non-focusable rows, so the restore had nothing to return
+      // to. Listed before the spread so a call site can still override it.
+      onCloseAutoFocus={(e) => e.preventDefault()}
       className={cn(
         "z-50 min-w-[180px] overflow-hidden rounded-md border border-[var(--popover-border)] bg-[var(--popover-bg)] p-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-secondary)] shadow-lg",
         "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",

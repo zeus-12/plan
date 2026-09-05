@@ -75,6 +75,7 @@ import {
   QUIT_PROMPT_TITLE,
   quitPromptDetail,
 } from "@/common/quit-prompt";
+import { RenameDialog } from "@/renderer/components/rename-dialog";
 import { useWorktrees } from "@/renderer/features/worktrees/use-worktrees";
 import { useAllWorktrees } from "@/renderer/features/worktrees/use-all-worktrees";
 import { useTabSwitcher } from "@/renderer/features/workspace/use-tab-switcher";
@@ -362,6 +363,11 @@ function Shell() {
   const [addReposWorktreeId, setAddReposWorktreeId] = useState<string | null>(
     null,
   );
+  // Worktree being renamed, keyed by rootPath so both kinds go through here.
+  const [renamingWorktree, setRenamingWorktree] = useState<{
+    rootPath: string;
+    name: string;
+  } | null>(null);
 
   // Flat id → record across all projects, so sidebar actions (PR / remove /
   // add-repos) and their modals resolve a worktree even when its project isn't
@@ -432,12 +438,18 @@ function Shell() {
     if (allWorktrees.loaded && activeWorktreeId && !activeWorktree)
       setActiveWorktreeId(null);
   }, [allWorktrees.loaded, activeWorktreeId, activeWorktree]);
-  const prWorktree = prWorktreeId
-    ? (worktreeById.get(prWorktreeId) ?? null)
-    : null;
-  const addReposWorktree = addReposWorktreeId
-    ? (worktreeById.get(addReposWorktreeId) ?? null)
-    : null;
+  const prWorktreeCandidate = prWorktreeId
+    ? worktreeById.get(prWorktreeId)
+    : undefined;
+  const prWorktree =
+    prWorktreeCandidate?.kind === "managed" ? prWorktreeCandidate : null;
+  const addReposWorktreeCandidate = addReposWorktreeId
+    ? worktreeById.get(addReposWorktreeId)
+    : undefined;
+  const addReposWorktree =
+    addReposWorktreeCandidate?.kind === "managed"
+      ? addReposWorktreeCandidate
+      : null;
 
   // The project (or synthesized worktree "project") currently in focus. Still
   // computed here because the move-session flow reads it; the workspace pool
@@ -524,6 +536,20 @@ function Shell() {
         );
       }),
     [confirm],
+  );
+
+  const handleRenameWorktree = useCallback(
+    (rootPath: string, currentName: string) =>
+      setRenamingWorktree({ rootPath, name: currentName }),
+    [],
+  );
+
+  const handleRenameWorktreeSave = useCallback(
+    async (rootPath: string, name: string) => {
+      await window.electronAPI.renameWorktree(rootPath, name);
+      await Promise.all([allWorktrees.refresh(), worktrees.refresh()]);
+    },
+    [allWorktrees, worktrees],
   );
 
   const handleRemoveWorktree = useCallback(
@@ -858,6 +884,7 @@ function Shell() {
         onSelectWorktree={selectWorktree}
         onNewWorktree={handleNewWorktree}
         onRemoveWorktree={handleRemoveWorktree}
+        onRenameWorktree={handleRenameWorktree}
         onCreatePr={setPrWorktreeId}
         onAddRepos={setAddReposWorktreeId}
         onAddProject={handleAddProject}
@@ -993,6 +1020,17 @@ function Shell() {
           />
         )}
       </Suspense>
+      {renamingWorktree && (
+        <RenameDialog
+          title="Rename worktree"
+          placeholder="Worktree name"
+          initialName={renamingWorktree.name}
+          onSave={(name) =>
+            handleRenameWorktreeSave(renamingWorktree.rootPath, name)
+          }
+          onClose={() => setRenamingWorktree(null)}
+        />
+      )}
       {projectSwitcher.active && (
         <SwitcherOverlay
           title="Switch to"

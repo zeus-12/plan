@@ -8,8 +8,17 @@ import {
 } from "@/main/providers/claude-code/projects";
 import { encodeCwd, safeSegment } from "@/main/providers/claude-code/encoding";
 import { PLAN_DIR } from "@/main/store/plan-config";
-import { discoverRepos, invalidateRepoLayout } from "@/main/git/git";
+import { getManualCwds } from "@/main/store/manual-projects";
+import {
+  discoverRepos,
+  repoLayout,
+  invalidateRepoLayout,
+} from "@/main/git/git";
 import { restartWorktreeWatch } from "./worktree-watcher";
+import {
+  externalWorktrees,
+  invalidateExternalWorktrees,
+} from "./worktree-discovery";
 import { deleteScratch } from "@/main/store/scratch-store";
 import { deleteNotes } from "@/main/store/notes-store";
 import type { DiscoveredRepo } from "@/common/shared-types";
@@ -27,14 +36,14 @@ import {
   addWorktreeRecord,
   deleteWorktreeRecord,
   getWorktreeRecord,
-  listWorktreeRecords,
   updateWorktreeRecord,
   worktreeNameTaken,
   listAllWorktreeRecords,
   getProjectDefaults,
   setProjectDefaults,
+  getWorktreeNames,
   type StoredWorktree,
-  type WorktreeRecord,
+  type ManagedWorktreeRecord,
   type WorktreeRepoRecord,
 } from "./worktrees-store";
 import { latestActivity } from "@/main/providers/claude-code/sessions";
@@ -44,6 +53,7 @@ import type {
   CreatePrResult,
   CreateWorktreeInput,
   AddReposToWorktreeInput,
+  WorktreeRecord,
 } from "@/common/shared-types";
 
 /** Remotes configured in a repo. */
@@ -196,7 +206,7 @@ async function addCheckouts(
 export async function createWorktree(
   encoded: string,
   input: CreateWorktreeInput,
-): Promise<WorktreeRecord> {
+): Promise<ManagedWorktreeRecord> {
   const name = input.name.trim();
   const branch = input.branch.trim();
   const base = input.base.trim();
@@ -239,6 +249,7 @@ export async function createWorktree(
   primeProjectCwd(wtEncoded, rootPath);
   // The checkouts just landed — drop any layout discovered before they existed.
   invalidateRepoLayout(wtEncoded);
+  invalidateExternalWorktrees();
   const record = await addWorktreeRecord({
     projectEncoded: encoded,
     name,
@@ -263,7 +274,7 @@ export async function createWorktree(
 export async function addReposToWorktree(
   id: string,
   input: AddReposToWorktreeInput,
-): Promise<WorktreeRecord> {
+): Promise<ManagedWorktreeRecord> {
   const rec = await getWorktreeRecord(id);
   if (!rec) throw new Error("Worktree not found.");
   const branch = rec.repos[0]?.branch;
@@ -293,6 +304,7 @@ export async function addReposToWorktree(
   // The worktree spans more repos now — its cached layout is stale, and the
   // file watcher's roots (one git dir per repo) were resolved from that layout.
   invalidateRepoLayout(rec.encoded);
+  invalidateExternalWorktrees();
   await restartWorktreeWatch(rec.encoded);
 
   const updated: StoredWorktree = { ...rec, repos: [...rec.repos, ...created] };
@@ -319,6 +331,7 @@ export async function removeWorktree(id: string): Promise<void> {
   await deleteScratch(rec.encoded).catch(() => {});
   await deleteNotes(rec.encoded).catch(() => {});
   invalidateRepoLayout(rec.encoded);
+  invalidateExternalWorktrees();
   await deleteWorktreeRecord(id);
 }
 
@@ -435,17 +448,85 @@ export async function createWorktreePr(
  * clock behind `ProjectEntry.mtimeMs` reads it unchanged: newest session
  * transcript wins, 0 when the worktree has never been chatted in.
  */
-async function withActivity(rec: StoredWorktree): Promise<WorktreeRecord> {
+async function withActivity<T extends { encoded: string }>(
+  rec: T,
+): Promise<T & { mtimeMs: number }> {
   return { ...rec, mtimeMs: await latestActivity(rec.encoded) };
+}
+
+/**
+ * Discovery reads repo locations only, never a live branch, so this takes the
+ * cached `repoLayout` rather than `discoverRepos` — the latter spawns a
+ * `rev-parse` per repo on every call, and the sidebar calls this per project on
+ * every watcher tick.
+ *
+ * `allManaged` spans every project, not just this one: two added projects can
+ * share a source repo, and a worktree Plan created under one of them is still
+ * Plan-managed when it turns up in the other's `git worktree list`.
+ */
+async function hydrateProjectWorktrees({
+  encoded,
+  records,
+  allManaged,
+  manualRoots,
+  names,
+}: {
+  encoded: string;
+  /** This project's own managed worktrees — what it renders. */
+  records: StoredWorktree[];
+  /** Every project's, for the exclusion set. */
+  allManaged: StoredWorktree[];
+  manualRoots: string[];
+  names: Record<string, string>;
+}): Promise<WorktreeRecord[]> {
+  const external = await externalWorktrees({
+    projectEncoded: encoded,
+    repos: await repoLayout(encoded),
+    managed: allManaged,
+    manualRoots,
+  });
+
+  // Re-seed the cwd cache after a restart so content ops resolve immediately.
+  for (const record of [...records, ...external])
+    primeProjectCwd(record.encoded, record.rootPath);
+
+  const [managedWithActivity, externalWithActivity] = await Promise.all([
+    Promise.all(records.map(withActivity)),
+    Promise.all(external.map(withActivity)),
+  ]);
+  return [...managedWithActivity, ...externalWithActivity].map((record) =>
+    named(record, names),
+  );
+}
+
+/**
+ * Apply the user's display name. Only the label moves — `rootPath`, `encoded`
+ * and the branch are untouched, so a renamed worktree keeps its checkout and
+ * its chats.
+ */
+function named(
+  record: WorktreeRecord,
+  names: Record<string, string>,
+): WorktreeRecord {
+  const name = names[record.rootPath];
+  return name ? { ...record, name } : record;
 }
 
 export async function listWorktrees(
   encoded: string,
 ): Promise<WorktreeRecord[]> {
-  const records = await listWorktreeRecords(encoded);
-  // Re-seed the cwd cache after a restart so content ops resolve immediately.
-  for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
-  return Promise.all(records.map(withActivity));
+  const [allManaged, manualRoots, names] = await Promise.all([
+    listAllWorktreeRecords(),
+    getManualCwds(),
+    getWorktreeNames(),
+  ]);
+  return hydrateProjectWorktrees({
+    encoded,
+    records: allManaged.filter((record) => record.projectEncoded === encoded),
+    allManaged,
+    manualRoots,
+    names,
+  });
 }
 
 /**
@@ -454,7 +535,28 @@ export async function listWorktrees(
  * their content/git/pty ops resolve immediately after a restart.
  */
 export async function listAllWorktrees(): Promise<WorktreeRecord[]> {
-  const records = await listAllWorktreeRecords();
-  for (const r of records) primeProjectCwd(r.encoded, r.rootPath);
-  return Promise.all(records.map(withActivity));
+  const [records, manualRoots, names] = await Promise.all([
+    listAllWorktreeRecords(),
+    getManualCwds(),
+    getWorktreeNames(),
+  ]);
+  const encodeds = new Set(records.map((record) => record.projectEncoded));
+  for (const root of manualRoots) {
+    const encoded = encodeCwd(root);
+    primeProjectCwd(encoded, root);
+    encodeds.add(encoded);
+  }
+
+  const byProject = await Promise.all(
+    [...encodeds].map((encoded) =>
+      hydrateProjectWorktrees({
+        encoded,
+        records: records.filter((r) => r.projectEncoded === encoded),
+        allManaged: records,
+        manualRoots,
+        names,
+      }),
+    ),
+  );
+  return byProject.flat();
 }

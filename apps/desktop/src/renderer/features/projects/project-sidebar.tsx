@@ -71,6 +71,8 @@ interface Props {
   /** Create a new worktree in the given project. */
   onNewWorktree: (projectEncoded: string) => void;
   onRemoveWorktree: (worktreeId: string) => void;
+  /** Rename a worktree's label; keyed by rootPath, which spans both kinds. */
+  onRenameWorktree: (rootPath: string, currentName: string) => void;
   onCreatePr: (worktreeId: string) => void;
   onAddRepos: (worktreeId: string) => void;
   onAddProject: () => void;
@@ -242,6 +244,7 @@ export function ProjectSidebar({
   onSelectWorktree,
   onNewWorktree,
   onRemoveWorktree,
+  onRenameWorktree,
   onCreatePr,
   onAddRepos,
   onAddProject,
@@ -598,12 +601,18 @@ export function ProjectSidebar({
                   const branch = w.repos[0]?.branch ?? "";
                   const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
                   const canAddRepos = w.repos.length < repoCount;
+                  const detachedAt =
+                    w.kind === "external" && !branch
+                      ? `detached @ ${w.repos[0]?.head.slice(0, 7) ?? "unknown"}`
+                      : "";
                   // The branch usually equals the worktree name (the name
                   // slugifies into it), so only surface it when it diverges.
                   // Same for the repo count — one line unless there's more to say.
                   const sub = [
+                    w.kind === "external" ? "External" : "",
                     w.mtimeMs ? relativeTime(w.mtimeMs) : "",
                     branch && branch !== w.name ? branch : "",
+                    detachedAt,
                     w.repos.length > 1 ? `${w.repos.length} repos` : "",
                   ]
                     .filter(Boolean)
@@ -612,85 +621,103 @@ export function ProjectSidebar({
                   // aligned to the parent's chevron centre. Consecutive worktree
                   // rows draw contiguous segments, forming one connecting line.
                   const guideX = (row.depth - 1 > 0 ? 18 : 6) + 10;
+                  const worktreeRow = (
+                    <div
+                      key={`wt:${w.id}`}
+                      className={cn(
+                        "group absolute left-0 top-0 flex w-full items-center gap-2 pr-2 transition-colors",
+                        isActive
+                          ? "bg-[var(--row-selected)]"
+                          : "hover:bg-[var(--row-hover)]",
+                      )}
+                      style={{
+                        transform,
+                        height: WORKTREE_HEIGHT,
+                        paddingLeft: guideX + 18,
+                      }}
+                    >
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute bottom-0 top-0 w-px bg-[var(--border)]"
+                        style={{ left: guideX }}
+                      />
+                      <button
+                        onClick={() => onSelectWorktree(wp.encoded, w.id)}
+                        aria-current={isActive ? "true" : undefined}
+                        title={w.kind === "external" ? w.rootPath : undefined}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
+                      >
+                        <GitBranch
+                          size={13}
+                          className="shrink-0 text-[var(--text-tertiary)]"
+                        />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span
+                            className={cn(
+                              "truncate font-[family-name:var(--font-mono)] text-[13px]",
+                              isActive
+                                ? "text-[var(--row-selected-text)]"
+                                : "text-[var(--text-secondary)]",
+                            )}
+                          >
+                            {w.name}
+                          </span>
+                          {sub && (
+                            <span
+                              className={cn(
+                                "truncate font-[family-name:var(--font-mono)] text-[10px]",
+                                isActive
+                                  ? "text-[var(--row-selected-meta)]"
+                                  : "text-[var(--row-meta)]",
+                              )}
+                            >
+                              {sub}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                      {showChats && (
+                        <StatusDots
+                          approval={wtNeedsApproval}
+                          unread={wtHasUnread}
+                          working={wtWorking}
+                        />
+                      )}
+                    </div>
+                  );
+                  // An external checkout is someone else's to create and
+                  // delete, so it gets the rename item and nothing that writes.
                   return (
                     <ContextMenu key={`wt:${w.id}`}>
                       <ContextMenuTrigger asChild>
-                        <div
-                          className={cn(
-                            "group absolute left-0 top-0 flex w-full items-center gap-2 pr-2 transition-colors",
-                            isActive
-                              ? "bg-[var(--row-selected)]"
-                              : "hover:bg-[var(--row-hover)]",
-                          )}
-                          style={{
-                            transform,
-                            height: WORKTREE_HEIGHT,
-                            paddingLeft: guideX + 18,
-                          }}
-                        >
-                          <span
-                            aria-hidden
-                            className="pointer-events-none absolute bottom-0 top-0 w-px bg-[var(--border)]"
-                            style={{ left: guideX }}
-                          />
-                          <button
-                            onClick={() => onSelectWorktree(wp.encoded, w.id)}
-                            aria-current={isActive ? "true" : undefined}
-                            className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
-                          >
-                            <GitBranch
-                              size={13}
-                              className="shrink-0 text-[var(--text-tertiary)]"
-                            />
-                            <span className="flex min-w-0 flex-1 flex-col">
-                              <span
-                                className={cn(
-                                  "truncate font-[family-name:var(--font-mono)] text-[13px]",
-                                  isActive
-                                    ? "text-[var(--row-selected-text)]"
-                                    : "text-[var(--text-secondary)]",
-                                )}
-                              >
-                                {w.name}
-                              </span>
-                              {sub && (
-                                <span
-                                  className={cn(
-                                    "truncate font-[family-name:var(--font-mono)] text-[10px]",
-                                    isActive
-                                      ? "text-[var(--row-selected-meta)]"
-                                      : "text-[var(--row-meta)]",
-                                  )}
-                                >
-                                  {sub}
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                          {showChats && (
-                            <StatusDots
-                              approval={wtNeedsApproval}
-                              unread={wtHasUnread}
-                              working={wtWorking}
-                            />
-                          )}
-                        </div>
+                        {worktreeRow}
                       </ContextMenuTrigger>
                       <ContextMenuContent>
-                        <ContextMenuItem onSelect={() => onCreatePr(w.id)}>
-                          Create pull request…
-                        </ContextMenuItem>
-                        {canAddRepos && (
-                          <ContextMenuItem onSelect={() => onAddRepos(w.id)}>
-                            Add repos…
-                          </ContextMenuItem>
-                        )}
                         <ContextMenuItem
-                          destructive
-                          onSelect={() => onRemoveWorktree(w.id)}
+                          onSelect={() => onRenameWorktree(w.rootPath, w.name)}
                         >
-                          Remove worktree…
+                          Rename…
                         </ContextMenuItem>
+                        {w.kind === "managed" && (
+                          <>
+                            <ContextMenuItem onSelect={() => onCreatePr(w.id)}>
+                              Create pull request…
+                            </ContextMenuItem>
+                            {canAddRepos && (
+                              <ContextMenuItem
+                                onSelect={() => onAddRepos(w.id)}
+                              >
+                                Add repos…
+                              </ContextMenuItem>
+                            )}
+                            <ContextMenuItem
+                              destructive
+                              onSelect={() => onRemoveWorktree(w.id)}
+                            >
+                              Remove worktree…
+                            </ContextMenuItem>
+                          </>
+                        )}
                       </ContextMenuContent>
                     </ContextMenu>
                   );

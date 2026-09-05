@@ -67,6 +67,7 @@ import type {
   TerminalInfo,
   UpdateInfo,
   WorktreeRecord,
+  ManagedWorktreeRecord,
 } from "./shared-types";
 
 /** Request/response channels: `ipcRenderer.invoke` ↔ `ipcMain.handle`. */
@@ -212,12 +213,16 @@ export interface IpcInvokeContract {
   "worktrees:listAll": { args: []; result: WorktreeRecord[] };
   "worktrees:create": {
     args: [encoded: string, input: CreateWorktreeInput];
-    result: WorktreeRecord;
+    result: ManagedWorktreeRecord;
   };
   "worktrees:remove": { args: [id: string]; result: void };
   "worktrees:addRepos": {
     args: [id: string, input: AddReposToWorktreeInput];
-    result: WorktreeRecord;
+    result: ManagedWorktreeRecord;
+  };
+  "worktrees:rename": {
+    args: [rootPath: string, name: string];
+    result: void;
   };
   "worktrees:createPr": {
     args: [id: string, input: CreatePrInput];
@@ -504,6 +509,7 @@ export const API_INVOKE = {
   listAllWorktrees: "worktrees:listAll",
   createWorktree: "worktrees:create",
   removeWorktree: "worktrees:remove",
+  renameWorktree: "worktrees:rename",
   addReposToWorktree: "worktrees:addRepos",
   createWorktreePr: "worktrees:createPr",
   getWorktreeDefaults: "worktrees:getDefaults",

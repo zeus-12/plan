@@ -161,10 +161,12 @@ import {
   createWorktreePr,
   addReposToWorktree,
 } from "@/main/worktrees/worktrees";
+import { invalidateExternalWorktrees } from "@/main/worktrees/worktree-discovery";
 import {
   getProjectDefaults,
   setProjectDefaults,
   getWorktreeRecord,
+  setWorktreeName,
 } from "@/main/worktrees/worktrees-store";
 
 const isMac = process.platform === "darwin";
@@ -622,6 +624,7 @@ const invokeHandlers: {
     await removeWorktree(id);
   },
   "worktrees:addRepos": (_e, id, input) => addReposToWorktree(id, input),
+  "worktrees:rename": (_e, rootPath, name) => setWorktreeName(rootPath, name),
   "worktrees:createPr": (_e, id, input) => createWorktreePr(id, input),
   "worktrees:getDefaults": (_e, encoded) => getProjectDefaults(encoded),
   "worktrees:setDefaults": (_e, encoded, defaults) =>
@@ -784,6 +787,7 @@ function bridgeWatcher() {
       // keeps them honest without heuristics.
       invalidateRepoLayout(e.encoded);
       invalidateFileList(e.encoded);
+      invalidateExternalWorktrees(e.encoded);
       send(e);
     },
   });

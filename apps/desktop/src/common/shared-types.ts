@@ -279,7 +279,7 @@ export interface DiscoveredRepo {
   branch: string | null;
 }
 
-/** One repo's checkout within a worktree ("" subPath for single-repo projects). */
+/** One repo's checkout within a Plan-managed worktree. */
 export interface WorktreeRepoRecord {
   subPath: string;
   /** Absolute path to this repo's worktree checkout (under ~/.plan/worktrees/…). */
@@ -288,7 +288,17 @@ export interface WorktreeRepoRecord {
   base: string;
 }
 
-export interface WorktreeRecord {
+/** One repo checkout discovered from Git rather than Plan's own store. */
+export interface ExternalWorktreeRepoRecord {
+  /** External worktrees are opened as standalone repo roots. */
+  subPath: "";
+  path: string;
+  /** Null when the checkout has a detached HEAD. */
+  branch: string | null;
+  head: string;
+}
+
+interface WorktreeRecordBase {
   id: string;
   /** Claude-encoded project cwd this worktree belongs to. */
   projectEncoded: string;
@@ -300,8 +310,6 @@ export interface WorktreeRecord {
    * this so all `(encoded, subPath)` content ops scope to the worktree.
    */
   encoded: string;
-  repos: WorktreeRepoRecord[];
-  createdAt: number;
   /**
    * Newest session-transcript mtime under this worktree's own `encoded` cwd —
    * the same activity clock `ProjectEntry.mtimeMs` carries. Derived on read,
@@ -309,6 +317,21 @@ export interface WorktreeRecord {
    */
   mtimeMs: number;
 }
+
+/** A worktree Plan created and can safely mutate. */
+export interface ManagedWorktreeRecord extends WorktreeRecordBase {
+  kind: "managed";
+  repos: WorktreeRepoRecord[];
+  createdAt: number;
+}
+
+/** A checkout another Git client created; Plan only opens and inspects it. */
+export interface ExternalWorktreeRecord extends WorktreeRecordBase {
+  kind: "external";
+  repos: ExternalWorktreeRepoRecord[];
+}
+
+export type WorktreeRecord = ManagedWorktreeRecord | ExternalWorktreeRecord;
 
 /** Per-project defaults that pre-fill new worktrees + the Run/Build terminals. */
 export interface ProjectDefaults {

@@ -108,7 +108,7 @@ import {
   ChatInput,
   type ChatInputHandle,
 } from "@/renderer/features/chat/composer/chat-input";
-import { RenameSessionDialog } from "@/renderer/features/sessions/rename-session-dialog";
+import { RenameDialog } from "@/renderer/components/rename-dialog";
 import {
   CommandsSettingsModal,
   type CommandSection,
@@ -2357,9 +2357,11 @@ function ProjectWorkspaceImpl({
             />
           )}
           {renaming && (
-            <RenameSessionDialog
+            <RenameDialog
+              title="Rename chat"
+              placeholder="Chat name"
               initialName={renaming.name}
-              onSave={(name) => void handleRenameSave(renaming.sessionId, name)}
+              onSave={(name) => handleRenameSave(renaming.sessionId, name)}
               onClose={() => setRenaming(null)}
             />
           )}

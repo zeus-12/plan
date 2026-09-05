@@ -5,13 +5,13 @@ import {
   onAccentShimmer,
 } from "@plan/shared/components/ui/text-shimmer";
 import type {
-  WorktreeRecord,
+  ManagedWorktreeRecord,
   CreatePrInput,
   CreatePrResult,
 } from "@/common/shared-types";
 
 interface Props {
-  worktree: WorktreeRecord;
+  worktree: ManagedWorktreeRecord;
   onCreate: (input: CreatePrInput) => Promise<CreatePrResult>;
   onClose: () => void;
 }

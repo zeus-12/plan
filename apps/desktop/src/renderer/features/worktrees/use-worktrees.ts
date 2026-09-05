@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   WorktreeRecord,
+  ManagedWorktreeRecord,
   ProjectDefaults,
   CreateWorktreeInput,
   AddReposToWorktreeInput,
@@ -12,12 +13,12 @@ export interface UseWorktrees {
   worktrees: WorktreeRecord[];
   loading: boolean;
   refresh: () => Promise<void>;
-  create: (input: CreateWorktreeInput) => Promise<WorktreeRecord>;
+  create: (input: CreateWorktreeInput) => Promise<ManagedWorktreeRecord>;
   remove: (id: string) => Promise<void>;
   addRepos: (
     id: string,
     input: AddReposToWorktreeInput,
-  ) => Promise<WorktreeRecord>;
+  ) => Promise<ManagedWorktreeRecord>;
   createPr: (id: string, input: CreatePrInput) => Promise<CreatePrResult>;
   defaults: ProjectDefaults;
   /** Patch the stored defaults; `current` is read fresh, never this hook's copy. */
