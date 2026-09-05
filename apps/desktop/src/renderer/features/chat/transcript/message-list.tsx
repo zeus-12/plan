@@ -677,10 +677,10 @@ function ToolRunMore({
 }) {
   return (
     <div className="relative">
-      <div className="pointer-events-none absolute inset-x-0 -top-7 h-7 bg-gradient-to-b from-transparent to-[var(--bg)]" />
+      <div className="pointer-events-none absolute inset-x-0 -top-11 h-11 bg-gradient-to-b from-transparent to-[var(--bg)]" />
       <button
         onClick={toggleUnlessSelecting(onShowAll)}
-        className="relative flex items-center gap-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+        className="relative flex items-center gap-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
       >
         Show {hidden} more
       </button>
@@ -2576,12 +2576,21 @@ export const MessageList = memo(function MessageList({
                   />
                 );
               }
+              const partMap = annotationsByMessage.get(m.uuid);
+              const showHeader = showHeaderForRow[idx];
+              // Folded and open share one row chrome. A run usually opens a
+              // turn, which carries the turn's top gap — spelling that padding
+              // differently per state moved the summary line under the cursor
+              // that had just clicked it.
               if (run && !runOpen) {
                 return (
                   <div
                     key={m.uuid || idx}
                     data-msg-row={m.uuid}
-                    className="flex w-full justify-center px-4 pt-1 pb-2 scroll-mt-3"
+                    className={cn(
+                      "group flex w-full justify-center px-4 scroll-mt-3",
+                      showHeader ? "pt-4 pb-2" : "pt-1 pb-2",
+                    )}
                   >
                     <div className="flex w-full max-w-[820px] justify-start">
                       <ToolRunHeader
@@ -2593,8 +2602,6 @@ export const MessageList = memo(function MessageList({
                   </div>
                 );
               }
-              const partMap = annotationsByMessage.get(m.uuid);
-              const showHeader = showHeaderForRow[idx];
               // A plan card that has a prior version opens on its diff; let that
               // row break out of the reading-width cap so the diff isn't boxed
               // into the narrow column. First-version plans (body only) stay
@@ -2681,7 +2688,15 @@ export const MessageList = memo(function MessageList({
                       });
                       if (!isUser) {
                         return (
-                          <div className="flex w-full flex-col gap-1">
+                          <div
+                            className={cn(
+                              "flex w-full flex-col",
+                              // Matches the 12px two rows of the run sit apart
+                              // (pb-2 + pt-1), so the summary line joins the
+                              // same rhythm instead of clamping to what it opens.
+                              run && idx === run.start ? "gap-3" : "gap-1",
+                            )}
+                          >
                             {run && idx === run.start && (
                               <ToolRunHeader
                                 label={run.label}
