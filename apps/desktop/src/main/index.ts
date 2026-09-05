@@ -59,6 +59,13 @@ import type {
 } from "@/common/ipc-contract";
 import { chatTerminalId, isChatTerminalId } from "@/common/terminal-ids";
 import {
+  QUIT_PROMPT_CONFIRM,
+  QUIT_PROMPT_TITLE,
+  quitPromptDetail,
+  type QuitAnswer,
+  type RunningCounts,
+} from "@/common/quit-prompt";
+import {
   setCallbacks,
   startWatching,
   startRootWatch,
@@ -327,6 +334,83 @@ function focusMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+// ── Quit confirmation ──────────────────────────────────────────────
+
+/** How long main waits for the renderer to acknowledge the quit request
+ *  before falling back to the native dialog. Only covers the round trip —
+ *  once acknowledged, the user gets unlimited time to answer. */
+const QUIT_ACK_TIMEOUT_MS = 2000;
+
+let quitApproved = false;
+let quitPromptOpen = false;
+let quitPrompt: { id: string; answer: (a: QuitAnswer) => void } | null = null;
+
+function runningCounts(): RunningCounts {
+  const ids = listTerminals().map((t) => t.id);
+  const chats = ids.filter(isChatTerminalId).length;
+  return { chats, terminals: ids.length - chats };
+}
+
+/** Resolves "unavailable" when the renderer can't be asked — no window, a
+ *  gone render process, or no acknowledgement — so quitting never depends on
+ *  a window that isn't there to answer. */
+function askRendererToConfirmQuit(
+  counts: RunningCounts,
+): Promise<"quit" | "cancel" | "unavailable"> {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || win.webContents.isCrashed())
+    return Promise.resolve("unavailable");
+
+  focusMainWindow();
+  // Held directly: reading win.webContents again would throw once the window
+  // is destroyed, which is exactly when the cleanup below runs.
+  const wc = win.webContents;
+  const id = randomUUID();
+  return new Promise((resolve) => {
+    const gone = () => settle("unavailable");
+    const timer = setTimeout(() => settle("unavailable"), QUIT_ACK_TIMEOUT_MS);
+
+    const settle = (result: "quit" | "cancel" | "unavailable") => {
+      if (quitPrompt?.id !== id) return;
+      quitPrompt = null;
+      clearTimeout(timer);
+      wc.off("destroyed", gone);
+      wc.off("render-process-gone", gone);
+      resolve(result);
+    };
+
+    quitPrompt = {
+      id,
+      answer: (a) => {
+        if (a === "ack") clearTimeout(timer);
+        else settle(a);
+      },
+    };
+    wc.once("destroyed", gone);
+    wc.once("render-process-gone", gone);
+    sendToRenderer("app:confirm-quit", { id, ...counts });
+  });
+}
+
+async function nativeConfirmQuit(counts: RunningCounts): Promise<boolean> {
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: [QUIT_PROMPT_CONFIRM, "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: QUIT_PROMPT_TITLE,
+    detail: quitPromptDetail(counts),
+  });
+  return response === 0;
+}
+
+async function confirmQuit(): Promise<boolean> {
+  const counts = runningCounts();
+  const answer = await askRendererToConfirmQuit(counts);
+  if (answer !== "unavailable") return answer === "quit";
+  return nativeConfirmQuit(counts);
 }
 
 // ── Session listing ────────────────────────────────────────────────
@@ -660,6 +744,10 @@ const sendHandlers: {
   "chat:sendKeys": (_e, chatId, keys) => sendKeysToChat(chatId, keys),
   "chat:stop": (_e, chatId) => stopChat(chatId),
 
+  "app:quit-response": (_e, id, answer) => {
+    if (quitPrompt?.id === id) quitPrompt.answer(answer);
+  },
+
   "terminal:input": (_e, id, data) => writeTerminal(id, data),
   "terminal:resize": (_e, id, cols, rows) => resizeTerminal(id, cols, rows),
   "terminal:kill": (_e, id) => killTerminal(id),
@@ -748,14 +836,31 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  // Closing the last window IS the quit intent off macOS, so it skips the
+  // confirmation — there'd be no window left to show it in anyway.
   if (!isMac) {
-    stopAll();
-    stopAllWorktreeWatches();
+    quitApproved = true;
     app.quit();
   }
 });
 
-app.on("before-quit", () => {
+// ⌘Q and Dock→Quit both land here. The quit is cancelled while the user
+// decides, then re-issued once approved; teardown waits for will-quit so a
+// declined quit leaves every pty alive.
+app.on("before-quit", (e) => {
+  if (quitApproved) return;
+  e.preventDefault();
+  if (quitPromptOpen) return;
+  quitPromptOpen = true;
+  void confirmQuit().then((ok) => {
+    quitPromptOpen = false;
+    if (!ok) return;
+    quitApproved = true;
+    app.quit();
+  });
+});
+
+app.on("will-quit", () => {
   stopAll();
   stopAllWorktreeWatches();
   // Chats first: an engine may hold more than a pty (a protocol connection, a

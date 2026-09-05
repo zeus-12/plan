@@ -18,6 +18,7 @@
  * or Node imports, so the renderer program can safely include this file.
  */
 
+import type { QuitAnswer, RunningCounts } from "./quit-prompt";
 import type {
   ChatActivity,
   ChatEngineDescriptor,
@@ -427,6 +428,11 @@ export interface IpcSendContract {
   "chat:sendKeys": [chatId: string, keys: string[]];
   "chat:stop": [chatId: string];
 
+  /** Answer to `app:confirm-quit`: an immediate "ack" on receipt (so main
+   *  knows the renderer is alive and can wait indefinitely for the user),
+   *  then the decision. */
+  "app:quit-response": [id: string, answer: QuitAnswer];
+
   "terminal:input": [id: string, data: string];
   "terminal:resize": [id: string, cols: number, rows: number];
   "terminal:kill": [id: string];
@@ -439,6 +445,9 @@ export interface IpcEventContract {
   "switcher:cycle": [e: { key: string; shift: boolean }];
   /** ⌘R pressed; renderer force-refreshes a data page or reloads the app. */
   "app:reload-request": [];
+  /** ⌘Q / Dock Quit; renderer asks the user and replies on
+   *  `app:quit-response` carrying the same id. */
+  "app:confirm-quit": [req: { id: string } & RunningCounts];
   "terminal:data": [chunk: TerminalChunk];
   "terminal:exit": [id: string];
   /** Pushed when a chat's busy / waiting-on-you pair changes. */
@@ -547,6 +556,8 @@ export const API_SEND = {
   sendKeysToChat: "chat:sendKeys",
   stopChat: "chat:stop",
 
+  respondToQuit: "app:quit-response",
+
   terminalInput: "terminal:input",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",
@@ -556,6 +567,7 @@ export const API_EVENTS = {
   onWatcherEvent: "watcher:event",
   onSwitcherCycle: "switcher:cycle",
   onReloadRequest: "app:reload-request",
+  onConfirmQuit: "app:confirm-quit",
   onTerminalData: "terminal:data",
   onTerminalExit: "terminal:exit",
   onChatActivity: "chat:activity",

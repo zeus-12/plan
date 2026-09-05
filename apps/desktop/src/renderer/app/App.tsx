@@ -70,6 +70,11 @@ const MoveSessionModal = lazy(() =>
   })),
 );
 import { useConfirm } from "@/renderer/components/confirm-dialog";
+import {
+  QUIT_PROMPT_CONFIRM,
+  QUIT_PROMPT_TITLE,
+  quitPromptDetail,
+} from "@/common/quit-prompt";
 import { useWorktrees } from "@/renderer/features/worktrees/use-worktrees";
 import { useAllWorktrees } from "@/renderer/features/worktrees/use-all-worktrees";
 import { useTabSwitcher } from "@/renderer/features/workspace/use-tab-switcher";
@@ -503,6 +508,23 @@ function Shell() {
       return mountTargets;
     return [deferredTarget, ...mountTargets].slice(0, MAX_MOUNTED_WORKSPACES);
   }, [mountTargets, deferredTarget]);
+
+  // ⌘Q / Dock→Quit: main holds the quit open until we answer. The ack tells it
+  // the prompt is up, so it waits instead of falling back to a native dialog.
+  useEffect(
+    () =>
+      window.electronAPI.onConfirmQuit(({ id, chats, terminals }) => {
+        window.electronAPI.respondToQuit(id, "ack");
+        void confirm({
+          title: QUIT_PROMPT_TITLE,
+          description: quitPromptDetail({ chats, terminals }),
+          confirmLabel: QUIT_PROMPT_CONFIRM,
+        }).then((ok) =>
+          window.electronAPI.respondToQuit(id, ok ? "quit" : "cancel"),
+        );
+      }),
+    [confirm],
+  );
 
   const handleRemoveWorktree = useCallback(
     async (id: string) => {
