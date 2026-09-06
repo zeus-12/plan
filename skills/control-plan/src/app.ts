@@ -59,11 +59,18 @@ export async function launch(opts: LaunchOptions) {
     "--disable-renderer-backgrounding",
   ];
   const logPath = join(STATE_DIR, `plan-${opts.port}.log`);
+  // `preview` MUST be the built renderer. The main process prefers
+  // ELECTRON_RENDERER_URL whenever it is set, so an inherited one — left in the
+  // shell by a dev server, possibly one belonging to a DIFFERENT checkout —
+  // silently makes a "preview" run measure someone else's source. Strip it.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (opts.home) env.HOME = opts.home;
+  if (opts.mode === "preview") delete env.ELECTRON_RENDERER_URL;
   const child = spawn("npx", args, {
     cwd: join(opts.repo, "apps/desktop"),
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: opts.home ? { ...process.env, HOME: opts.home } : process.env,
+    env,
   });
   const chunks: Buffer[] = [];
   child.stdout?.on("data", (d: Buffer) => chunks.push(d));
