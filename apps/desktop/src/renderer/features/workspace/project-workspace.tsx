@@ -96,6 +96,11 @@ import {
   forgetSession,
   rekeySession,
 } from "@/renderer/features/chat/composer/composer-memory";
+import {
+  addNote,
+  forgetSessionNotes,
+  rekeyNotes,
+} from "@/renderer/features/notes/notes-store";
 import { PrView } from "@/renderer/features/pr/pr-view";
 import { TabBar } from "./tab-bar";
 import { ScratchEditor } from "@/renderer/features/scratch/scratch-editor";
@@ -863,6 +868,7 @@ function ProjectWorkspaceImpl({
       if (archived) {
         window.electronAPI.terminalKill(`chat:${project.encoded}:${sessionId}`);
         forgetSession(sessionId);
+        void forgetSessionNotes(project.encoded, sessionId);
         // Unread now outlives the pty, so putting a chat away has to retire its
         // badge explicitly — otherwise it would sit in the rollup unreachable.
         clearSessionUnread(chatTerminalId(project.encoded, sessionId));
@@ -1495,6 +1501,83 @@ function ProjectWorkspaceImpl({
     [sessions, transcripts, project.encoded],
   );
 
+  // ── Notes: the per-chat stash in the sidebar's bottom pane ────
+  // `tick` reveals the pane; `focus` also lands the caret in its composer, which
+  // only the "no selection" path wants — a capture made mid-selection must leave
+  // focus where the user was reading.
+  const [notesReveal, setNotesReveal] = useState({ tick: 0, focus: false });
+  const [notesInsert, setNotesInsert] = useState({ text: "", token: 0 });
+
+  const retireNotesInsert = useCallback(
+    () => setNotesInsert({ text: "", token: 0 }),
+    [],
+  );
+
+  // The stash belongs to the chat you were last IN, not to whatever the centre
+  // pane happens to show. Keying it on the active tab meant opening a diff — the
+  // moment you most want to jot something down — emptied the pane and made ⇧⇧
+  // silently capture nothing.
+  const notesSessionId = mruChatSessionId;
+
+  const handleInsertNotesToChat = useCallback(
+    (text: string) => {
+      if (!notesSessionId) return;
+      openChatTab(notesSessionId);
+      setNotesInsert((prev) => ({ text, token: prev.token + 1 }));
+    },
+    [notesSessionId, openChatTab],
+  );
+
+  // ⇧⇧ (two Shift presses with nothing in between) stashes the current text
+  // selection as a note on the selected chat. With no selection it just opens
+  // the stash — the same key gets you to it either way.
+  //
+  // Everything it reads goes through refs and the listener registers ONCE. With
+  // `titleForTab` in the deps it re-registered on every transcript tick, and
+  // each re-register reset `lastShift` — so while a chat was streaming, a tick
+  // landing between the two presses silently swallowed the shortcut.
+  const captureRef = useRef({
+    encoded: project.encoded,
+    sessionId: notesSessionId,
+    source: activeTab ? titleForTab(activeTab) : undefined,
+  });
+  captureRef.current = {
+    encoded: project.encoded,
+    sessionId: notesSessionId,
+    source: activeTab ? titleForTab(activeTab) : undefined,
+  };
+
+  useEffect(() => {
+    let lastShift = 0;
+    const handler = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
+      if (e.key !== "Shift") {
+        lastShift = 0;
+        return;
+      }
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      const now = Date.now();
+      if (now - lastShift >= DOUBLE_TAP_MS) {
+        lastShift = now;
+        return;
+      }
+      lastShift = 0;
+      const { encoded, sessionId, source } = captureRef.current;
+      const text = selectedText();
+      if (!text.trim() || !sessionId) {
+        setNotesReveal((prev) => ({ tick: prev.tick + 1, focus: true }));
+        return;
+      }
+      void addNote(encoded, sessionId, text, source).then((id) => {
+        if (!id) return;
+        setNotesReveal((prev) => ({ tick: prev.tick + 1, focus: false }));
+        pushToast({ title: "Stashed to notes", id: "notes-capture" }, 2000);
+      });
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // ── Terminals (⌘J) ───────────────────────────────────────────
   // Each project has a default terminal; each chat the user "resumes" gets its
   // own terminal running `claude --resume <id>`; the sidebar's Terminals
@@ -1607,6 +1690,7 @@ function ProjectWorkspaceImpl({
         // The composer's memory follows the conversation, not the id it used to
         // have — what was typed seconds before the fork stays undoable.
         rekeySession(pending.fromSid, b);
+        void rekeyNotes(project.encoded, pending.fromSid, b);
         replaceProjectTab(
           project.encoded,
           chatTabId(pending.fromSid),
@@ -2489,6 +2573,8 @@ function ProjectWorkspaceImpl({
                             onBlocked={() =>
                               revealChatTerminal(selectedSessionId)
                             }
+                            insert={notesInsert}
+                            onInsertApplied={retireNotesInsert}
                             autoFocus={isNewSession(selectedSessionId)}
                             commentsPending={totalComments > 0}
                             canContinue={
@@ -2626,6 +2712,11 @@ function ProjectWorkspaceImpl({
               scriptEntries={scriptEntries}
               onOpenCommandSettings={setCommandSettings}
               onOpenScratch={() => openTab(makeScratchTab())}
+              notesSessionId={notesSessionId}
+              notesReveal={notesReveal}
+              onInsertNotesToChat={
+                notesSessionId ? handleInsertNotesToChat : undefined
+              }
             />
           </div>
         </SidebarProvider>
@@ -2643,6 +2734,30 @@ interface SwitchEntry {
   project: string;
   badge: string;
   run: () => void;
+}
+
+/** How long after one Shift a second one still counts as a double-tap. */
+const DOUBLE_TAP_MS = 400;
+
+/**
+ * The text the user has selected, wherever it is.
+ *
+ * `window.getSelection()` covers the transcript, diffs, files and the Lexical
+ * composer, but Chromium reports an EMPTY selection for `<input>`/`<textarea>`
+ * — their selection lives on the element. Both are read so ⇧⇧ captures from a
+ * commit box or the notes composer as readily as from a transcript.
+ */
+function selectedText(): string {
+  const el = document.activeElement;
+  if (
+    (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) &&
+    el.selectionStart !== null &&
+    el.selectionEnd !== null &&
+    el.selectionEnd > el.selectionStart
+  ) {
+    return el.value.slice(el.selectionStart, el.selectionEnd);
+  }
+  return window.getSelection()?.toString() ?? "";
 }
 
 /** True when focus is inside an embedded xterm terminal (dock or sidebar). */

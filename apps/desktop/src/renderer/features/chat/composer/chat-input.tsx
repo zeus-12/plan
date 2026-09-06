@@ -68,6 +68,14 @@ interface Props {
   blocked?: boolean;
   /** Invoked when the user tries to send while blocked (reveals the terminal). */
   onBlocked?: () => void;
+  /** Text to append to the draft, applied whenever `token` changes. Prop-driven
+   *  rather than imperative because the caller may have to open the chat tab
+   *  first — this lands the moment the composer mounts, with no frame guessing. */
+  insert?: { text: string; token: number };
+  /** Called once the `insert` has landed, so the caller can retire the token —
+   *  without that, remounting the composer (a hop to a diff tab and back) would
+   *  replay the same insert. */
+  onInsertApplied?: () => void;
   /** Comments are waiting in the chip above — they go out with this message, so
    *  send stays available even when the draft itself is empty. */
   commentsPending?: boolean;
@@ -172,6 +180,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     autoFocus,
     blocked,
     onBlocked,
+    insert,
+    onInsertApplied,
     commentsPending,
     canContinue,
     atSessionLimit,
@@ -353,6 +363,37 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   );
   const addImageRef = useRef(addImage);
   addImageRef.current = addImage;
+
+  // Appended at the end of the draft on its own line, so what was already typed
+  // is never overwritten. Nothing is sent — the user still edits and hits Enter.
+  const insertToken = insert?.token ?? 0;
+  const insertTextRef = useRef(insert?.text ?? "");
+  insertTextRef.current = insert?.text ?? "";
+  const onInsertAppliedRef = useRef(onInsertApplied);
+  onInsertAppliedRef.current = onInsertApplied;
+  useEffect(() => {
+    if (insertToken === 0) return;
+    const editor = editorRef.current;
+    const text = insertTextRef.current;
+    if (!editor || !text) return;
+    editor.update(() => {
+      const root = $getRoot();
+      const hadText = root.getTextContent().trim().length > 0;
+      const sel = root.selectEnd();
+      if (hadText) {
+        sel.insertLineBreak();
+        sel.insertLineBreak();
+      }
+      // insertText doesn't split on newlines — each line is inserted, with an
+      // explicit break between, so a multi-line note keeps its shape.
+      text.split("\n").forEach((line, i) => {
+        if (i > 0) sel.insertLineBreak();
+        if (line) sel.insertText(line);
+      });
+    });
+    editor.focus();
+    onInsertAppliedRef.current?.();
+  }, [insertToken]);
 
   useImperativeHandle(
     ref,

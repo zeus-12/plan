@@ -642,6 +642,24 @@ export interface ScratchData {
 }
 
 /**
+ * One stashed thought in a chat's Notes pane — a prompt you want to send later,
+ * or a snippet captured off a selection. `source` is only set when the note was
+ * captured from a surface (the label that surface reported), never guessed.
+ */
+export interface SessionNote {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: number;
+  source?: string;
+}
+
+/** A project's note stash, keyed by chat session id. */
+export interface NotesData {
+  sessions: Record<string, SessionNote[]>;
+}
+
+/**
  * What kind of target an "Open in…" app expects: a terminal takes a working
  * directory (never a file), a file manager reveals rather than opens, an
  * editor takes the path as given.

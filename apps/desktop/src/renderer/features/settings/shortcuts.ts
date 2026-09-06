@@ -147,6 +147,11 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: "Toggle terminal pane",
         chords: [{ mods: ["meta"], key: "T" }],
       },
+      {
+        id: "stashNote",
+        label: "Stash selection as a note / open Notes",
+        chords: [{ key: "Double-tap ⇧" }],
+      },
     ],
   },
   {

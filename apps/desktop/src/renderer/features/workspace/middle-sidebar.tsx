@@ -32,6 +32,8 @@ import { CommitPanel } from "@/renderer/features/git/commit-panel";
 import { TerminalPanel } from "@/renderer/features/terminal/terminal-panel";
 import { CommandsTerminal } from "@/renderer/features/terminal/commands-terminal";
 import { SearchPanel } from "@/renderer/features/search/search-panel";
+import { NotesPanel } from "@/renderer/features/notes/notes-panel";
+import { useOpenNoteCount } from "@/renderer/features/notes/notes-store";
 import { PrSidebar } from "@/renderer/features/pr/pr-sidebar";
 import type { CommandKind } from "@/common/terminal-ids";
 import type { CommandSection } from "@/renderer/features/terminal/commands-settings-modal";
@@ -133,6 +135,14 @@ interface Props {
   onOpenCommandSettings: (section: CommandSection) => void;
   /** Open the per-worktree scratchpad as a tab in the center content pane. */
   onOpenScratch: () => void;
+
+  /** The chat the Notes tab stashes for — null when no chat is selected. */
+  notesSessionId: string | null;
+  /** Bumped to reveal the Notes tab; `focus` also lands the caret in its
+   *  composer (a capture made from a selection must NOT steal focus). */
+  notesReveal: { tick: number; focus: boolean };
+  /** Drop notes into the chat composer. Absent when there's no chat to drop into. */
+  onInsertNotesToChat?: (text: string) => void;
 }
 
 function ChevronIcon({ up }: { up: boolean }) {
@@ -328,11 +338,22 @@ export const MiddleSidebar = memo(function MiddleSidebar({
   scriptEntries,
   onOpenCommandSettings,
   onOpenScratch,
+  notesSessionId,
+  notesReveal,
+  onInsertNotesToChat,
 }: Props) {
   const sidebar = useSidebar();
   // Minimise the embedded terminal pane while keeping the tab strip visible.
   // Local UI state — independent of the dock and ⌘J.
   const [paneCollapsed, setPaneCollapsed] = useState(false);
+  // Which surface the bottom pane shows. The Notes tab is pinned and always
+  // present (a chat's stash outlives any terminal), so it can't live in the
+  // `terminals` list.
+  const [bottomView, setBottomView] = useState<"terminal" | "notes">(
+    "terminal",
+  );
+  const [notesFocusSignal, setNotesFocusSignal] = useState(0);
+  const openNotes = useOpenNoteCount(encoded, notesSessionId);
   const [width, setWidth] = usePersistentNumber(
     "plan.middleSidebar.width",
     320,
@@ -412,6 +433,8 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       e.preventDefault();
       const wasOpen = sidebar.open;
       if (!wasOpen) sidebar.setOpen(true);
+      const wasShowing = bottomView === "terminal" && !paneCollapsed;
+      setBottomView("terminal");
       if (e.shiftKey) {
         onNewTerminal();
         setPaneCollapsed(false);
@@ -420,15 +443,17 @@ export const MiddleSidebar = memo(function MiddleSidebar({
       if (terminals.length === 0) {
         onNewTerminal();
         setPaneCollapsed(false);
-      } else if (!wasOpen) {
+      } else if (!wasOpen || !wasShowing) {
+        // The pane was hidden, or was showing Notes — ⌘T reveals the terminal
+        // rather than collapsing a pane the user can't see a terminal in.
         setPaneCollapsed(false);
       } else {
-        setPaneCollapsed((v) => !v);
+        setPaneCollapsed(true);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [sidebar, terminals.length, onNewTerminal]);
+  }, [sidebar, terminals.length, onNewTerminal, bottomView, paneCollapsed]);
 
   // A shell spawned elsewhere (the run button on a chat code block) has no way
   // to open this pane itself. Compared against the tick we last acted on rather
@@ -439,8 +464,22 @@ export const MiddleSidebar = memo(function MiddleSidebar({
     if (terminalRevealTick === lastRevealTick.current) return;
     lastRevealTick.current = terminalRevealTick;
     sidebar.setOpen(true);
+    setBottomView("terminal");
     setPaneCollapsed(false);
   }, [terminalRevealTick, sidebar]);
+
+  // A capture made from a surface elsewhere (the ⇧⇧ shortcut) has to bring the
+  // stash on screen itself. Compared against the tick we last acted on, so a
+  // workspace remount doesn't pop the pane open for a long-past capture.
+  const lastNotesTick = useRef(notesReveal.tick);
+  useEffect(() => {
+    if (notesReveal.tick === lastNotesTick.current) return;
+    lastNotesTick.current = notesReveal.tick;
+    sidebar.setOpen(true);
+    setBottomView("notes");
+    setPaneCollapsed(false);
+    if (notesReveal.focus) setNotesFocusSignal((n) => n + 1);
+  }, [notesReveal, sidebar]);
 
   const multiRepo = repos.length > 1;
   // Commit drafts live here, keyed by repo subPath, so a draft survives its
@@ -597,21 +636,39 @@ export const MiddleSidebar = memo(function MiddleSidebar({
         </SidebarContent>
       </Tabs>
 
-      {/* ── Terminals: always-present tab strip + embedded pane ── */}
+      {/* ── Bottom pane: Notes + terminals share one tab strip and one box ── */}
       <div className="shrink-0 border-t border-[var(--border)]">
         <div className="flex items-stretch gap-2 px-3 pt-2">
-          {terminals.length > 0 && (
-            <button
-              onClick={() => setPaneCollapsed((v) => !v)}
-              title={paneCollapsed ? "Expand terminal" : "Minimise terminal"}
-              aria-label={
-                paneCollapsed ? "Expand terminal" : "Minimise terminal"
-              }
-              className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
-            >
-              <ChevronIcon up={paneCollapsed} />
-            </button>
-          )}
+          <button
+            onClick={() => setPaneCollapsed((v) => !v)}
+            title={paneCollapsed ? "Expand panel" : "Minimise panel"}
+            aria-label={paneCollapsed ? "Expand panel" : "Minimise panel"}
+            className="mb-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--row-hover)] hover:text-[var(--text)]"
+          >
+            <ChevronIcon up={paneCollapsed} />
+          </button>
+          {/* Pinned left of the scroller: the stash must stay reachable however
+              many terminals are open. */}
+          <button
+            onClick={() => {
+              setBottomView("notes");
+              setPaneCollapsed(false);
+            }}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 border-b-2 pb-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
+              bottomView === "notes" && !paneCollapsed
+                ? "border-[var(--text)] text-[var(--text)]"
+                : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+            )}
+          >
+            <span>Notes</span>
+            {openNotes > 0 && (
+              <span className="rounded-full bg-[var(--bg-surface-hover)] px-1.5 text-[10px] leading-[15px] text-[var(--text-secondary)]">
+                {openNotes}
+              </span>
+            )}
+          </button>
+          <span className="mb-1.5 w-px shrink-0 bg-[var(--border)]" />
           <div
             ref={stripFade.ref}
             onScroll={stripFade.onScroll}
@@ -628,11 +685,12 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                   key={t.id}
                   onClick={() => {
                     onSelectTerminal(t.id);
+                    setBottomView("terminal");
                     setPaneCollapsed(false);
                   }}
                   className={cn(
                     "group flex shrink-0 items-center gap-1.5 border-b-2 pb-1.5 font-[family-name:var(--font-mono)] text-[11px] transition-colors",
-                    active && !paneCollapsed
+                    active && bottomView === "terminal" && !paneCollapsed
                       ? "border-[var(--text)] text-[var(--text)]"
                       : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
                   )}
@@ -666,6 +724,7 @@ export const MiddleSidebar = memo(function MiddleSidebar({
                 // Spawning already switches to the new terminal; make sure the
                 // pane is expanded so a collapsed terminal section reopens too.
                 onNewTerminal();
+                setBottomView("terminal");
                 setPaneCollapsed(false);
               }}
               title="New terminal (⌘⇧T)"
@@ -686,71 +745,97 @@ export const MiddleSidebar = memo(function MiddleSidebar({
             <GearIcon />
           </button>
         </div>
-        {/* Embedded terminal pane: the active shell renders right here, sized
-            to this bottom section only (drag the top edge to resize). All opened
-            shells stay mounted (hidden) so scrollback survives tab switches. */}
-        {terminals.length > 0 && (
+        {/* The pane itself: whichever tab is selected renders right here, sized
+            to this bottom section only (drag the top edge to resize). Notes and
+            every opened shell stay mounted (hidden) so scrollback, scroll
+            position and selection survive tab switches. */}
+        <div
+          className={cn(
+            "relative border-t border-[var(--border)]",
+            paneCollapsed && "border-t-0",
+          )}
+          style={{ height: paneCollapsed ? 0 : termHeight }}
+        >
+          {!paneCollapsed && (
+            <div
+              onPointerDown={startTermResize}
+              title="Drag to resize"
+              className="absolute inset-x-0 top-0 z-20 h-1 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
+            />
+          )}
+          {/* Kept mounted so its search, selection and scroll survive a hop to a
+              terminal and back. */}
           <div
             className={cn(
-              "relative border-t border-[var(--border)]",
-              paneCollapsed && "border-t-0",
+              "absolute inset-0 overflow-hidden pt-1",
+              (bottomView !== "notes" || paneCollapsed) && "hidden",
             )}
-            style={{ height: paneCollapsed ? 0 : termHeight }}
           >
-            {!paneCollapsed && (
-              <div
-                onPointerDown={startTermResize}
-                title="Drag to resize"
-                className="absolute inset-x-0 top-0 z-20 h-1 cursor-row-resize transition-colors hover:bg-[var(--border-strong)]"
-              />
-            )}
-            {terminals.map((t) => {
-              const active = t.id === activeTerminalId;
-              const commandKind = t.kind === "shell" ? null : t.kind;
-              return (
-                <div
-                  key={t.id}
-                  className={cn(
-                    "absolute inset-0 overflow-hidden",
-                    (!active || paneCollapsed) && "hidden",
-                  )}
-                >
-                  {commandKind ? (
-                    <CommandsTerminal
-                      kind={commandKind}
-                      encoded={encoded}
-                      entries={
-                        commandKind === "build"
-                          ? buildEntries
-                          : commandKind === "script"
-                            ? scriptEntries
-                            : runEntries
-                      }
-                      repos={repos}
-                      visible={active && !paneCollapsed && sidebar.open}
-                      fitSignal={fitSignal}
-                      onConfigure={() =>
-                        onOpenCommandSettings(
-                          commandKind === "script" ? "scripts" : commandKind,
-                        )
-                      }
-                    />
-                  ) : (
-                    <TerminalPanel
-                      id={t.id}
-                      encoded={encoded}
-                      initialCommand={t.initialCommand}
-                      showHeader={false}
-                      visible={active && !paneCollapsed && sidebar.open}
-                      fitSignal={fitSignal}
-                      onRequestClose={() => onCloseTerminal(t.id)}
-                    />
-                  )}
-                </div>
-              );
-            })}
+            <NotesPanel
+              encoded={encoded}
+              sessionId={notesSessionId}
+              visible={bottomView === "notes" && !paneCollapsed && sidebar.open}
+              focusSignal={notesFocusSignal}
+              onInsertToChat={onInsertNotesToChat}
+            />
           </div>
-        )}
+          {terminals.map((t) => {
+            const active = t.id === activeTerminalId;
+            const commandKind = t.kind === "shell" ? null : t.kind;
+            return (
+              <div
+                key={t.id}
+                className={cn(
+                  "absolute inset-0 overflow-hidden",
+                  (!active || paneCollapsed || bottomView !== "terminal") &&
+                    "hidden",
+                )}
+              >
+                {commandKind ? (
+                  <CommandsTerminal
+                    kind={commandKind}
+                    encoded={encoded}
+                    entries={
+                      commandKind === "build"
+                        ? buildEntries
+                        : commandKind === "script"
+                          ? scriptEntries
+                          : runEntries
+                    }
+                    repos={repos}
+                    visible={
+                      active &&
+                      bottomView === "terminal" &&
+                      !paneCollapsed &&
+                      sidebar.open
+                    }
+                    fitSignal={fitSignal}
+                    onConfigure={() =>
+                      onOpenCommandSettings(
+                        commandKind === "script" ? "scripts" : commandKind,
+                      )
+                    }
+                  />
+                ) : (
+                  <TerminalPanel
+                    id={t.id}
+                    encoded={encoded}
+                    initialCommand={t.initialCommand}
+                    showHeader={false}
+                    visible={
+                      active &&
+                      bottomView === "terminal" &&
+                      !paneCollapsed &&
+                      sidebar.open
+                    }
+                    fitSignal={fitSignal}
+                    onRequestClose={() => onCloseTerminal(t.id)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </Sidebar>
   );

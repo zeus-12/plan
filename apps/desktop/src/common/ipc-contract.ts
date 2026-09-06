@@ -51,6 +51,7 @@ import type {
   ProjectDefaults,
   ProjectEntry,
   PushPreview,
+  NotesData,
   ProjectFile,
   ScratchData,
   SearchOptions,
@@ -418,6 +419,10 @@ export interface IpcInvokeContract {
   // Per-worktree scratchpad
   "scratch:read": { args: [encoded: string]; result: ScratchData | null };
   "scratch:write": { args: [encoded: string, data: ScratchData]; result: void };
+
+  // Per-chat note stash
+  "notes:read": { args: [encoded: string]; result: NotesData | null };
+  "notes:write": { args: [encoded: string, data: NotesData]; result: void };
 }
 
 /** Fire-and-forget renderer→main channels: `ipcRenderer.send` ↔ `ipcMain.on`. */
@@ -549,6 +554,9 @@ export const API_INVOKE = {
 
   readScratch: "scratch:read",
   writeScratch: "scratch:write",
+
+  readNotes: "notes:read",
+  writeNotes: "notes:write",
 } as const satisfies Record<string, keyof IpcInvokeContract>;
 
 export const API_SEND = {

@@ -11,6 +11,7 @@ import { PLAN_DIR } from "@/main/store/plan-config";
 import { discoverRepos, invalidateRepoLayout } from "@/main/git/git";
 import { restartWorktreeWatch } from "./worktree-watcher";
 import { deleteScratch } from "@/main/store/scratch-store";
+import { deleteNotes } from "@/main/store/notes-store";
 import type { DiscoveredRepo } from "@/common/shared-types";
 
 /**
@@ -313,9 +314,10 @@ export async function removeWorktree(id: string): Promise<void> {
     }
   }
   await rm(rec.rootPath, { recursive: true, force: true }).catch(() => {});
-  // Drop its scratchpad too — a future worktree reusing the same name (and
-  // hence the same encoded path) must not inherit stale notes.
+  // Drop its scratchpad and note stash too — a future worktree reusing the same
+  // name (and hence the same encoded path) must not inherit stale notes.
   await deleteScratch(rec.encoded).catch(() => {});
+  await deleteNotes(rec.encoded).catch(() => {});
   invalidateRepoLayout(rec.encoded);
   await deleteWorktreeRecord(id);
 }

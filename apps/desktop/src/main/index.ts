@@ -40,6 +40,7 @@ import {
   writeClaudeConfig,
 } from "./providers/claude-code/instructions";
 import { readScratch, writeScratch } from "@/main/store/scratch-store";
+import { readNotes, writeNotes } from "@/main/store/notes-store";
 import {
   listExternalApps,
   openInExternalApp,
@@ -730,6 +731,10 @@ const invokeHandlers: {
   // Per-worktree scratchpad: durable notepad content persisted to ~/.plan.
   "scratch:read": (_e, encoded) => readScratch(encoded),
   "scratch:write": (_e, encoded, data) => writeScratch(encoded, data),
+
+  // Per-chat note stash: prompts jotted down for later, persisted to ~/.plan.
+  "notes:read": (_e, encoded) => readNotes(encoded),
+  "notes:write": (_e, encoded, data) => writeNotes(encoded, data),
 };
 
 /** Fire-and-forget channels (`ipcMain.on`), same contract discipline. */
