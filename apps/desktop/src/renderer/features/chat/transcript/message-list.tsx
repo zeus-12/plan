@@ -71,6 +71,11 @@ import {
   useToolPreviewHover,
 } from "./tool-preview-card";
 import { SessionCwdContext } from "./session-cwd";
+import { chatTerminalId } from "@/common/terminal-ids";
+import {
+  isSessionUnread,
+  takeOpenedUnread,
+} from "@/renderer/features/sessions/unread-response-store";
 import { ImageLightbox } from "@/renderer/components/image-lightbox";
 import { MessageRail } from "./message-rail";
 import { TimeAgo } from "@/renderer/components/time-ago";
@@ -1619,6 +1624,20 @@ export const MessageList = memo(function MessageList({
     return null;
   }, [items]);
 
+  // Row the newest reply's prose starts on — where a chat opened with an unseen
+  // reply lands. The turn's FIRST row would be the top of a tool run the reader
+  // has no reason to start at; its last prose row is the answer itself. Null
+  // when the newest turn is all machinery, and the open falls back to the end.
+  const latestReplyUuid = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (isRealUserTurn(items[i])) break;
+      if (messageText(items[i])) return items[i].uuid || null;
+    }
+    return null;
+  }, [items]);
+  const latestReplyUuidRef = useRef<string | null>(null);
+  latestReplyUuidRef.current = latestReplyUuid;
+
   // Files each turn wrote to, keyed by the turn's last row — the pill strip
   // that closes a reply. Same anchor as the reply meta row, so a turn ends with
   // its prose, then what it changed, then the time.
@@ -1882,6 +1901,7 @@ export const MessageList = memo(function MessageList({
     rowWindow.schedule();
   }, [openRunKeys, fullRunKeys, rowWindow.schedule]);
   const scrollKey = sessionId ? chatScrollKey(encoded, sessionId) : null;
+  const chatId = sessionId ? chatTerminalId(encoded, sessionId) : null;
   const scrollKeyRef = useRef<string | null>(null);
   // Anchor to restore to (null = never scrolled this session, or it was left at
   // the bottom). Seeded from the module store, which outlives both this pane's
@@ -1987,8 +2007,32 @@ export const MessageList = memo(function MessageList({
   // pane has no layout box, so the browser drops its scroll offset.
   useLayoutEffect(() => {
     if (!visible) return;
+    // Consumed on every pass, so a flag left by an open that never built a pane
+    // (the chat was opened in a workspace that stayed off screen) can't be
+    // applied to some later one.
+    const openedUnread = chatId ? takeOpenedUnread(chatId) : false;
+    const el = parentRef.current;
+    // Nothing remembered means this is a fresh open, and a fresh open with an
+    // unseen reply starts at that reply rather than at the end of it. A chat
+    // whose tab was already open keeps its position (savedRef), and one with
+    // nothing unread falls through to the bottom.
+    if (
+      el &&
+      !savedRef.current &&
+      latestReplyUuidRef.current &&
+      (openedUnread || (chatId !== null && isSessionUnread(chatId)))
+    ) {
+      followingBottomRef.current = false;
+      savedRef.current = {
+        atBottom: false,
+        scrollTop: el.scrollTop,
+        anchorUuid: latestReplyUuidRef.current,
+        anchorOffset: 0,
+        anchorScrollTop: el.scrollTop,
+      };
+    }
     beginRestore();
-  }, [visible, beginRestore]);
+  }, [visible, beginRestore, chatId]);
 
   // Keep the bottom pinned as new content lands. `working` is a dep so the
   // typing indicator appearing/disappearing keeps us anchored too.

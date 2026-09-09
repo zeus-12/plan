@@ -38,3 +38,13 @@ export function getChatScroll(key: string): ChatScrollPos | null {
 export function setChatScroll(key: string, pos: ChatScrollPos): void {
   positions.set(key, pos);
 }
+
+/**
+ * Drop a chat's remembered position — called when its TAB closes. A position is
+ * "where I left this open chat", so it may not outlive the tab: reopening a
+ * closed chat is a fresh open, and lands wherever a fresh open lands (its unseen
+ * reply, or the newest message) rather than at some offset from a past visit.
+ */
+export function forgetChatScroll(key: string): void {
+  positions.delete(key);
+}

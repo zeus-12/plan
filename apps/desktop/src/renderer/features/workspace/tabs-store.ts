@@ -1,5 +1,9 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { mostRecentUsed } from "./mru-store";
+import {
+  chatScrollKey,
+  forgetChatScroll,
+} from "@/renderer/features/chat/transcript/chat-scroll-store";
 
 /**
  * Content-pane tabs, keyed by project `encoded`. Lives at module scope so it
@@ -212,6 +216,10 @@ export function closeProjectTab(encoded: string, id: string) {
   const cur = get(encoded);
   const idx = cur.tabs.findIndex((t) => t.id === id);
   if (idx === -1) return;
+  const closing = cur.tabs[idx];
+  if (closing.kind === "chat") {
+    forgetChatScroll(chatScrollKey(encoded, closing.sessionId));
+  }
   const tabs = cur.tabs.filter((t) => t.id !== id);
   let activeId = cur.activeId;
   if (activeId === id) {

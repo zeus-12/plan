@@ -44,6 +44,16 @@ const listeners = new Set<() => void>();
 let viewedId: string | null = null;
 let focused = typeof document !== "undefined" ? document.hasFocus() : true;
 
+/**
+ * Chats whose badge was cleared by opening them, held until the transcript pane
+ * asks. Opening a chat clears the badge immediately, but its pane mounts a beat
+ * later (the transcript is read from disk first), so by then "this reply was
+ * unseen" is gone — and that fact is what decides where the transcript lands.
+ * Values are timestamps, kept only to drop the oldest when the map is capped.
+ */
+const openedUnread = new Map<string, number>();
+const MAX_OPENED = 50;
+
 const STORAGE_KEY = "plan.unreadSessions";
 // A badge nobody cleared in a month is for a chat that's been dealt with or
 // deleted; keeping it forever would only grow the blob.
@@ -169,7 +179,30 @@ export function relocateSessionUnread(oldId: string, newId: string) {
  */
 export function setViewedSession(id: string | null) {
   viewedId = id;
-  if (focused && id) clear(id);
+  if (!focused || !id) return;
+  if (unread.has(id)) {
+    if (openedUnread.size >= MAX_OPENED) {
+      const oldest = [...openedUnread.entries()].sort((a, b) => a[1] - b[1])[0];
+      if (oldest) openedUnread.delete(oldest[0]);
+    }
+    openedUnread.set(id, Date.now());
+  }
+  clear(id);
+}
+
+/** Whether this chat has a replied-but-unseen badge right now. */
+export function isSessionUnread(id: string): boolean {
+  return unread.has(id);
+}
+
+/**
+ * Whether this chat was opened with an unseen reply, consumed on read. Callers
+ * ask on every pass so a flag that outlived its open (the pane was already
+ * mounted and kept its own scroll position) is dropped rather than applied to
+ * some later open.
+ */
+export function takeOpenedUnread(id: string): boolean {
+  return openedUnread.delete(id);
 }
 
 function onFocusChange(next: boolean) {
@@ -187,7 +220,9 @@ if (typeof window !== "undefined") {
   // again, it's no longer done. The session row already hides the green dot
   // while working, but clearing keeps the sidebar rollup honest too.
   window.electronAPI?.onChatActivity?.((id, activity) => {
-    if (activity.busy) clear(id);
+    if (!activity.busy) return;
+    openedUnread.delete(id);
+    clear(id);
   });
 }
 
