@@ -26,6 +26,7 @@ import {
   type TextSegment,
 } from "@plan/shared/lib/text/dom-text";
 import { CommentPopover } from "@plan/shared/components/comment-popover";
+import { TextShimmer } from "@plan/shared/components/ui/text-shimmer";
 
 import { FindWidget } from "@plan/shared/components/find-widget";
 import { Markdown } from "@plan/shared/components/markdown";
@@ -635,14 +636,20 @@ function ToolCallBlock({
  * The one-line summary a run of tool rows folds into. Shaped like the rows it
  * replaces — same mono size, same muted palette — so an open run reads as the
  * same column of activity lines it was before, under a heading.
+ *
+ * While the run is still being written to, the label shimmers: folded it names
+ * the call in flight, open it names the run, so the heading always says whether
+ * anything is still happening.
  */
 function ToolRunHeader({
   label,
   open,
+  live,
   onToggle,
 }: {
   label: string;
   open: boolean;
+  live: boolean;
   onToggle: () => void;
 }) {
   return (
@@ -651,9 +658,15 @@ function ToolRunHeader({
       className="flex w-full items-center gap-1.5 py-0.5 text-left font-[family-name:var(--font-mono)] text-[11px]"
     >
       <Wrench size={11} className="shrink-0 text-[var(--text-tertiary)]" />
-      <span className="min-w-0 truncate text-[var(--text-secondary)]">
-        {label}
-      </span>
+      {live ? (
+        <TextShimmer duration={2.4} className="min-w-0 truncate">
+          {label}
+        </TextShimmer>
+      ) : (
+        <span className="min-w-0 truncate text-[var(--text-secondary)]">
+          {label}
+        </span>
+      )}
       <Chevron
         open={open}
         size={12}
@@ -1802,12 +1815,30 @@ export const MessageList = memo(function MessageList({
         }
       }
     }
-    // The run Claude is still adding to: folding it hides the only progress the
-    // transcript shows while a reply is in flight.
-    const last = toolRuns.runs[toolRuns.runs.length - 1];
-    if (working && last && last.end === items.length - 1) out.add(last.key);
     return out;
-  }, [toolRuns, items, annotationsByMessage, working]);
+  }, [toolRuns, items, annotationsByMessage]);
+
+  /** The run Claude is still writing to, if the reply is in flight. */
+  const liveRun = useMemo(() => {
+    if (!working) return null;
+    const last = toolRuns.runs[toolRuns.runs.length - 1];
+    return last && last.end === items.length - 1 ? last : null;
+  }, [working, toolRuns, items.length]);
+
+  /** The call in flight, as the folded live run's heading — "Ran <target>". */
+  const liveLabel = useMemo(() => {
+    if (!liveRun) return null;
+    for (let i = liveRun.end; i >= liveRun.start; i--) {
+      const parts = items[i].parts;
+      for (let j = parts.length - 1; j >= 0; j--) {
+        const p = parts[j];
+        if (p.kind !== "tool_use") continue;
+        const { verb, target } = toolHeader(p.tool, p.input);
+        return target ? `${verb} ${target}` : verb;
+      }
+    }
+    return null;
+  }, [liveRun, items]);
 
   /** Per-row "should we show the role header here?" */
   const showHeaderForRow = useMemo(() => {
@@ -2594,8 +2625,11 @@ export const MessageList = memo(function MessageList({
                   >
                     <div className="flex w-full max-w-[820px] justify-start">
                       <ToolRunHeader
-                        label={run.label}
+                        label={
+                          run === liveRun ? (liveLabel ?? run.label) : run.label
+                        }
                         open={false}
+                        live={run === liveRun}
                         onToggle={() => toggleRun(run.key)}
                       />
                     </div>
@@ -2701,6 +2735,7 @@ export const MessageList = memo(function MessageList({
                               <ToolRunHeader
                                 label={run.label}
                                 open
+                                live={run === liveRun}
                                 onToggle={() => toggleRun(run.key)}
                               />
                             )}
@@ -2809,10 +2844,12 @@ export const MessageList = memo(function MessageList({
                 </div>
               );
             })}
-            {working && (
+            {working && !liveRun && (
               // Mirror a message row's layout (px-4 band + centered 820 column)
               // so the pill's left edge lands on the same column edge as the
               // prose and "Ran …" rows above it, at every viewport width.
+              // A live run already shimmers its own heading; two "still going"
+              // signals stacked read as two things happening.
               <div className="flex w-full justify-center px-4">
                 <div className="w-full max-w-[820px]">
                   <TypingIndicator />
