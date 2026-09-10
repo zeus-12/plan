@@ -29,6 +29,7 @@ import type {
 import type {
   AddReposToWorktreeInput,
   BlameResult,
+  ChatFolder,
   ClaudeConfigBundle,
   CommitDetails,
   CreatePrInput,
@@ -96,6 +97,29 @@ export interface IpcInvokeContract {
   "sessions:rename": {
     args: [sessionId: string, name: string];
     result: { ok: true };
+  };
+  // Every chat-folder mutation answers with the worktree's folders after it.
+  "chatFolders:list": { args: [encoded: string]; result: ChatFolder[] };
+  "chatFolders:create": {
+    args: [encoded: string, name: string, sessionId: string];
+    result: ChatFolder[];
+  };
+  "chatFolders:rename": {
+    args: [encoded: string, folderId: string, name: string];
+    result: ChatFolder[];
+  };
+  "chatFolders:setCollapsed": {
+    args: [encoded: string, folderId: string, collapsed: boolean];
+    result: ChatFolder[];
+  };
+  "chatFolders:ungroup": {
+    args: [encoded: string, folderId: string];
+    result: ChatFolder[];
+  };
+  /** `folderId: null` takes the chat out of its folder. */
+  "chatFolders:moveChat": {
+    args: [encoded: string, sessionId: string, folderId: string | null];
+    result: ChatFolder[];
   };
   /** Incremental transcript read: pass the previous response's `gen` +
    *  held-message count to receive only the messages appended since. */
@@ -479,6 +503,12 @@ export const API_INVOKE = {
   listSessions: "projects:listSessions",
   setSessionArchived: "sessions:setArchived",
   renameSession: "sessions:rename",
+  listChatFolders: "chatFolders:list",
+  createChatFolder: "chatFolders:create",
+  renameChatFolder: "chatFolders:rename",
+  setChatFolderCollapsed: "chatFolders:setCollapsed",
+  ungroupChatFolder: "chatFolders:ungroup",
+  moveChatToFolder: "chatFolders:moveChat",
   readSession: "session:read",
   moveSession: "session:move",
 

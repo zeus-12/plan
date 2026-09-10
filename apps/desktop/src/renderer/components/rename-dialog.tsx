@@ -7,6 +7,8 @@ interface Props {
   placeholder: string;
   /** Current display name, prefilled and selected. */
   initialName: string;
+  /** Blocks saving a blank name instead of treating it as "clear". */
+  requireName?: boolean;
   /** Rejecting keeps the dialog open and surfaces the reason. */
   onSave: (name: string) => void | Promise<void>;
   onClose: () => void;
@@ -20,6 +22,7 @@ export function RenameDialog({
   title,
   placeholder,
   initialName,
+  requireName = false,
   onSave,
   onClose,
 }: Props) {
@@ -27,6 +30,7 @@ export function RenameDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const blocked = requireName && !name.trim();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -34,7 +38,7 @@ export function RenameDialog({
   }, []);
 
   const save = async () => {
-    if (busy) return;
+    if (busy || blocked) return;
     setBusy(true);
     setError(null);
     try {
@@ -83,7 +87,11 @@ export function RenameDialog({
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => void save()}>
+          <Button
+            size="sm"
+            disabled={busy || blocked}
+            onClick={() => void save()}
+          >
             Save
           </Button>
         </div>

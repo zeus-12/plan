@@ -140,6 +140,14 @@ export function useChatWorking(id: string | null): boolean {
   );
 }
 
+export function useAnyChatWorking(ids: readonly string[]): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => ids.some(isWorking),
+    () => false,
+  );
+}
+
 /**
  * The set of target `encoded` cwds (projects AND worktrees) with at least one
  * chat session actively working. The sidebar rolls this up the same way it does

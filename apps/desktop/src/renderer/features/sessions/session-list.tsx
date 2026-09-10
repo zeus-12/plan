@@ -1,23 +1,43 @@
-import { memo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import type { DragEvent } from "react";
 import { cn } from "@plan/shared/lib/utils";
+import type { ChatFolder } from "@/common/shared-types";
 import { chatTerminalId } from "@/common/terminal-ids";
 import { TimeAgo } from "@/renderer/components/time-ago";
-import { useChatWorking } from "./session-activity-store";
-import { useSessionNeedsApproval } from "./session-approval-store";
+import { RenameDialog } from "@/renderer/components/rename-dialog";
+import { pushToast } from "@/renderer/lib/toast-store";
+import { useAnyChatWorking, useChatWorking } from "./session-activity-store";
 import {
+  useAnySessionNeedsApproval,
+  useSessionNeedsApproval,
+} from "./session-approval-store";
+import {
+  useAnySessionHasUnread,
   useSessionHasUnread,
   markSessionUnread,
   clearSessionUnread,
 } from "./unread-response-store";
+import {
+  createChatFolder,
+  moveChatToFolder,
+  renameChatFolder,
+  setChatFolderCollapsed,
+  syncChatFolders,
+  ungroupChatFolder,
+  useChatFolders,
+} from "./chat-folders-store";
 import { WorkingIcon } from "./working-icon";
 import { ApprovalDot } from "./approval-dot";
 import { RepliedDot } from "./replied-dot";
-
-import { useEffect, useMemo, useState } from "react";
+import { StatusDots } from "./status-dots";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@plan/shared/components/ui/context-menu";
 import {
@@ -25,7 +45,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@plan/shared/components/ui/tooltip";
-import { ChevronLeft } from "@/renderer/components/chevron";
+import { Chevron, ChevronLeft } from "@/renderer/components/chevron";
 import { ListFooter, ListFooterIcon } from "@/renderer/components/list-footer";
 
 export interface SessionListItem {
@@ -39,15 +59,39 @@ export interface SessionListItem {
 interface Props {
   sessions: SessionListItem[];
   selected: string | null;
-  /** Project encoded dir — used to build each session's terminal id. */
   encoded: string;
   onSelect: (sessionId: string) => void;
   onSetArchived: (sessionId: string, archived: boolean) => void;
   onRename: (sessionId: string, currentTitle: string) => void;
-  /** Move a chat to another worktree (or the live copy). Omitted = no targets. */
+  /** Omitted = no other worktree to move to. */
   onMoveSession?: (sessionId: string, title: string) => void;
   onNewChat: () => void;
   loading?: boolean;
+}
+
+interface FolderGroup {
+  folder: ChatFolder;
+  chats: SessionListItem[];
+}
+
+interface FolderTarget {
+  id: string;
+  name: string;
+}
+
+type FolderDialog =
+  | { kind: "create"; sessionId: string }
+  | { kind: "rename"; folderId: string; name: string };
+
+const LOOSE = "loose";
+const NO_IDS: string[] = [];
+
+function reportFolderError(err: unknown) {
+  pushToast({
+    title: "Couldn't update chat folders",
+    description: err instanceof Error ? err.message : String(err),
+    id: "chat-folders-failed",
+  });
 }
 
 export function SessionList({
@@ -61,10 +105,15 @@ export function SessionList({
   onNewChat,
   loading,
 }: Props) {
-  // When true the list transforms into an archived-only view.
   const [archivedView, setArchivedView] = useState(false);
-  // Free-text filter for the archived view (title substring match).
   const [archivedSearch, setArchivedSearch] = useState("");
+  const [folderDialog, setFolderDialog] = useState<FolderDialog | null>(null);
+  const [dragging, setDragging] = useState<{
+    sessionId: string;
+    from: string;
+  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const folders = useChatFolders(encoded);
 
   const { active, archived } = useMemo(() => {
     const a: SessionListItem[] = [];
@@ -73,12 +122,49 @@ export function SessionList({
     return { active: a, archived: ar };
   }, [sessions]);
 
-  // Leave the archived view automatically once it's empty; drop any stale
-  // filter text whenever we're back on the active list.
   useEffect(() => {
     if (!archivedView && archivedSearch) setArchivedSearch("");
     if (archivedView && archived.length === 0) setArchivedView(false);
   }, [archivedView, archived.length, archivedSearch]);
+
+  // Main drops a chat's folder when it's archived or moved away, so re-read
+  // whenever the set of listed chats changes.
+  const rosterKey = useMemo(
+    () => active.map((s) => s.sessionId).join("\n"),
+    [active],
+  );
+  useEffect(() => {
+    syncChatFolders(encoded).catch(reportFolderError);
+  }, [encoded, rosterKey]);
+
+  const { groups, loose } = useMemo(() => {
+    const folderOf = new Map<string, string>();
+    for (const f of folders)
+      for (const id of f.sessionIds)
+        if (!folderOf.has(id)) folderOf.set(id, f.id);
+    const members = new Map<string, SessionListItem[]>();
+    const rest: SessionListItem[] = [];
+    for (const s of active) {
+      const fid = folderOf.get(s.sessionId);
+      if (fid === undefined) {
+        rest.push(s);
+        continue;
+      }
+      const list = members.get(fid);
+      if (list) list.push(s);
+      else members.set(fid, [s]);
+    }
+    const g: FolderGroup[] = folders.flatMap((folder) => {
+      const chats = members.get(folder.id);
+      return chats ? [{ folder, chats }] : [];
+    });
+    return { groups: g, loose: rest };
+  }, [folders, active]);
+
+  const folderTargets = useMemo<FolderTarget[]>(
+    () => groups.map((g) => ({ id: g.folder.id, name: g.folder.name })),
+    [groups],
+  );
 
   const shown = useMemo(() => {
     if (!archivedView) return active;
@@ -88,6 +174,89 @@ export function SessionList({
       (s.title ?? "Untitled session").toLowerCase().includes(q),
     );
   }, [archivedView, active, archived, archivedSearch]);
+
+  const handleNewFolder = useCallback(
+    (sessionId: string) => setFolderDialog({ kind: "create", sessionId }),
+    [],
+  );
+  const handleMoveToFolder = useCallback(
+    (sessionId: string, folderId: string | null) => {
+      moveChatToFolder(encoded, sessionId, folderId).catch(reportFolderError);
+    },
+    [encoded],
+  );
+  const handleToggleFolder = useCallback(
+    (folder: ChatFolder) => {
+      setChatFolderCollapsed(encoded, folder.id, !folder.collapsed).catch(
+        reportFolderError,
+      );
+    },
+    [encoded],
+  );
+  const handleRenameFolder = useCallback(
+    (folder: ChatFolder) =>
+      setFolderDialog({
+        kind: "rename",
+        folderId: folder.id,
+        name: folder.name,
+      }),
+    [],
+  );
+  const handleUngroupFolder = useCallback(
+    (folder: ChatFolder) => {
+      ungroupChatFolder(encoded, folder.id).catch(reportFolderError);
+    },
+    [encoded],
+  );
+  const handleDragStart = useCallback(
+    (sessionId: string, folderId: string | null) =>
+      setDragging({ sessionId, from: folderId ?? LOOSE }),
+    [],
+  );
+  const handleDragEnd = useCallback(() => {
+    setDragging(null);
+    setDropTarget(null);
+  }, []);
+
+  const dropZone = (target: string) => ({
+    onDragOver: (e: DragEvent<HTMLDivElement>) => {
+      if (!dragging || dragging.from === target) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (dropTarget !== target) setDropTarget(target);
+    },
+    onDragLeave: (e: DragEvent<HTMLDivElement>) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setDropTarget((t) => (t === target ? null : t));
+    },
+    onDrop: (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const d = dragging;
+      handleDragEnd();
+      if (d) handleMoveToFolder(d.sessionId, target === LOOSE ? null : target);
+    },
+  });
+
+  const renderRow = (s: SessionListItem, folderId: string | null) => (
+    <SessionRow
+      key={s.sessionId}
+      session={s}
+      isSelected={s.sessionId === selected}
+      termId={chatTerminalId(encoded, s.sessionId)}
+      nested={folderId !== null}
+      canGroup={!archivedView}
+      folderId={folderId}
+      folderTargets={folderTargets}
+      onSelect={onSelect}
+      onRename={onRename}
+      onSetArchived={onSetArchived}
+      onMoveSession={onMoveSession}
+      onNewFolder={handleNewFolder}
+      onMoveToFolder={handleMoveToFolder}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    />
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -128,20 +297,44 @@ export function SessionList({
                 : "No archived chats"
               : "No sessions"}
           </div>
-        ) : (
+        ) : archivedView ? (
           <div className="flex flex-col">
-            {shown.map((s) => (
-              <SessionRow
-                key={s.sessionId}
-                session={s}
-                isSelected={s.sessionId === selected}
-                termId={chatTerminalId(encoded, s.sessionId)}
-                onSelect={onSelect}
-                onRename={onRename}
-                onSetArchived={onSetArchived}
-                onMoveSession={onMoveSession}
-              />
+            {shown.map((s) => renderRow(s, null))}
+          </div>
+        ) : (
+          <div className="flex min-h-full flex-col">
+            {groups.map(({ folder, chats }) => (
+              <div
+                key={folder.id}
+                className={cn(
+                  "flex flex-col transition-colors",
+                  dropTarget === folder.id && "bg-[var(--bg-surface-hover)]",
+                )}
+                {...dropZone(folder.id)}
+              >
+                <FolderHeader
+                  folder={folder}
+                  chats={chats}
+                  encoded={encoded}
+                  holdsSelected={chats.some((c) => c.sessionId === selected)}
+                  onToggle={handleToggleFolder}
+                  onRename={handleRenameFolder}
+                  onUngroup={handleUngroupFolder}
+                />
+                {!folder.collapsed && chats.map((s) => renderRow(s, folder.id))}
+              </div>
             ))}
+            <div
+              className={cn(
+                "flex flex-1 flex-col transition-colors",
+                groups.length > 0 && "border-t border-[var(--border)]",
+                dragging && loose.length === 0 && "min-h-12",
+                dropTarget === LOOSE && "bg-[var(--bg-surface-hover)]",
+              )}
+              {...dropZone(LOOSE)}
+            >
+              {loose.map((s) => renderRow(s, null))}
+            </div>
           </div>
         )}
       </div>
@@ -169,53 +362,156 @@ export function SessionList({
           ) : null
         }
       />
+      {folderDialog?.kind === "create" && (
+        <RenameDialog
+          title="New folder"
+          placeholder="Folder name"
+          initialName=""
+          requireName
+          onSave={(name) =>
+            createChatFolder(encoded, name, folderDialog.sessionId)
+          }
+          onClose={() => setFolderDialog(null)}
+        />
+      )}
+      {folderDialog?.kind === "rename" && (
+        <RenameDialog
+          title="Rename folder"
+          placeholder="Folder name"
+          initialName={folderDialog.name}
+          requireName
+          onSave={(name) =>
+            renameChatFolder(encoded, folderDialog.folderId, name)
+          }
+          onClose={() => setFolderDialog(null)}
+        />
+      )}
     </div>
   );
 }
 
-/**
- * One row in the session list. Split out so each can subscribe to its own
- * agent's working-state (a hook). The status indicator sits in a fixed 14px slot
- * at the trailing edge — the three states are different sizes (8px dots, 14px
- * spinner), so without it the title's truncation point would jump every time one
- * appeared, swapped, or cleared.
- */
-// Memoized: the list re-renders when `selected` or the sessions array changes,
-// but only the rows whose own props actually changed need to re-render (each
-// row also subscribes to its own working-state). The parent passes stable
-// (useCallback) handlers, so unchanged rows bail out.
+const FolderHeader = memo(function FolderHeader({
+  folder,
+  chats,
+  encoded,
+  holdsSelected,
+  onToggle,
+  onRename,
+  onUngroup,
+}: {
+  folder: ChatFolder;
+  chats: SessionListItem[];
+  encoded: string;
+  holdsSelected: boolean;
+  onToggle: (folder: ChatFolder) => void;
+  onRename: (folder: ChatFolder) => void;
+  onUngroup: (folder: ChatFolder) => void;
+}) {
+  // Expanded, each chat shows its own status; collapsed, the header stands in.
+  const rolledUp = useMemo(
+    () =>
+      folder.collapsed
+        ? chats.map((c) => chatTerminalId(encoded, c.sessionId))
+        : NO_IDS,
+    [folder.collapsed, chats, encoded],
+  );
+  const approval = useAnySessionNeedsApproval(rolledUp);
+  const unread = useAnySessionHasUnread(rolledUp);
+  const working = useAnyChatWorking(rolledUp);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          onClick={() => onToggle(folder)}
+          aria-expanded={!folder.collapsed}
+          className={cn(
+            "flex items-center gap-1.5 border-l-2 px-3 py-1.5 text-left transition-colors hover:bg-[var(--bg-surface-hover)]",
+            folder.collapsed && holdsSelected
+              ? "border-l-[var(--accent)]"
+              : "border-l-transparent",
+          )}
+        >
+          <Chevron
+            open={!folder.collapsed}
+            className="text-[var(--text-tertiary)]"
+          />
+          <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-secondary)]">
+            {folder.name}
+          </span>
+          <StatusDots approval={approval} unread={unread} working={working} />
+          <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+            {chats.length}
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onRename(folder)}>
+          Rename…
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onUngroup(folder)}>
+          Ungroup
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+});
+
+// Memoized, so handlers must be stable. The status slot is a fixed 14px so the
+// title's truncation point doesn't jump between 8px dots and the 14px spinner.
 const SessionRow = memo(function SessionRow({
   session: s,
   isSelected,
   termId,
+  nested,
+  canGroup,
+  folderId,
+  folderTargets,
   onSelect,
   onRename,
   onSetArchived,
   onMoveSession,
+  onNewFolder,
+  onMoveToFolder,
+  onDragStart,
+  onDragEnd,
 }: {
   session: SessionListItem;
   isSelected: boolean;
   termId: string;
+  nested: boolean;
+  canGroup: boolean;
+  folderId: string | null;
+  folderTargets: FolderTarget[];
   onSelect: (sessionId: string) => void;
   onRename: (sessionId: string, currentTitle: string) => void;
   onSetArchived: (sessionId: string, archived: boolean) => void;
   onMoveSession?: (sessionId: string, title: string) => void;
+  onNewFolder: (sessionId: string) => void;
+  onMoveToFolder: (sessionId: string, folderId: string | null) => void;
+  onDragStart: (sessionId: string, folderId: string | null) => void;
+  onDragEnd: () => void;
 }) {
   const working = useChatWorking(termId);
   // A parked menu wins over the working spinner: the session keeps repainting
-  // its prompt while it waits, so both read true — but "waiting on you" is the
-  // actionable state, so it's the one to show.
+  // while it waits, so both read true, but "waiting on you" is the actionable one.
   const needsApproval = useSessionNeedsApproval(termId);
-  // Lowest priority of the three: only shown once the turn is genuinely done
-  // (not working) and it isn't parked on a menu (not approval).
   const hasUnread = useSessionHasUnread(termId);
+  const otherFolders = folderTargets.filter((f) => f.id !== folderId);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
           onClick={() => onSelect(s.sessionId)}
+          draggable={canGroup}
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("application/x-plan-chat", s.sessionId);
+            onDragStart(s.sessionId, folderId);
+          }}
+          onDragEnd={onDragEnd}
           className={cn(
-            "flex flex-col gap-0.5 border-l-2 px-3 py-2 text-left transition-colors",
+            "flex flex-col gap-0.5 border-l-2 py-2 pr-3 text-left transition-colors",
+            nested ? "pl-7" : "pl-3",
             isSelected
               ? "border-l-[var(--accent)] bg-[var(--bg-surface-hover)]"
               : "border-l-transparent hover:bg-[var(--bg-surface-hover)]",
@@ -268,6 +564,35 @@ const SessionRow = memo(function SessionRow({
             }
           >
             Move to worktree…
+          </ContextMenuItem>
+        )}
+        {canGroup &&
+          (otherFolders.length > 0 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>Move to folder</ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {otherFolders.map((f) => (
+                  <ContextMenuItem
+                    key={f.id}
+                    onSelect={() => onMoveToFolder(s.sessionId, f.id)}
+                  >
+                    <span className="truncate">{f.name}</span>
+                  </ContextMenuItem>
+                ))}
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => onNewFolder(s.sessionId)}>
+                  New folder…
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : (
+            <ContextMenuItem onSelect={() => onNewFolder(s.sessionId)}>
+              Move to new folder…
+            </ContextMenuItem>
+          ))}
+        {canGroup && folderId !== null && (
+          <ContextMenuItem onSelect={() => onMoveToFolder(s.sessionId, null)}>
+            Remove from folder
           </ContextMenuItem>
         )}
         {s.archived ? (

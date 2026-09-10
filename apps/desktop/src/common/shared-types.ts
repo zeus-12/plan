@@ -157,6 +157,14 @@ export interface SkillInfo {
   source: "project" | "personal" | "plugin";
 }
 
+/** A named group of chats inside one worktree's chat list. Never empty. */
+export interface ChatFolder {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  sessionIds: string[];
+}
+
 export interface SessionListEntry {
   sessionId: string;
   filePath: string;

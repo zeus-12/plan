@@ -36,6 +36,16 @@ import {
   setSessionName,
 } from "@/main/store/manual-projects";
 import {
+  createChatFolder,
+  dropChatFoldersFor,
+  listChatFolders,
+  moveChatToFolder,
+  removeChatFromFolders,
+  renameChatFolder,
+  setChatFolderCollapsed,
+  ungroupChatFolder,
+} from "@/main/store/chat-folders";
+import {
   readClaudeConfig,
   writeClaudeConfig,
 } from "./providers/claude-code/instructions";
@@ -464,6 +474,7 @@ async function archiveWorktreeChatsToProject(
     markSessionMovedAway(worktreeEncoded, s.sessionId);
     await setSessionArchived(s.sessionId, true);
   }
+  await dropChatFoldersFor(worktreeEncoded);
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────
@@ -532,12 +543,24 @@ const invokeHandlers: {
   "projects:listSessions": (_e, encoded) => listSessionsForProject(encoded),
   "sessions:setArchived": async (_e, sessionId, archived) => {
     await setSessionArchived(sessionId, archived);
+    if (archived) await removeChatFromFolders(sessionId);
     return { ok: true };
   },
   "sessions:rename": async (_e, sessionId, name) => {
     await setSessionName(sessionId, name);
     return { ok: true };
   },
+  "chatFolders:list": (_e, encoded) => listChatFolders(encoded),
+  "chatFolders:create": (_e, encoded, name, sessionId) =>
+    createChatFolder(encoded, name, sessionId),
+  "chatFolders:rename": (_e, encoded, folderId, name) =>
+    renameChatFolder(encoded, folderId, name),
+  "chatFolders:setCollapsed": (_e, encoded, folderId, collapsed) =>
+    setChatFolderCollapsed(encoded, folderId, collapsed),
+  "chatFolders:ungroup": (_e, encoded, folderId) =>
+    ungroupChatFolder(encoded, folderId),
+  "chatFolders:moveChat": (_e, encoded, sessionId, folderId) =>
+    moveChatToFolder(encoded, sessionId, folderId),
 
   "session:move": async (_e, sessionId, fromEncoded, toEncoded) => {
     // Kill the source chat's `claude` and WAIT for it to exit before moving the
@@ -549,7 +572,10 @@ const invokeHandlers: {
     // deterministic reaper that neutralizes that ghost (see session-reaper).
     await stopChatAndWait(chatTerminalId(fromEncoded, sessionId));
     await moveSessionTranscript(sessionId, fromEncoded, toEncoded);
-    if (fromEncoded !== toEncoded) markSessionMovedAway(fromEncoded, sessionId);
+    if (fromEncoded !== toEncoded) {
+      markSessionMovedAway(fromEncoded, sessionId);
+      await removeChatFromFolders(sessionId);
+    }
   },
 
   "session:read": async (_e, encoded, sessionId, client) => {

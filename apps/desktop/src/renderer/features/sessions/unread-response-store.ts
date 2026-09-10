@@ -242,6 +242,14 @@ export function useSessionHasUnread(id: string | null): boolean {
   );
 }
 
+export function useAnySessionHasUnread(ids: readonly string[]): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => ids.some((id) => unread.has(id)),
+    () => false,
+  );
+}
+
 /**
  * Read-only accessors mirroring session-approval-store, so an external consumer
  * (the attention switcher) can enumerate replied-but-unseen session ids and the

@@ -130,6 +130,14 @@ export function useSessionNeedsApproval(id: string | null): boolean {
   );
 }
 
+export function useAnySessionNeedsApproval(ids: readonly string[]): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => ids.some((id) => awaiting.has(id)),
+    () => false,
+  );
+}
+
 /**
  * The set of target `encoded` cwds (projects AND worktrees) that have at least
  * one session waiting on the user. The sidebar uses this to badge rows — a
