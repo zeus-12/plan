@@ -170,6 +170,7 @@ import {
   listAllWorktrees,
   createWorktreePr,
   addReposToWorktree,
+  sweepWorktreeTrash,
 } from "@/main/worktrees/worktrees";
 import { invalidateExternalWorktrees } from "@/main/worktrees/worktree-discovery";
 import {
@@ -450,30 +451,22 @@ async function listSessionsForProject(
   }));
 }
 
-/**
- * Preserve a worktree's chats before the worktree itself is deleted: relocate
- * every transcript into the parent project's live working copy and archive it
- * there. Without this the transcripts would be orphaned under an encoded dir
- * that no longer maps to any worktree — recoverable in theory, invisible in
- * practice. Landing them in the project's archived-sessions list keeps a
- * finished worktree's conversations resumable from the main project. Each move
- * mirrors "session:move": kill the source `claude` and wait for exit, rename the
- * transcript, then arm the ghost reaper (a dying claude may re-flush a
- * message-less stub at the old path). A no-op when a worktree shares the
- * project's encoded, which can't normally happen.
- */
+// Mirrors "session:move" per chat: the source `claude` must exit before its
+// transcript moves, or it re-flushes a stub at the old path.
 async function archiveWorktreeChatsToProject(
   worktreeEncoded: string,
   projectEncoded: string,
 ): Promise<void> {
   if (worktreeEncoded === projectEncoded) return;
   const sessions = await listSessions(worktreeEncoded);
-  for (const s of sessions) {
-    await stopChatAndWait(chatTerminalId(worktreeEncoded, s.sessionId));
-    await moveSessionTranscript(s.sessionId, worktreeEncoded, projectEncoded);
-    markSessionMovedAway(worktreeEncoded, s.sessionId);
-    await setSessionArchived(s.sessionId, true);
-  }
+  await Promise.all(
+    sessions.map(async (s) => {
+      await stopChatAndWait(chatTerminalId(worktreeEncoded, s.sessionId));
+      await moveSessionTranscript(s.sessionId, worktreeEncoded, projectEncoded);
+      markSessionMovedAway(worktreeEncoded, s.sessionId);
+      await setSessionArchived(s.sessionId, true);
+    }),
+  );
   await dropChatFoldersFor(worktreeEncoded);
 }
 
@@ -641,9 +634,6 @@ const invokeHandlers: {
   "worktrees:listAll": () => listAllWorktrees(),
   "worktrees:create": (_e, encoded, input) => createWorktree(encoded, input),
   "worktrees:remove": async (_e, id) => {
-    // Save the worktree's chats into the parent project's archive before the
-    // checkout is torn down — a deleted worktree should lose its code, not its
-    // conversations.
     const rec = await getWorktreeRecord(id);
     if (rec)
       await archiveWorktreeChatsToProject(rec.encoded, rec.projectEncoded);
@@ -844,6 +834,7 @@ app.whenReady().then(async () => {
   const loginPath = await loginShellPath();
   if (loginPath) process.env.PATH = loginPath;
 
+  void sweepWorktreeTrash();
   buildMenu();
   registerIpc();
   bridgeWatcher();

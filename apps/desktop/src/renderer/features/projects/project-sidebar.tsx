@@ -71,6 +71,7 @@ interface Props {
   /** Create a new worktree in the given project. */
   onNewWorktree: (projectEncoded: string) => void;
   onRemoveWorktree: (worktreeId: string) => void;
+  removingWorktreeIds: ReadonlySet<string>;
   /** Rename a worktree's label; keyed by rootPath, which spans both kinds. */
   onRenameWorktree: (rootPath: string, currentName: string) => void;
   onCreatePr: (worktreeId: string) => void;
@@ -244,6 +245,7 @@ export function ProjectSidebar({
   onSelectWorktree,
   onNewWorktree,
   onRemoveWorktree,
+  removingWorktreeIds,
   onRenameWorktree,
   onCreatePr,
   onAddRepos,
@@ -598,6 +600,7 @@ export function ProjectSidebar({
                   const wtNeedsApproval = approvalEncoded.has(w.encoded);
                   const wtHasUnread = unreadEncoded.has(w.encoded);
                   const wtWorking = workingEncoded.has(w.encoded);
+                  const removing = removingWorktreeIds.has(w.id);
                   const branch = w.repos[0]?.branch ?? "";
                   const repoCount = reposByProject.get(wp.encoded)?.length ?? 0;
                   const canAddRepos = w.repos.length < repoCount;
@@ -608,15 +611,17 @@ export function ProjectSidebar({
                   // The branch usually equals the worktree name (the name
                   // slugifies into it), so only surface it when it diverges.
                   // Same for the repo count — one line unless there's more to say.
-                  const sub = [
-                    w.kind === "external" ? "External" : "",
-                    w.mtimeMs ? relativeTime(w.mtimeMs) : "",
-                    branch && branch !== w.name ? branch : "",
-                    detachedAt,
-                    w.repos.length > 1 ? `${w.repos.length} repos` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ");
+                  const sub = removing
+                    ? "Removing…"
+                    : [
+                        w.kind === "external" ? "External" : "",
+                        w.mtimeMs ? relativeTime(w.mtimeMs) : "",
+                        branch && branch !== w.name ? branch : "",
+                        detachedAt,
+                        w.repos.length > 1 ? `${w.repos.length} repos` : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ");
                   // Vertical guide tying worktrees to their parent project —
                   // aligned to the parent's chevron centre. Consecutive worktree
                   // rows draw contiguous segments, forming one connecting line.
@@ -629,6 +634,7 @@ export function ProjectSidebar({
                         isActive
                           ? "bg-[var(--row-selected)]"
                           : "hover:bg-[var(--row-hover)]",
+                        removing && "pointer-events-none opacity-50",
                       )}
                       style={{
                         transform,
@@ -643,6 +649,7 @@ export function ProjectSidebar({
                       />
                       <button
                         onClick={() => onSelectWorktree(wp.encoded, w.id)}
+                        disabled={removing}
                         aria-current={isActive ? "true" : undefined}
                         title={w.kind === "external" ? w.rootPath : undefined}
                         className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]"
@@ -685,6 +692,7 @@ export function ProjectSidebar({
                       )}
                     </div>
                   );
+                  if (removing) return worktreeRow;
                   // An external checkout is someone else's to create and
                   // delete, so it gets the rename item and nothing that writes.
                   return (

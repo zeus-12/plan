@@ -356,6 +356,9 @@ function Shell() {
       window.localStorage.setItem(SELECTED_WORKTREE_KEY, activeWorktreeId);
     else window.localStorage.removeItem(SELECTED_WORKTREE_KEY);
   }, [activeWorktreeId]);
+  const [removingWorktreeIds, setRemovingWorktreeIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   // Worktree id whose Create-PR modal is open (null = closed).
   const [prWorktreeId, setPrWorktreeId] = useState<string | null>(null);
@@ -563,8 +566,17 @@ function Shell() {
       });
       if (!ok) return;
       if (activeWorktreeId === id) setActiveWorktreeId(null);
-      await worktrees.remove(id);
-      await allWorktrees.refresh();
+      setRemovingWorktreeIds((prev) => new Set(prev).add(id));
+      try {
+        await worktrees.remove(id);
+        await allWorktrees.refresh();
+      } finally {
+        setRemovingWorktreeIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
     },
     [worktrees, worktreeById, allWorktrees, confirm, activeWorktreeId],
   );
@@ -884,6 +896,7 @@ function Shell() {
         onSelectWorktree={selectWorktree}
         onNewWorktree={handleNewWorktree}
         onRemoveWorktree={handleRemoveWorktree}
+        removingWorktreeIds={removingWorktreeIds}
         onRenameWorktree={handleRenameWorktree}
         onCreatePr={setPrWorktreeId}
         onAddRepos={setAddReposWorktreeId}

@@ -1,8 +1,6 @@
+import { execFile } from "child_process";
 import { stat } from "fs/promises";
 
-/** Small file/path helpers shared across main-process modules. */
-
-/** True when the path exists (any file type). */
 export async function pathExists(p: string): Promise<boolean> {
   try {
     await stat(p);
@@ -12,9 +10,19 @@ export async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+// Not fs.rm: it queues every unlink on libuv's 4-thread pool, so a 100k-file
+// delete stalls every other file read in main until it finishes.
+export function removeTree(path: string): Promise<void> {
+  return new Promise((resolve) => {
+    execFile("rm", ["-rf", "--", path], (err) => {
+      if (err) console.warn(`[removeTree] ${path}: ${err.message}`);
+      resolve();
+    });
+  });
+}
+
 const BINARY_PROBE_BYTES = 8000;
 
-/** True when the data looks like a binary blob (NUL byte in the sample). */
 export function looksBinary(data: string | Buffer): boolean {
   const n = Math.min(data.length, BINARY_PROBE_BYTES);
   for (let i = 0; i < n; i++) {
@@ -24,7 +32,6 @@ export function looksBinary(data: string | Buffer): boolean {
   return false;
 }
 
-/** Lowercased extension without the dot ("" when none), ignoring dot-dirs. */
 export function extOf(path: string): string {
   const slash = path.lastIndexOf("/");
   const dot = path.lastIndexOf(".");
