@@ -4,6 +4,26 @@
 
 Review & iterate on code and messages w.o copy pasting your life away :)
 
+## Install
+
+macOS, Apple Silicon:
+
+```sh
+brew trust --tap zeus-12/plan
+brew install --cask zeus-12/plan/plan
+```
+
+`brew trust` is a one-time step — Homebrew refuses to load a third-party tap until you trust it.
+The cask clears the macOS quarantine flag, so the app opens without the "unidentified developer"
+warning. Later updates: `brew upgrade --cask zeus-12/plan/plan`.
+
+The DMGs on the [releases page](https://github.com/zeus-12/plan/releases) still work, but macOS
+quarantines them — you have to clear the flag yourself:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Plan.app
+```
+
 Two pieces live here:
 
 ## Desktop app (`apps/desktop`)
