@@ -2,7 +2,8 @@
 # Cut a release with a single version input:
 #   pnpm release 0.1.1
 # Bumps package.json, commits, tags v0.1.1, and pushes branch + tag.
-# Pushing the tag is what triggers the GitHub Actions release build.
+# Pushing the tag is what triggers the GitHub Actions release build; the script then
+# waits for that build and points the Homebrew cask at the new DMG.
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
@@ -30,4 +31,5 @@ git tag "$tag"
 git push
 git push origin "$tag"
 
-echo "pushed $tag — watch the build in the Actions tab"
+echo "pushed $tag — building in the Actions tab"
+bash "$(dirname "$0")/bump-cask.sh" "$v"

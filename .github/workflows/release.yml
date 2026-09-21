@@ -134,33 +134,3 @@ jobs:
           files: dist/*.dmg
           generate_release_notes: true
           fail_on_unmatched_files: true
-
-      # Point the Homebrew tap at the release we just published. The cask lives in
-      # zeus-12/homebrew-plan, so this needs a token with contents:write on that repo —
-      # the default GITHUB_TOKEN only reaches this one.
-      - name: Bump Homebrew cask
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          if [ -z "$TAP_TOKEN" ]; then
-            echo "::error::HOMEBREW_TAP_TOKEN is not set — the cask still points at the previous release"
-            exit 1
-          fi
-          VERSION="${GITHUB_REF_NAME#v}"
-          DMG="dist/Plan-$VERSION-arm64.dmg"
-          SHA="$(sha256sum "$DMG" | cut -d' ' -f1)"
-          git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/zeus-12/homebrew-plan.git" tap
-          cd tap
-          sed -i -E "s|^  version \".*\"$|  version \"$VERSION\"|" Casks/plan.rb
-          sed -i -E "s|^  sha256 \".*\"$|  sha256 \"$SHA\"|" Casks/plan.rb
-          # A silently unmatched sed would leave the cask pointing at the old DMG.
-          grep -q "^  version \"$VERSION\"$" Casks/plan.rb
-          grep -q "^  sha256 \"$SHA\"$" Casks/plan.rb
-          if git diff --quiet; then
-            echo "cask already at $VERSION"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "plan $VERSION"
-          git push
