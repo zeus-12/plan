@@ -10,20 +10,32 @@ import { BranchCombo } from "@/renderer/features/git/branch-combo";
 import type {
   ProjectDefaults,
   CreateWorktreeInput,
+  AddReposToWorktreeInput,
   DiscoveredRepo,
+  ManagedWorktreeRecord,
 } from "@/common/shared-types";
 
-interface Props {
-  /** Per-project defaults used to pre-fill the base branch. */
-  defaults: ProjectDefaults;
+type Props = {
   /** Project whose repos the worktree will span (for per-repo base selection). */
   projectEncoded: string;
   /** Repos App already knows for this project, so the first frame is the final
    * layout instead of the single-repo one. Refreshed by this modal's own fetch. */
   initialRepos: DiscoveredRepo[] | null;
-  onCreate: (input: CreateWorktreeInput) => Promise<unknown>;
   onClose: () => void;
-}
+} & (
+  | {
+      mode: "create";
+      /** Per-project defaults used to pre-fill the base branch. */
+      defaults: ProjectDefaults;
+      onCreate: (input: CreateWorktreeInput) => Promise<unknown>;
+    }
+  | {
+      mode: "add";
+      /** Worktree to extend: its repos show locked, its branch is reused. */
+      worktree: ManagedWorktreeRecord;
+      onAdd: (input: AddReposToWorktreeInput) => Promise<unknown>;
+    }
+);
 
 const inputCls =
   "w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[13px] font-[family-name:var(--font-mono)] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]";
@@ -35,16 +47,19 @@ const overrideCls = (overridden: boolean) =>
   "w-36 rounded-md border bg-[var(--bg-surface)] px-2 py-1 text-[11px] font-[family-name:var(--font-mono)] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)] " +
   (overridden ? "border-[var(--accent)]" : "border-[var(--border)]");
 
-export function NewWorktreeModal({
-  defaults,
-  projectEncoded,
-  initialRepos,
-  onCreate,
-  onClose,
-}: Props) {
-  // One field is both the branch to create and the worktree's name.
-  const [branch, setBranch] = useState("");
-  const [base, setBase] = useState(defaults.base ?? "");
+export function WorktreeModal(props: Props) {
+  const { projectEncoded, initialRepos, onClose } = props;
+  const existing = props.mode === "add" ? props.worktree : null;
+  // One field is both the branch to create and the worktree's name. When
+  // extending a worktree it's that worktree's branch, fixed.
+  const [branch, setBranch] = useState(existing?.repos[0]?.branch ?? "");
+  const [base, setBase] = useState(
+    existing
+      ? (existing.repos[0]?.base ?? "")
+      : props.mode === "create"
+        ? (props.defaults.base ?? "")
+        : "",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Repos the worktree spans, and per-repo base overrides keyed by subPath. An
@@ -58,12 +73,13 @@ export function NewWorktreeModal({
   const [repoBases, setRepoBases] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const branchRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Once the user edits the base, stop letting the fetched default overwrite it.
   const baseTouched = useRef(false);
 
   useEffect(() => {
-    branchRef.current?.focus();
-  }, []);
+    (existing ? dialogRef.current : branchRef.current)?.focus();
+  }, [existing]);
 
   useEffect(() => {
     let alive = true;
@@ -83,6 +99,7 @@ export function NewWorktreeModal({
   // refetched yet), so read fresh by projectEncoded — the source of truth for
   // the project the worktree is actually being created in.
   useEffect(() => {
+    if (existing) return;
     let alive = true;
     void window.electronAPI.getWorktreeDefaults(projectEncoded).then((d) => {
       if (alive && !baseTouched.current) setBase(d.base ?? "");
@@ -90,10 +107,15 @@ export function NewWorktreeModal({
     return () => {
       alive = false;
     };
-  }, [projectEncoded]);
+  }, [projectEncoded, existing]);
 
-  const multiRepo = (repos?.length ?? 0) > 1;
-  const selectedRepos = (repos ?? []).filter((r) => selected.has(r.subPath));
+  const baseInWorktree = new Map(
+    (existing?.repos ?? []).map((r) => [r.subPath, r.base]),
+  );
+  const multiRepo = existing !== null || (repos?.length ?? 0) > 1;
+  const selectedRepos = (repos ?? []).filter(
+    (r) => selected.has(r.subPath) && !baseInWorktree.has(r.subPath),
+  );
   // Suggestions for the shared field: every branch across the project's repos.
   const allBranches = [...new Set(Object.values(branchesByRepo).flat())].sort();
   // A repo's base is its override, falling back to the shared default.
@@ -147,11 +169,16 @@ export function NewWorktreeModal({
       for (const r of selectedRepos) {
         bases[r.subPath] = baseFor(r.subPath);
       }
+      if (props.mode === "add") {
+        await props.onAdd({ bases });
+        onClose();
+        return;
+      }
       // The backend still wants a top-level base as the fallback default.
       const fallbackBase = multiRepo
         ? base.trim() || baseFor(selectedRepos[0].subPath)
         : base.trim();
-      await onCreate({
+      await props.onCreate({
         name: branch.trim(),
         branch: branch.trim(),
         base: fallbackBase,
@@ -172,9 +199,11 @@ export function NewWorktreeModal({
     >
       <div
         className={
-          "flex max-h-[85vh] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] shadow-lg " +
+          "flex max-h-[85vh] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] shadow-lg outline-none " +
           (multiRepo ? "w-[min(760px,92vw)]" : "w-[min(440px,92vw)]")
         }
+        ref={dialogRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           // Keys the modal owns must not leak to listeners outside it (e.g.
@@ -196,7 +225,7 @@ export function NewWorktreeModal({
         }}
       >
         <div className="shrink-0 px-4 pb-3 pt-4 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--text)]">
-          New worktree
+          {existing ? `Add repos to “${existing.name}”` : "New worktree"}
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-1">
@@ -207,7 +236,8 @@ export function NewWorktreeModal({
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               placeholder="branch to create"
-              className={inputCls}
+              disabled={existing !== null}
+              className={inputCls + " disabled:opacity-60"}
             />
           </div>
 
@@ -236,17 +266,47 @@ export function NewWorktreeModal({
             <div>
               <label className={labelCls}>
                 Repos{" "}
-                {selected.size === 0 && (
+                {selectedRepos.length === 0 && (
                   <span className="text-[var(--text-tertiary)] normal-case">
                     · none selected
                   </span>
                 )}
               </label>
               <div className="grid grid-cols-2 gap-1.5">
-                {repos!.map((r) => {
+                {(repos ?? []).map((r) => {
                   const sp = r.subPath;
                   const label = sp || "repo root";
-                  const on = selected.has(sp);
+                  const lockedBase = baseInWorktree.get(sp);
+                  const locked = lockedBase !== undefined;
+                  const on = !locked && selected.has(sp);
+                  if (locked) {
+                    return (
+                      <div
+                        key={sp}
+                        className="flex h-10 items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 opacity-60"
+                      >
+                        <span
+                          className="grid h-4 w-4 shrink-0 place-items-center rounded-[5px] border"
+                          style={{
+                            background: "var(--text-tertiary)",
+                            borderColor: "var(--text-tertiary)",
+                            color: "var(--bg)",
+                          }}
+                        >
+                          <Check size={11} strokeWidth={2.75} />
+                        </span>
+                        <span
+                          className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text-tertiary)]"
+                          title={label}
+                        >
+                          {label}
+                        </span>
+                        <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
+                          in worktree · {lockedBase}
+                        </span>
+                      </div>
+                    );
+                  }
                   return (
                     <div
                       key={sp}
@@ -339,8 +399,9 @@ export function NewWorktreeModal({
                 })}
               </div>
               <div className="mt-1.5 font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-                Each repo forks from its remote (origin) tip. Skipped repos can
-                be added later from the worktree.
+                Each repo forks from its remote (origin) tip.
+                {!existing &&
+                  " Skipped repos can be added later from the worktree."}
               </div>
             </div>
           )}
@@ -355,9 +416,11 @@ export function NewWorktreeModal({
 
           <div className="mt-4 flex items-center justify-between">
             <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--text-tertiary)]">
-              {multiRepo
-                ? `Spans ${selectedRepos.length} of ${repos!.length} repos`
-                : ""}
+              {existing
+                ? `Adds ${selectedRepos.length} repo(s)`
+                : multiRepo
+                  ? `Spans ${selectedRepos.length} of ${repos!.length} repos`
+                  : ""}
             </span>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={onClose}>
@@ -370,11 +433,11 @@ export function NewWorktreeModal({
               >
                 {busy ? (
                   <TextShimmer duration={2.4} style={onAccentShimmer}>
-                    Creating…
+                    {existing ? "Adding…" : "Creating…"}
                   </TextShimmer>
                 ) : (
                   <>
-                    Create
+                    {existing ? "Add repos" : "Create"}
                     <Kbd keys={["⌘", "↵"]} />
                   </>
                 )}

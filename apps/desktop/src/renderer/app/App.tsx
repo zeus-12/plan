@@ -49,14 +49,9 @@ const ClaudeConfigModal = lazy(() =>
     default: m.ClaudeConfigModal,
   })),
 );
-const NewWorktreeModal = lazy(() =>
-  import("@/renderer/features/worktrees/new-worktree-modal").then((m) => ({
-    default: m.NewWorktreeModal,
-  })),
-);
-const AddReposModal = lazy(() =>
-  import("@/renderer/features/worktrees/add-repos-modal").then((m) => ({
-    default: m.AddReposModal,
+const WorktreeModal = lazy(() =>
+  import("@/renderer/features/worktrees/worktree-modal").then((m) => ({
+    default: m.WorktreeModal,
   })),
 );
 const CreatePrModal = lazy(() =>
@@ -974,7 +969,8 @@ function Shell() {
           />
         )}
         {showNewWorktree && selected && (
-          <NewWorktreeModal
+          <WorktreeModal
+            mode="create"
             defaults={worktrees.defaults}
             projectEncoded={selected.encoded}
             initialRepos={reposByProject.get(selected.encoded) ?? null}
@@ -1021,13 +1017,16 @@ function Shell() {
           />
         )}
         {addReposWorktree && (
-          <AddReposModal
+          <WorktreeModal
+            mode="add"
             worktree={addReposWorktree}
             projectEncoded={addReposWorktree.projectEncoded}
+            initialRepos={
+              reposByProject.get(addReposWorktree.projectEncoded) ?? null
+            }
             onAdd={async (input) => {
-              const rec = await worktrees.addRepos(addReposWorktree.id, input);
+              await worktrees.addRepos(addReposWorktree.id, input);
               await allWorktrees.refresh();
-              return rec;
             }}
             onClose={() => setAddReposWorktreeId(null)}
           />
