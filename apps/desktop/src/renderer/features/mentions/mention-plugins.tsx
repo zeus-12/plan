@@ -180,7 +180,7 @@ function MenuShell({ children }: { children: ReactNode }) {
       // the popover looks for this attribute to tell them apart.
       data-mention-menu=""
       style={style}
-      className="z-[70] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-1 shadow-xl"
+      className="z-[70] overflow-y-auto overflow-x-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-1 shadow-xl"
     >
       {children}
     </ul>,
@@ -212,7 +212,12 @@ function Row({
       role="option"
       aria-selected={selected}
       ref={(el) => option.setRefElement(el)}
-      onMouseEnter={onHighlight}
+      // Chromium fires mouseenter (and zero-delta mousemove) when the menu opens or
+      // scrolls under a resting cursor; only a real pointer move may take the highlight.
+      onMouseMove={(e) => {
+        if (!selected && (e.movementX !== 0 || e.movementY !== 0))
+          onHighlight();
+      }}
       // Keep editor focus/selection so the insert lands on the right node.
       onMouseDown={(e) => {
         e.preventDefault();
@@ -226,7 +231,7 @@ function Row({
       <span className="flex h-[15px] w-[15px] shrink-0 items-center justify-center">
         {icon}
       </span>
-      <span className="shrink-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
+      <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
         {title}
       </span>
       {subtitle && (
