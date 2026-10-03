@@ -46,6 +46,7 @@ import {
   parseBashBlock,
   parseLocalCommandOutput,
   parseTaskNotifications,
+  unwrapPastedContent,
   type MessageCategory,
   type TaskNotification,
 } from "./message-kind";
@@ -353,7 +354,7 @@ function messageText(m: ConversationMessage): string {
     .filter(
       (p): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text",
     )
-    .map((p) => p.text)
+    .map((p) => (m.role === "user" ? unwrapPastedContent(p.text) : p.text))
     .join("\n\n")
     .trim();
 }
@@ -1323,7 +1324,13 @@ function renderPartContent({
       if (message.isMeta || message.promptSource === "system") {
         return <SystemMetaBlock text={part.text} />;
       }
-      return <MarkdownText text={part.text} />;
+      return (
+        <MarkdownText
+          text={
+            message.role === "user" ? unwrapPastedContent(part.text) : part.text
+          }
+        />
+      );
     }
     case "thinking":
       return <ThinkingBlock text={part.text} />;

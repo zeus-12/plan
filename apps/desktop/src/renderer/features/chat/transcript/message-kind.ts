@@ -23,6 +23,16 @@ export function imageOnlyPaths(text: string): string[] | null {
   return remainder.length === 0 ? paths : null;
 }
 
+// Claude Code wraps text pasted into its prompt (including dictation, which
+// arrives as a paste) in `<pasted_content id="…">…</pasted_content id="…">`.
+const PASTED_CONTENT_RE =
+  /<pasted_content (id="[^"]+")>\n?([\s\S]*?)\n?<\/pasted_content \1>/g;
+
+export function unwrapPastedContent(text: string): string {
+  if (!text.includes("<pasted_content")) return text;
+  return text.replace(PASTED_CONTENT_RE, "$2").trim();
+}
+
 /**
  * Claude Code records a "!" bash-mode turn as tagged text:
  *   <bash-input>cmd</bash-input>                                  the command
