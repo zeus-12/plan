@@ -23,9 +23,12 @@ digest=""
 waited=0
 echo "waiting for $asset on $tag…"
 while :; do
-  digest="$(gh api "repos/$repo/releases/tags/$tag" \
-    --jq ".assets[] | select(.name == \"$asset\") | .digest" 2>/dev/null || true)"
-  [ -n "$digest" ] && break
+  # On a 404 gh prints the error body to stdout, so only a successful call's output is a digest.
+  if digest="$(gh api "repos/$repo/releases/tags/$tag" \
+    --jq ".assets[] | select(.name == \"$asset\") | .digest" 2>/dev/null)" &&
+    [ -n "$digest" ]; then
+    break
+  fi
 
   conclusion="$(gh run list --repo "$repo" --workflow release.yml --branch "$tag" \
     --json conclusion --jq '.[0].conclusion' 2>/dev/null || true)"
