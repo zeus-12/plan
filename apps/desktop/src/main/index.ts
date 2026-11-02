@@ -201,6 +201,7 @@ const switcherModifierOk: Record<
   (input: Electron.Input) => boolean
 > = {
   Tab: (input) => input.control && !input.meta,
+  Backquote: (input) => input.control && !input.meta,
   Digit1: (input) => input.control && !input.meta,
 };
 
@@ -308,7 +309,7 @@ function createMainWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  // Ctrl+Tab (sessions) / Ctrl+1 (projects) switcher; Shift reverses direction.
+  // Ctrl+Tab (sessions) / Ctrl+` or Ctrl+1 (projects) switcher; Shift reverses direction.
   // Chromium swallows plain Ctrl+Tab before the page's keydown sees it, and a
   // macOS menu accelerator for Tab is unreliable (often consumed by AppKit
   // without firing). before-input-event is the dependable interception point:

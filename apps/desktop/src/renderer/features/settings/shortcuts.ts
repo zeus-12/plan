@@ -105,6 +105,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         chords: [
           { mods: ["ctrl"], key: "`" },
           { mods: ["ctrl", "shift"], key: "`" },
+          { mods: ["ctrl"], key: "1" },
         ],
       },
       {

@@ -13,7 +13,7 @@ import { SWITCHER_FORWARDED_CODES } from "@/common/shared-types";
  * cancels too (so it can't get stuck).
  *
  * Several channels coexist — content-pane tabs (Ctrl+Tab) and the unified
- * projects+worktrees switcher (Ctrl+1) — but there
+ * projects+worktrees switcher (Ctrl+` or Ctrl+1) — but there
  * is a SINGLE window listener and a SINGLE active-state, so there's no
  * effect-ordering race or stuck-lock between component instances: on the
  * opening keystroke we pick the enabled channel whose trigger key matches.
@@ -25,8 +25,7 @@ import { SWITCHER_FORWARDED_CODES } from "@/common/shared-types";
 
 interface Channel {
   id: string;
-  /** KeyboardEvent.code that opens this channel, e.g. "Tab" | "Digit1". */
-  triggerCode: string;
+  isTrigger: (code: string) => boolean;
   isEnabled: () => boolean;
   getItems: () => unknown[];
   getCurrentIndex: () => number;
@@ -118,7 +117,7 @@ function cycle(code: string, dir: 1 | -1) {
     return;
   }
   const ch = channels.find(
-    (c) => c.isEnabled() && c.triggerCode === code && c.getItems().length > 0,
+    (c) => c.isEnabled() && c.isTrigger(code) && c.getItems().length > 0,
   );
   if (!ch) return;
   active = {
@@ -132,15 +131,7 @@ function onKeyDown(e: KeyboardEvent) {
   // The lone Ctrl keydown that precedes the trigger arms modDown, which the
   // first (async, IPC-delivered) cycle of the gesture is gated on.
   syncMod(e);
-  // Renderer-side path: suppress the combo's default (a 1 or Tab reaching an
-  // input/terminal) for whichever registered channel claims this key code.
-  // Cycling for main-forwarded codes happens ONLY via the IPC path (see
-  // MAIN_FORWARDED_CODES); other codes cycle from this native keydown.
-  // Ctrl drives every channel. Cmd is excluded for Tab (the OS app switcher)
-  // and digits (the app's sidebar shortcuts).
-  const mod =
-    e.ctrlKey || (e.metaKey && e.code !== "Tab" && !e.code.startsWith("Digit"));
-  if (mod && !e.altKey && channels.some((c) => c.triggerCode === e.code)) {
+  if (e.ctrlKey && !e.altKey && channels.some((c) => c.isTrigger(e.code))) {
     e.preventDefault();
     if (!MAIN_FORWARDED_CODES.has(e.code)) cycle(e.code, e.shiftKey ? -1 : 1);
     return;
@@ -205,8 +196,8 @@ function subscribe(l: () => void) {
 interface Options<T> {
   id: string;
   enabled: boolean;
-  /** KeyboardEvent.code that opens this channel: "Tab" or "Digit1". */
-  triggerCode: string;
+  /** KeyboardEvent.codes that open this channel. */
+  triggerCodes: string[];
   /** Items in display order — MRU-ordered, current item first. */
   items: T[];
   /** Index of the active item — the cycle's starting point. */
@@ -227,7 +218,7 @@ export function useTabSwitcher<T>(opts: Options<T>): {
   useEffect(() => {
     const ch: Channel = {
       id: opts.id,
-      triggerCode: opts.triggerCode,
+      isTrigger: (code) => ref.current.triggerCodes.includes(code),
       isEnabled: () => ref.current.enabled,
       getItems: () => ref.current.items as unknown[],
       getCurrentIndex: () => ref.current.currentIndex,
@@ -241,7 +232,7 @@ export function useTabSwitcher<T>(opts: Options<T>): {
         emit();
       }
     };
-  }, [opts.id, opts.triggerCode]);
+  }, [opts.id]);
 
   const index = useSyncExternalStore(
     subscribe,

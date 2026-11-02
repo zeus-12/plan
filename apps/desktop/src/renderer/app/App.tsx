@@ -797,12 +797,12 @@ function Shell() {
     [moveSession, selectedEncoded, selectWorktree, selectProject],
   );
 
-  // Ctrl+1 cycles everything you can navigate to: every project's working copy
+  // Ctrl+` or Ctrl+1 cycles everything you can navigate to: every project's working copy
   // plus every worktree, in ONE flat most-recently-used list. Any destination
   // you visit floats to the top, so a single tap-release returns you to where
   // you just were (Alt-Tab), whether that's a project or a worktree. The branch
   // glyph + parent-project subtitle keep worktrees identifiable once recency has
-  // detached them from their project. A single Ctrl+1 reaches anything.
+  // detached them from their project. A single press reaches anything.
   const switchTargets = useMemo(() => {
     const out: {
       id: string;
@@ -850,7 +850,7 @@ function Shell() {
   const projectSwitcher = useTabSwitcher({
     id: "projects",
     enabled: switchTargets.length > 1,
-    triggerCode: "Digit1",
+    triggerCodes: ["Backquote", "Digit1"],
     items: switchTargets,
     currentIndex: currentTargetIndex,
     onCommit: (t) =>

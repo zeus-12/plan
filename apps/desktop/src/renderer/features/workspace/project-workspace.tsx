@@ -2253,7 +2253,7 @@ function ProjectWorkspaceImpl({
     // open tab). Requiring 2+ made Ctrl+Tab silently do nothing there, which
     // read as "worktrees don't have the switcher".
     enabled: active && switcherEntries.length > 0,
-    triggerCode: "Tab",
+    triggerCodes: ["Tab"],
     items: switcherEntries,
     currentIndex: switcherCurrentIndex,
     onCommit: (e) =>
