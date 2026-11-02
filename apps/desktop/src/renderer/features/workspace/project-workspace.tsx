@@ -38,6 +38,8 @@ import type {
 import { MiddleSidebar } from "./middle-sidebar";
 import { FileDiffViewer } from "@/renderer/features/git/file-diff-viewer";
 import { MessageList } from "@/renderer/features/chat/transcript/message-list";
+import { ChatTerminalPane } from "@/renderer/features/chat/chat-terminal-pane";
+import { useChatTerminalView } from "@/renderer/features/chat/chat-view-settings";
 import { FileViewer } from "@/renderer/features/files/file-viewer";
 import {
   CommandPalette,
@@ -501,11 +503,13 @@ const ChatTabPane = memo(function ChatTabPane({
   working,
   terminalReady,
   isNew,
+  terminalView,
   revealAnnotation,
   onAddAnnotation,
   onUpdateAnnotation,
   onRemoveAnnotation,
   onSendKeys,
+  onStartChat,
 }: {
   tab: Extract<Tab, { kind: "chat" }>;
   active: boolean;
@@ -515,6 +519,7 @@ const ChatTabPane = memo(function ChatTabPane({
   working: boolean;
   terminalReady: boolean;
   isNew: boolean;
+  terminalView: boolean;
   revealAnnotation: { id: string; nonce: number } | null;
   onAddAnnotation: (
     anchor: ChatAnchor,
@@ -525,6 +530,7 @@ const ChatTabPane = memo(function ChatTabPane({
   onUpdateAnnotation: (id: string, comment: string) => void;
   onRemoveAnnotation: (id: string) => void;
   onSendKeys: (keys: string[]) => void;
+  onStartChat: (sessionId: string) => Promise<boolean>;
 }) {
   return (
     // Keep inactive chat panes mounted so switching back does not rebuild a
@@ -535,7 +541,14 @@ const ChatTabPane = memo(function ChatTabPane({
         !active && "pointer-events-none [content-visibility:hidden]",
       )}
     >
-      {transcript ? (
+      {terminalView ? (
+        <ChatTerminalPane
+          encoded={encoded}
+          sessionId={tab.sessionId}
+          active={active}
+          onStart={onStartChat}
+        />
+      ) : transcript ? (
         <MessageList
           messages={transcript.messages}
           sessionId={tab.sessionId}
@@ -591,6 +604,7 @@ function ProjectWorkspaceImpl({
   // current value (assigned on each render, before the handlers can fire).
   const activeRef = useRef(active);
   activeRef.current = active;
+  const [terminalView] = useChatTerminalView();
   // Session list state lives up here because the tab hook's Ctrl+Tab switcher
   // lists sessions without an open tab. Seeded from the per-encoded cache so
   // revisiting a worktree paints instantly (then refreshes in the background)
@@ -1641,10 +1655,11 @@ function ProjectWorkspaceImpl({
     (sid: string) => {
       openChatTab(sid);
       setTab("chat");
+      if (terminalView) return;
       setActiveShellId(null);
       setTerminalOpen(true);
     },
-    [openChatTab, setActiveShellId, setTerminalOpen],
+    [openChatTab, setActiveShellId, setTerminalOpen, terminalView],
   );
 
   // Record a `/branch` submit so the watcher can follow the fork. Stable so
@@ -1883,9 +1898,9 @@ function ProjectWorkspaceImpl({
   // terminal to show).
   const connectAndShowChat = useCallback(() => {
     void connectChat().then((shown) => {
-      if (shown) setTerminalOpen(true);
+      if (shown && !terminalView) setTerminalOpen(true);
     });
-  }, [connectChat, setTerminalOpen]);
+  }, [connectChat, setTerminalOpen, terminalView]);
 
   // ⌘J itself: connect when the selected chat has no Claude yet, otherwise
   // toggle the dock (closing hands focus back to the composer). Shared with the
@@ -1894,6 +1909,8 @@ function ProjectWorkspaceImpl({
     if (!selectedSessionId) return;
     if (!chatTerminalReady) {
       connectAndShowChat();
+    } else if (terminalView) {
+      return;
     } else if (terminalOpen) {
       setTerminalOpen(false);
       requestAnimationFrame(() => chatInputRef.current?.focus());
@@ -1904,6 +1921,7 @@ function ProjectWorkspaceImpl({
     selectedSessionId,
     chatTerminalReady,
     connectAndShowChat,
+    terminalView,
     terminalOpen,
     setTerminalOpen,
   ]);
@@ -2537,6 +2555,7 @@ function ProjectWorkspaceImpl({
                                   tabActive ? chatTerminalReady : false
                                 }
                                 isNew={isNewSession(t.sessionId)}
+                                terminalView={terminalView}
                                 revealAnnotation={
                                   commentReveal?.tabId === t.id
                                     ? commentReveal
@@ -2546,11 +2565,12 @@ function ProjectWorkspaceImpl({
                                 onUpdateAnnotation={updateChatAnnotation}
                                 onRemoveAnnotation={removeChatAnnotation}
                                 onSendKeys={sendKeysToChat}
+                                onStartChat={startChatFor}
                               />
                             );
                           })}
                         </div>
-                        {comments.length > 0 && (
+                        {!terminalView && comments.length > 0 && (
                           <div className="shrink-0 px-3 pb-1.5">
                             <div className="mx-auto w-full max-w-[820px]">
                               <CommentChip
@@ -2562,34 +2582,40 @@ function ProjectWorkspaceImpl({
                             </div>
                           </div>
                         )}
-                        {activeTab?.kind === "chat" && selectedSessionId && (
-                          <ChatInput
-                            ref={chatInputRef}
-                            sessionId={selectedSessionId}
-                            projectEncoded={project.encoded}
-                            inactive={!chatTerminalReady}
-                            notReady={chatTerminalReady && !agentLive}
-                            onStart={connectChat}
-                            onSend={handleSendChat}
-                            blocked={awaitingSelection}
-                            onBlocked={() =>
-                              revealChatTerminal(selectedSessionId)
-                            }
-                            insert={notesInsert}
-                            onInsertApplied={retireNotesInsert}
-                            autoFocus={isNewSession(selectedSessionId)}
-                            commentsPending={totalComments > 0}
-                            canContinue={
-                              stalledOnApiError &&
-                              !chatWorking &&
-                              !continueInFlight
-                            }
-                            atSessionLimit={!!sessionLimitReset && !chatWorking}
-                            sessionLimitReset={sessionLimitReset?.text ?? null}
-                            continueStarting={continueStarting}
-                            onContinue={handleContinue}
-                          />
-                        )}
+                        {!terminalView &&
+                          activeTab?.kind === "chat" &&
+                          selectedSessionId && (
+                            <ChatInput
+                              ref={chatInputRef}
+                              sessionId={selectedSessionId}
+                              projectEncoded={project.encoded}
+                              inactive={!chatTerminalReady}
+                              notReady={chatTerminalReady && !agentLive}
+                              onStart={connectChat}
+                              onSend={handleSendChat}
+                              blocked={awaitingSelection}
+                              onBlocked={() =>
+                                revealChatTerminal(selectedSessionId)
+                              }
+                              insert={notesInsert}
+                              onInsertApplied={retireNotesInsert}
+                              autoFocus={isNewSession(selectedSessionId)}
+                              commentsPending={totalComments > 0}
+                              canContinue={
+                                stalledOnApiError &&
+                                !chatWorking &&
+                                !continueInFlight
+                              }
+                              atSessionLimit={
+                                !!sessionLimitReset && !chatWorking
+                              }
+                              sessionLimitReset={
+                                sessionLimitReset?.text ?? null
+                              }
+                              continueStarting={continueStarting}
+                              onContinue={handleContinue}
+                            />
+                          )}
                       </div>
                     )}
                     {/* The same chip on a diff/file tab, floating over the bottom of
@@ -2613,7 +2639,7 @@ function ProjectWorkspaceImpl({
 
                 {/* Resizable docked terminal (⌘J). Kept mounted once opened so
                 scrollback survives toggles; hidden (height 0) when closed. */}
-                {terminalMounted && (
+                {terminalMounted && !terminalView && (
                   <div
                     className={cn(
                       "flex shrink-0 flex-col overflow-hidden border-t border-[var(--border)]",

@@ -1,9 +1,14 @@
 import type { IPty } from "node-pty";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { defaultShell, shellEnv } from "./shell-env";
 import { resolveWorkspaceCwd } from "@/main/worktrees/workspace";
 import { descendantPids } from "./process-tree";
-import type { TerminalChunk, TerminalInfo } from "@/common/shared-types";
+import type {
+  TerminalChunk,
+  TerminalInfo,
+  TerminalSnapshot,
+} from "@/common/shared-types";
 
 interface Session {
   /** The pty's CURRENT terminal id — the key it's stored under in `sessions`.
@@ -16,10 +21,14 @@ interface Session {
    *  batching to one IPC message per ~16ms keeps the renderer responsive. */
   pendingOut: string;
   flushTimer: ReturnType<typeof setTimeout> | null;
+  /** Seq of the last chunk emitted, so a view attaching mid-stream can tell
+   *  which chunks its snapshot already contains. */
+  seq: number;
   /** A headless emulator fed the SAME pty bytes, kept current regardless of
    *  whether the renderer's xterm is visible — so we can read the rendered
    *  screen (the input box vs. an approval menu) even from the diffs tab. */
   screen: HeadlessTerminal;
+  serializer: SerializeAddon;
   /** Teardown (deregister + `exit`) runs exactly once: from the pty's own exit,
    *  or from a kill that verified the process is gone. */
   tornDown: boolean;
@@ -80,6 +89,36 @@ function loadPty(): typeof import("node-pty") | null {
   }
 }
 
+function flushPending(session: Session) {
+  if (session.flushTimer) {
+    clearTimeout(session.flushTimer);
+    session.flushTimer = null;
+  }
+  const data = session.pendingOut;
+  if (!data) return;
+  session.pendingOut = "";
+  session.seq += 1;
+  emitData({ id: session.id, data, seq: session.seq });
+}
+
+/** The screen and scrollback as of the last emitted chunk — pending output is
+ *  flushed first so the snapshot and the chunk stream meet at `seq` exactly. */
+function snapshotOf(session: Session): TerminalSnapshot | undefined {
+  if (session.tornDown) return undefined;
+  flushPending(session);
+  return { data: session.serializer.serialize(), seq: session.seq };
+}
+
+/**
+ * Opens in flight, by id. A spawn can't register its session until it has
+ * resolved a cwd, so without this two opens racing on one id BOTH get past the
+ * "is there a session?" check and BOTH spawn a shell — the second wins the
+ * table and the first is orphaned: still writing to the id, still reporting its
+ * exit under it, and unreachable by any kill. React's StrictMode double-invokes
+ * every mount effect in dev, so a terminal pane produced that race every time.
+ */
+const opening = new Map<string, Promise<{ cwd: string; error?: string }>>();
+
 /**
  * Ensure a pty exists for terminal `id` (cwd resolved from `encoded`) and return
  * its cwd. Reuses the existing session if one is already running, so the shell +
@@ -104,16 +143,6 @@ function loadPty(): typeof import("node-pty") | null {
  * the Run/Build terminals in a multi-repo project, where each command targets
  * one of the project's git sub-repos).
  */
-/**
- * Opens in flight, by id. A spawn can't register its session until it has
- * resolved a cwd, so without this two opens racing on one id BOTH get past the
- * "is there a session?" check and BOTH spawn a shell — the second wins the
- * table and the first is orphaned: still writing to the id, still reporting its
- * exit under it, and unreachable by any kill. React's StrictMode double-invokes
- * every mount effect in dev, so a terminal pane produced that race every time.
- */
-const opening = new Map<string, Promise<{ cwd: string; error?: string }>>();
-
 export async function openTerminal(
   id: string,
   encoded: string,
@@ -122,7 +151,7 @@ export async function openTerminal(
   initialCommand?: string,
   subPath = "",
   opts: { attachOnly?: boolean } = {},
-): Promise<{ cwd: string; error?: string }> {
+): Promise<{ cwd: string; error?: string; snapshot?: TerminalSnapshot }> {
   const resize = (s: Session) => {
     if (cols == null || rows == null) return;
     try {
@@ -136,7 +165,7 @@ export async function openTerminal(
   const existing = sessions.get(id);
   if (existing) {
     resize(existing);
-    return { cwd: existing.cwd };
+    return { cwd: existing.cwd, snapshot: snapshotOf(existing) };
   }
   const inflight = opening.get(id);
   if (inflight) {
@@ -144,8 +173,9 @@ export async function openTerminal(
     // than start a second shell under the same id.
     const result = await inflight;
     const opened = sessions.get(id);
-    if (opened) resize(opened);
-    return result;
+    if (!opened) return result;
+    resize(opened);
+    return { ...result, snapshot: snapshotOf(opened) };
   }
   if (opts.attachOnly) {
     return {
@@ -163,7 +193,9 @@ export async function openTerminal(
   );
   opening.set(id, spawn);
   try {
-    return await spawn;
+    const result = await spawn;
+    const opened = sessions.get(id);
+    return opened ? { ...result, snapshot: snapshotOf(opened) } : result;
   } finally {
     opening.delete(id);
   }
@@ -202,15 +234,19 @@ async function spawnTerminal(
       // No DOM here — writing to a headless emulator is cheap, so we feed it
       // every byte immediately (uncoalesced) to keep its grid frame-accurate.
       allowProposedApi: true,
-      scrollback: 200,
+      scrollback: 2_000,
     });
+    const serializer = new SerializeAddon();
+    screen.loadAddon(serializer);
     const session: Session = {
       id,
       pty,
       cwd,
       pendingOut: "",
       flushTimer: null,
+      seq: 0,
       screen,
+      serializer,
       tornDown: false,
       killTimers: [],
       exitWaiters: [],
@@ -223,12 +259,7 @@ async function spawnTerminal(
       session.screen.write(data);
       session.pendingOut += data;
       if (session.flushTimer) return;
-      session.flushTimer = setTimeout(() => {
-        session.flushTimer = null;
-        const out = session.pendingOut;
-        session.pendingOut = "";
-        if (out) emitData({ id: session.id, data: out });
-      }, 16);
+      session.flushTimer = setTimeout(() => flushPending(session), 16);
     });
     pty.onExit(() => teardown(session));
     sessions.set(id, session);
@@ -324,17 +355,10 @@ export function resizeTerminal(id: string, cols: number, rows: number) {
  */
 function teardown(session: Session) {
   if (session.tornDown) return;
+  flushPending(session);
   session.tornDown = true;
-  if (session.flushTimer) {
-    clearTimeout(session.flushTimer);
-    session.flushTimer = null;
-  }
   for (const t of session.killTimers) clearTimeout(t);
   session.killTimers = [];
-  if (session.pendingOut) {
-    emitData({ id: session.id, data: session.pendingOut });
-    session.pendingOut = "";
-  }
   try {
     session.screen.dispose();
   } catch {

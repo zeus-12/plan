@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { useTheme } from "@plan/shared/components/theme-provider";
+import type { TerminalChunk } from "@/common/shared-types";
 import { registerTerminalMetrics } from "./terminal-metrics";
 import "@xterm/xterm/css/xterm.css";
 
@@ -333,7 +334,31 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
         });
       };
 
-      scheduleFit();
+      // Fit now rather than next frame: the attach below sizes the pty, and the
+      // snapshot it returns is laid out at that size.
+      runFit();
+      const fitted = lastDims.current.cols > 0;
+
+      const writeOut = (data: string) => {
+        if (visibleRef.current) {
+          term.write(data);
+        } else {
+          hiddenBufRef.current += data;
+          // Keep only the tail — enough to reconstruct the current TUI frame.
+          if (hiddenBufRef.current.length > 500_000) {
+            hiddenBufRef.current = hiddenBufRef.current.slice(-400_000);
+          }
+        }
+      };
+      // Until the attach answers, chunks are held: the snapshot it returns
+      // already contains every chunk up to its seq, and must be written first.
+      let held: TerminalChunk[] | null = [];
+      const offData = window.electronAPI.onTerminalData((chunk) => {
+        if (chunk.id !== id) return;
+        if (held) held.push(chunk);
+        else writeOut(chunk.data);
+      });
+
       // Attaches to the pty, creating it only if nothing has yet — a chat pane
       // finds one its engine already started. The result is reported back: a
       // failed attach leaves NO pty, so an owner that waits for `exit` to tell
@@ -343,27 +368,26 @@ export const TerminalPanel = forwardRef<TerminalHandle, Props>(
         .terminalOpen(
           id,
           encoded,
-          term.cols,
-          term.rows,
+          // An unfitted (hidden) pane's 80×24 default would shrink a running
+          // pty that a visible view sized.
+          fitted ? term.cols : undefined,
+          fitted ? term.rows : undefined,
           initialCommand,
           subPath,
         )
         .then((r) => {
-          if (attached) onOpenedRef.current?.({ error: r.error });
-        });
-
-      const offData = window.electronAPI.onTerminalData((chunk) => {
-        if (chunk.id !== id) return;
-        if (visibleRef.current) {
-          term.write(chunk.data);
-        } else {
-          hiddenBufRef.current += chunk.data;
-          // Keep only the tail — enough to reconstruct the current TUI frame.
-          if (hiddenBufRef.current.length > 500_000) {
-            hiddenBufRef.current = hiddenBufRef.current.slice(-400_000);
+          if (!attached) return;
+          const pending = held ?? [];
+          held = null;
+          const snap = r.snapshot;
+          if (snap?.data) writeOut(snap.data);
+          for (const chunk of pending) {
+            if (!snap || chunk.seq == null || chunk.seq > snap.seq) {
+              writeOut(chunk.data);
+            }
           }
-        }
-      });
+          onOpenedRef.current?.({ error: r.error });
+        });
       const inputSub = term.onData((d) =>
         window.electronAPI.terminalInput(id, d),
       );

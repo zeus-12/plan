@@ -632,6 +632,16 @@ export interface ClaudeConfigBundle {
 export interface TerminalChunk {
   id: string;
   data: string;
+  /** Per-pty emission order; absent on messages main writes outside the pty
+   *  stream (spawn failures). */
+  seq?: number;
+}
+
+/** A pty's rendered screen + scrollback as escape sequences, and the seq of the
+ *  last chunk it already includes. */
+export interface TerminalSnapshot {
+  data: string;
+  seq: number;
 }
 
 /** One live pty as reported to the sessions dashboard. */

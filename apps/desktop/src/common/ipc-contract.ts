@@ -64,6 +64,7 @@ import type {
   SessionListEntry,
   SkillInfo,
   TerminalChunk,
+  TerminalSnapshot,
   TerminalDebugFrame,
   TerminalInfo,
   UpdateInfo,
@@ -385,12 +386,12 @@ export interface IpcInvokeContract {
     args: [
       id: string,
       encoded: string,
-      cols: number,
-      rows: number,
+      cols: number | undefined,
+      rows: number | undefined,
       initialCommand?: string,
       subPath?: string,
     ];
-    result: { cwd: string; error?: string };
+    result: { cwd: string; error?: string; snapshot?: TerminalSnapshot };
   };
   /** Whether a pty is alive. Whether an AGENT is live inside one is a chat
    *  question — see `chat:status`, which the owning engine answers. */

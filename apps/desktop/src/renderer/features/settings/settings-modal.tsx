@@ -23,6 +23,7 @@ import {
 import type { ChatEngineId } from "@/common/chat-engines";
 import { useAutoContinueEnabled } from "@/renderer/features/chat/session/auto-continue-settings";
 import { useShowChats } from "@/renderer/features/chat/chat-visibility-settings";
+import { useChatTerminalView } from "@/renderer/features/chat/chat-view-settings";
 import { useDebugMode } from "@/renderer/features/debug/debug-mode";
 import {
   PROSE_BRIGHTNESS,
@@ -54,6 +55,7 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [prose, setProse] = useTranscriptPrefs();
   const [debugMode, setDebugMode] = useDebugMode();
   const [showChats, setShowChats] = useShowChats();
+  const [terminalView, setTerminalView] = useChatTerminalView();
 
   useEffect(() => {
     if (!open) return;
@@ -112,6 +114,24 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                 onCheckedChange={setShowChats}
               />
             </div>
+            {showChats && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-[12px] text-[var(--text)]">
+                    Terminal view
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    Show each chat as its live Claude Code terminal instead of
+                    the rendered transcript.
+                  </span>
+                </div>
+                <Switch
+                  aria-label="Terminal view"
+                  checked={terminalView}
+                  onCheckedChange={setTerminalView}
+                />
+              </div>
+            )}
             <div className="mt-2 h-px bg-[var(--border)]" />
           </section>
 
