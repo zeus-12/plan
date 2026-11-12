@@ -535,7 +535,7 @@ const COMPONENTS = {
   ),
   ol: ({ className, ...p }: Props<"ol">) => (
     <ol
-      className={cn("my-3 list-decimal space-y-1.5 pl-5", className)}
+      className={cn("my-3 list-decimal space-y-1.5 pl-[2em]", className)}
       {...p}
     />
   ),
