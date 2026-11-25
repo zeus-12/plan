@@ -21,7 +21,7 @@ timeout_seconds=$((40 * 60))
 
 digest=""
 waited=0
-echo "waiting for $asset on $tag…"
+echo "waiting for $asset on ${tag}…"
 while :; do
   # On a 404 gh prints the error body to stdout, so only a successful call's output is a digest.
   if digest="$(gh api "repos/$repo/releases/tags/$tag" \

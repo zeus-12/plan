@@ -27,9 +27,8 @@ permissions:
 jobs:
   validate:
     name: Validate
-    # Same runner as the build job — node-pty is built from source on install and
-    # has only ever been proven on macos-14 here.
-    runs-on: macos-14
+    # Same runner as the build job: node-pty is built from source on install.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -55,7 +54,7 @@ jobs:
     needs: validate
     # Apple Silicon only. Intel (macos-13) runners are being retired and queue
     # indefinitely; a universal build would need node-pty rebuilt for both arches.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
