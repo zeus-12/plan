@@ -124,6 +124,9 @@ export interface StartChatOptions {
   isNew: boolean;
   /** Run Claude with permissions on auto (the global Settings toggle). */
   autoMode: boolean;
+  /** Tell Claude the reader sees only its final message per turn (Claude
+   *  Code's focus view), so that message is written to stand on its own. */
+  focusView: boolean;
   /** Engine to start with. Ignored when the chat is already being driven. */
   engine: ChatEngineId;
 }

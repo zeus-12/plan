@@ -5,6 +5,7 @@ import { chatTerminalId } from "@/common/terminal-ids";
 import { useChatWorking } from "@/renderer/features/sessions/session-activity-store";
 import { useSessionNeedsApproval } from "@/renderer/features/sessions/session-approval-store";
 import { useAutoModeEnabled } from "./auto-mode-settings";
+import { useChatFocusView } from "../chat-view-settings";
 import {
   capabilitiesFor,
   useChatEngineCapabilities,
@@ -62,6 +63,7 @@ export function useChatSession(opts: {
     onBranchCommand,
   } = opts;
   const [globalAutoMode] = useAutoModeEnabled();
+  const [focusView] = useChatFocusView();
 
   // The selected chat's id, and whether anything is driving it. The dock (⌘J)
   // mirrors exactly this — it is never a plain shell.
@@ -103,6 +105,7 @@ export function useChatSession(opts: {
         // resumed; see new-session-ids.
         isNew: isNewSession(sid),
         autoMode: globalAutoMode,
+        focusView,
       });
       if (res.error) {
         pushToast({
@@ -116,7 +119,7 @@ export function useChatSession(opts: {
       ensureOpened(tid);
       return true;
     },
-    [encoded, globalAutoMode, ensureOpened],
+    [encoded, globalAutoMode, focusView, ensureOpened],
   );
 
   /** `startChatFor` the currently selected session. */

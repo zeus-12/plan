@@ -44,6 +44,7 @@ function sameMessage(a: ConversationMessage, b: ConversationMessage): boolean {
   if (
     a.uuid !== b.uuid ||
     a.role !== b.role ||
+    a.stopReason !== b.stopReason ||
     a.parts.length !== b.parts.length
   ) {
     return false;

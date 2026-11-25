@@ -2,8 +2,11 @@ export function claudeStartCommand(opts: {
   sessionId: string;
   isNew: boolean;
   autoMode: boolean;
+  focusView: boolean;
 }): string {
-  const flags = opts.autoMode ? " --permission-mode auto" : "";
+  const flags =
+    (opts.autoMode ? " --permission-mode auto" : "") +
+    (opts.focusView ? ` --settings '{"viewMode":"focus"}'` : "");
   const sessionArgs = opts.isNew
     ? `--session-id ${opts.sessionId}`
     : `--resume ${opts.sessionId}`;

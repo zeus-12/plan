@@ -135,7 +135,9 @@ function parseMessageLine(
   parentMessageUuid: string | null,
 ): ConversationMessage | null {
   if (obj.type !== "user" && obj.type !== "assistant") return null;
-  const message = (obj as { message?: { content?: unknown } }).message;
+  const message = (
+    obj as { message?: { content?: unknown; stop_reason?: unknown } }
+  ).message;
   const content = message?.content;
   const parts =
     obj.type === "assistant"
@@ -172,6 +174,9 @@ function parseMessageLine(
     ...(obj.isMeta === true ? { isMeta: true } : {}),
     ...(promptSource ? { promptSource } : {}),
     ...(apiError ? { apiError } : {}),
+    ...(obj.type === "assistant" && typeof message?.stop_reason === "string"
+      ? { stopReason: message.stop_reason }
+      : {}),
   };
 }
 

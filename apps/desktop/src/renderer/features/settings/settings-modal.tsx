@@ -23,7 +23,10 @@ import {
 import type { ChatEngineId } from "@/common/chat-engines";
 import { useAutoContinueEnabled } from "@/renderer/features/chat/session/auto-continue-settings";
 import { useShowChats } from "@/renderer/features/chat/chat-visibility-settings";
-import { useChatTerminalView } from "@/renderer/features/chat/chat-view-settings";
+import {
+  useChatFocusView,
+  useChatTerminalView,
+} from "@/renderer/features/chat/chat-view-settings";
 import { useDebugMode } from "@/renderer/features/debug/debug-mode";
 import {
   PROSE_BRIGHTNESS,
@@ -56,6 +59,7 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
   const [debugMode, setDebugMode] = useDebugMode();
   const [showChats, setShowChats] = useShowChats();
   const [terminalView, setTerminalView] = useChatTerminalView();
+  const [focusView, setFocusView] = useChatFocusView();
 
   useEffect(() => {
     if (!open) return;
@@ -129,6 +133,25 @@ export function SettingsModal({ open, onClose, onShowShortcuts }: Props) {
                   aria-label="Terminal view"
                   checked={terminalView}
                   onCheckedChange={setTerminalView}
+                />
+              </div>
+            )}
+            {showChats && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-[12px] text-[var(--text)]">
+                    Focus view
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    Show each turn as your prompt, one summary line, and
+                    Claude&rsquo;s final reply. Claude is told about it when a
+                    chat&rsquo;s terminal next starts.
+                  </span>
+                </div>
+                <Switch
+                  aria-label="Focus view"
+                  checked={focusView}
+                  onCheckedChange={setFocusView}
                 />
               </div>
             )}

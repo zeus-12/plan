@@ -72,6 +72,7 @@ import {
   useToolPreviewHover,
 } from "./tool-preview-card";
 import { SessionCwdContext } from "./session-cwd";
+import { useChatFocusView } from "../chat-view-settings";
 import { chatTerminalId } from "@/common/terminal-ids";
 import {
   isSessionUnread,
@@ -1795,22 +1796,27 @@ export const MessageList = memo(function MessageList({
   // Runs of consecutive tool/thinking rows fold behind one summary line. A part
   // that renders as a card (plan, question, delivered file) is content, not
   // machinery, so it breaks the run rather than folding into it.
+  const [focusView] = useChatFocusView();
   const toolRuns = useMemo(
     () =>
-      findToolRuns(items, (m, i, p) => {
-        const key = `${m.uuid}:${i}`;
-        if (hiddenParts.has(key) || planVersionByPart.has(key)) return true;
-        if (p.kind !== "tool_use") return false;
-        if (p.tool === "AskUserQuestion")
-          return parseAskInput(p.input) !== null;
-        if (p.tool === "SendUserFile")
-          return (
-            resultByToolUseId.get(p.id)?.isError !== true &&
-            parseSendUserFile(p.input) !== null
-          );
-        return false;
-      }),
-    [items, hiddenParts, planVersionByPart, resultByToolUseId],
+      findToolRuns(
+        items,
+        (m, i, p) => {
+          const key = `${m.uuid}:${i}`;
+          if (hiddenParts.has(key) || planVersionByPart.has(key)) return true;
+          if (p.kind !== "tool_use") return false;
+          if (p.tool === "AskUserQuestion")
+            return parseAskInput(p.input) !== null;
+          if (p.tool === "SendUserFile")
+            return (
+              resultByToolUseId.get(p.id)?.isError !== true &&
+              parseSendUserFile(p.input) !== null
+            );
+          return false;
+        },
+        { focus: focusView },
+      ),
+    [items, hiddenParts, planVersionByPart, resultByToolUseId, focusView],
   );
   const [openRunKeys, setOpenRunKeys] =
     useState<ReadonlySet<string>>(EMPTY_RUN_KEYS);

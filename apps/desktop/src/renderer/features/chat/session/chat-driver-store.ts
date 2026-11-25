@@ -63,6 +63,7 @@ export function startChat(
     sessionId: string;
     isNew: boolean;
     autoMode: boolean;
+    focusView: boolean;
   },
 ): Promise<StartChatResult> {
   const inFlight = pending.get(chatId);

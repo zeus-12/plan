@@ -111,3 +111,69 @@ describe("findToolRuns", () => {
     expect(grown.end).toBe(4);
   });
 });
+
+describe("findToolRuns in focus view", () => {
+  const focus = { focus: true };
+  const stopped = (m: ConversationMessage, stopReason: string) => ({
+    ...m,
+    stopReason,
+  });
+  const aside = (text: string) => stopped(say(text), "tool_use");
+  const reply = (text: string) => stopped(say(text), "end_turn");
+
+  it("folds the prose between tool calls, leaving prompt and final reply", () => {
+    const items = [
+      prompt("go"),
+      aside("Let me look"),
+      read("a.ts"),
+      aside("Now the test"),
+      ran("pnpm test"),
+      reply("All green"),
+    ];
+    const { runs, runOfRow } = findToolRuns(items, never, focus);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      start: 1,
+      end: 4,
+      label: "Read files, ran commands",
+    });
+    expect(Array.from(runOfRow)).toEqual([-1, 0, 0, 0, 0, -1]);
+  });
+
+  it("folds even a single row and a thinking-only run", () => {
+    const items = [prompt("go"), think("hmm"), reply("Yes")];
+    const { runs } = findToolRuns(items, never, focus);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ start: 1, end: 1, label: "Thought" });
+  });
+
+  it("keeps prose with no stop reason visible, since it can't be classified", () => {
+    const items = [prompt("go"), say("old transcript line"), read("a.ts")];
+    const { runOfRow } = findToolRuns(items, never, focus);
+    expect(runOfRow[1]).toBe(-1);
+    expect(runOfRow[2]).toBe(0);
+  });
+
+  it("keeps API error turns visible", () => {
+    const failed = { ...aside("Overloaded"), apiError: { kind: "overloaded" } };
+    const { runOfRow } = findToolRuns(
+      [prompt("go"), failed, read("a.ts")],
+      never,
+      focus,
+    );
+    expect(runOfRow[1]).toBe(-1);
+  });
+
+  it("keeps cards out of the fold", () => {
+    const ask = tool("AskUserQuestion");
+    const isCard = (m: ConversationMessage) => m === ask;
+    const items = [prompt("go"), aside("One question"), ask];
+    const { runOfRow } = findToolRuns(items, isCard, focus);
+    expect(Array.from(runOfRow)).toEqual([-1, 0, -1]);
+  });
+
+  it("labels a run of prose alone without inventing an action", () => {
+    const { runs } = findToolRuns([aside("Checking")], never, focus);
+    expect(runs[0].label).toBe("Worked");
+  });
+});

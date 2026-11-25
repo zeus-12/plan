@@ -44,6 +44,9 @@ export interface ConversationMessage {
    *  (`isApiErrorMessage`) rather than a real reply — its own classification of
    *  what went wrong. See api-errors for which of these are worth retrying. */
   apiError?: { kind: string; status?: number };
+  /** The API's `stop_reason` for the response this assistant line belongs to.
+   *  Anything but "tool_use" means the line is part of the turn's final reply. */
+  stopReason?: string;
 }
 
 export interface SessionMeta {

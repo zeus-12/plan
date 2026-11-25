@@ -213,3 +213,29 @@ describe("readSessionMeta", () => {
     expect(meta.messageCount).toBe(2);
   });
 });
+
+describe("parseSessionJsonl stop reasons", () => {
+  it("carries an assistant line's stop_reason and leaves user lines without one", () => {
+    const line = (type: string, i: number, message: object) =>
+      JSON.stringify({ type, uuid: `x-${i}`, timestamp: ts(i), message });
+    const raw = [
+      line("user", 0, { content: "go" }),
+      line("assistant", 1, {
+        content: [{ type: "text", text: "Looking" }],
+        stop_reason: "tool_use",
+      }),
+      line("assistant", 2, {
+        content: [{ type: "text", text: "Done" }],
+        stop_reason: "end_turn",
+      }),
+      line("assistant", 3, { content: [{ type: "text", text: "Old" }] }),
+    ].join("\n");
+    const { messages } = parseSessionJsonl(raw, "/tmp/s.jsonl");
+    expect(messages.map((m) => m.stopReason)).toEqual([
+      undefined,
+      "tool_use",
+      "end_turn",
+      undefined,
+    ]);
+  });
+});

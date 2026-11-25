@@ -85,15 +85,27 @@ function labelFor(messages: ConversationMessage[]): string {
       else if (p.kind === "tool_use") add(phraseFor(p.tool));
     }
   }
-  const joined = phrases.join(", ");
+  const joined = phrases.join(", ") || "worked";
   return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 
-function groupable(m: ConversationMessage, isCardPart: IsCardPart): boolean {
-  if (m.role !== "assistant" || m.parts.length === 0) return false;
+/** Focus view folds everything the reader wasn't addressed by: the prose Claude
+ *  writes between tool calls joins the machinery, leaving each turn as the
+ *  prompt, one summary line, and the final reply. */
+export interface RunOptions {
+  focus: boolean;
+}
+
+function groupable(
+  m: ConversationMessage,
+  isCardPart: IsCardPart,
+  focus: boolean,
+): boolean {
+  if (m.role !== "assistant" || m.parts.length === 0 || m.apiError)
+    return false;
   return m.parts.every((p, i) => {
     if (p.kind === "thinking" || p.kind === "tool_result") return true;
-    if (p.kind !== "tool_use") return false;
+    if (p.kind === "text") return focus && m.stopReason === "tool_use";
     return !isCardPart(m, i, p);
   });
 }
@@ -111,6 +123,7 @@ export interface ToolRuns {
 export function findToolRuns(
   items: ConversationMessage[],
   isCardPart: IsCardPart,
+  { focus }: RunOptions = { focus: false },
 ): ToolRuns {
   const runs: ToolRun[] = [];
   const runOfRow = new Int32Array(items.length).fill(-1);
@@ -121,7 +134,7 @@ export function findToolRuns(
     const slice = items.slice(start, end + 1);
     // A run of nothing but thinking is left alone: those rows already carry a
     // preview of what they say, and a fold would trade it for a worse one.
-    if (end - start + 1 >= MIN_RUN_ROWS && slice.some(hasToolUse)) {
+    if (focus || (end - start + 1 >= MIN_RUN_ROWS && slice.some(hasToolUse))) {
       const index = runs.length;
       runs.push({
         key: items[start].uuid,
@@ -136,7 +149,7 @@ export function findToolRuns(
   };
 
   for (let i = 0; i < items.length; i++) {
-    if (groupable(items[i], isCardPart)) {
+    if (groupable(items[i], isCardPart, focus)) {
       if (start < 0) start = i;
     } else close(i - 1);
   }
