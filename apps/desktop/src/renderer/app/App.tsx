@@ -79,7 +79,16 @@ import {
   closeProjectTab,
   makeChatTab,
   chatTabId,
+  getProjectTabs,
+  setActiveProjectTab,
+  useActiveTabId,
 } from "@/renderer/features/workspace/tabs-store";
+import {
+  NavHistory,
+  type NavDirection,
+  type NavLocation,
+} from "@/renderer/features/navigation/nav-history";
+import { SwipeNavigation } from "@/renderer/features/navigation/swipe-navigation";
 import { handleReloadRequest } from "@/renderer/lib/reload-override";
 import { forgetNewSession } from "@/renderer/features/sessions/new-session-ids";
 import { removeCachedSession } from "@/renderer/features/sessions/session-cache";
@@ -859,6 +868,46 @@ function Shell() {
         : selectProject(t.projectEncoded),
   });
 
+  const [navHistory] = useState(() => new NavHistory());
+  const activeTabId = useActiveTabId(activeTarget?.encoded ?? null);
+  useEffect(() => {
+    if (activeTarget)
+      navHistory.record({ ...activeTarget, tabId: activeTabId });
+  }, [navHistory, activeTarget, activeTabId]);
+  const navSourcesRef = useRef({ projects, worktreeById });
+  navSourcesRef.current = { projects, worktreeById };
+  const isLiveLocation = useCallback((loc: NavLocation) => {
+    const { projects, worktreeById } = navSourcesRef.current;
+    if (!projects.some((p) => p.encoded === loc.projectEncoded)) return false;
+    if (
+      loc.worktreeId &&
+      worktreeById.get(loc.worktreeId)?.projectEncoded !== loc.projectEncoded
+    )
+      return false;
+    const tabs = getProjectTabs(loc.encoded);
+    return loc.tabId
+      ? tabs.tabs.some((t) => t.id === loc.tabId)
+      : tabs.activeId === null;
+  }, []);
+  const canNavigate = useCallback(
+    (direction: NavDirection) =>
+      navHistory.peek(direction, isLiveLocation) !== null,
+    [navHistory, isLiveLocation],
+  );
+  const navigate = useCallback(
+    (direction: NavDirection) => {
+      const index = navHistory.peek(direction, isLiveLocation);
+      if (index === null) return;
+      const loc = navHistory.go(index);
+      // Tab first: switching worktree before it would briefly show that
+      // worktree's previous tab, which would be recorded as a new visit.
+      if (loc.tabId) setActiveProjectTab(loc.encoded, loc.tabId);
+      if (loc.worktreeId) selectWorktree(loc.projectEncoded, loc.worktreeId);
+      else selectProject(loc.projectEncoded);
+    },
+    [navHistory, isLiveLocation, selectWorktree, selectProject],
+  );
+
   // ── Global attention switcher (double-tap Ctrl) ─────────────────────
   // Self-contained in ./attention-switcher; App only supplies the data it
   // already has and the landing action. Deleting the feature = remove that
@@ -1062,6 +1111,7 @@ function Shell() {
           onNavigate={handleAttentionNavigate}
         />
       )}
+      <SwipeNavigation canNavigate={canNavigate} navigate={navigate} />
       {confirmDialog}
     </div>
   );

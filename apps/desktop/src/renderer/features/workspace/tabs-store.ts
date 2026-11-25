@@ -259,6 +259,14 @@ export function setActiveProjectTab(encoded: string, id: string) {
   set(encoded, { ...cur, activeId: id });
 }
 
+export function useActiveTabId(encoded: string | null): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => (encoded ? get(encoded).activeId : null),
+    () => (encoded ? get(encoded).activeId : null),
+  );
+}
+
 export interface ProjectTabs extends TabsState {
   /** Focus an existing tab for this target, or append it and focus it. */
   openTab: (tab: Tab) => void;

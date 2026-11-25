@@ -2407,7 +2407,10 @@ function ProjectWorkspaceImpl({
                 onToggleChatTerminal={toggleChatTerminal}
               />
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex min-h-0 flex-1 flex-col">
+                <div
+                  className="flex min-h-0 flex-1 flex-col"
+                  data-swipe-nav-zone
+                >
                   <TabBar
                     tabs={tabs}
                     activeId={activeId}

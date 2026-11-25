@@ -111,6 +111,7 @@ import { readSentFile } from "@/main/fs/sent-file";
 import { listSkills } from "./providers/claude-code/skills";
 import { getProjectIcons } from "@/main/fs/project-icons";
 import { checkForUpdate } from "@/main/app/updates";
+import { watchTrackpadSwipes } from "@/main/app/trackpad-swipe";
 import { loginShellPath } from "@/main/terminal/shell-env";
 import {
   addTerminalListener,
@@ -339,6 +340,11 @@ function createMainWindow(): BrowserWindow {
       sendToRenderer("switcher:cycle", { key: input.code, shift: input.shift });
     }
   });
+
+  if (isMac)
+    watchTrackpadSwipes(win, (e) => {
+      if (mainWindow === win) sendToRenderer("swipe:gesture", e);
+    });
 
   mainWindow = win;
   return win;

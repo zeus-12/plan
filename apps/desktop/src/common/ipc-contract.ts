@@ -63,6 +63,7 @@ import type {
   SessionEvent,
   SessionListEntry,
   SkillInfo,
+  SwipeGestureEvent,
   TerminalChunk,
   TerminalSnapshot,
   TerminalDebugFrame,
@@ -489,6 +490,7 @@ export interface IpcEventContract {
   "chat:activity": [chatId: string, activity: ChatActivity];
   /** A chat's driver ended (quit, killed, or died). */
   "chat:exit": [chatId: string];
+  "swipe:gesture": [e: SwipeGestureEvent];
 }
 
 // ── window.electronAPI surface ───────────────────────────────────────
@@ -617,6 +619,7 @@ export const API_EVENTS = {
   onTerminalExit: "terminal:exit",
   onChatActivity: "chat:activity",
   onChatExit: "chat:exit",
+  onSwipeGesture: "swipe:gesture",
 } as const satisfies Record<string, keyof IpcEventContract>;
 
 /** The renderer-facing API, derived method-by-method from the maps above.

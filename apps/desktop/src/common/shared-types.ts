@@ -755,3 +755,12 @@ export interface SentFile {
  */
 export const SWITCHER_FORWARDED_CODES = ["Tab", "Backquote", "Digit1"] as const;
 export type SwitcherForwardedCode = (typeof SWITCHER_FORWARDED_CODES)[number];
+
+/** One phase of a macOS two-finger trackpad scroll gesture (finger contact
+ *  only — momentum is never reported). `x`/`y` are CSS px in the window;
+ *  deltas are points in DOM wheel convention (positive = scroll right/down). */
+export type SwipeGestureEvent =
+  | { phase: "begin"; x: number; y: number; dx: number; dy: number }
+  | { phase: "update"; dx: number; dy: number }
+  | { phase: "end" }
+  | { phase: "cancel" };

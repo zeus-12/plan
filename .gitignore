@@ -39,3 +39,5 @@ yarn-error.log*
 *.tsbuildinfo
 
 .claude
+# native addons (built by native/*/build.sh)
+apps/desktop/native/*/build/

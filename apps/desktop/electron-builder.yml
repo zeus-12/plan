@@ -10,6 +10,10 @@ directories:
   output: dist
 files:
   - out/**/*
+# Loaded with process.dlopen, which can't read from inside app.asar.
+extraResources:
+  - from: native/trackpad-swipe/build/trackpad_swipe.node
+    to: trackpad_swipe.node
 mac:
   icon: build/icon.icns
   target:

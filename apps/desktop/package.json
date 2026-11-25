@@ -4,7 +4,7 @@
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "bash native/trackpad-swipe/build.sh && electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
@@ -14,9 +14,10 @@
     "format": "prettier --write . --ignore-path ../../.prettierignore",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "test": "vitest run",
-    "rebuild": "electron-rebuild -f -w node-pty",
+    "rebuild": "electron-rebuild -f -w node-pty && bash native/trackpad-swipe/build.sh",
     "pack": "electron-vite build && electron-builder --mac",
-    "pack:dmg": "electron-vite build && electron-builder --mac dmg"
+    "pack:dmg": "electron-vite build && electron-builder --mac dmg",
+    "build:native": "bash native/trackpad-swipe/build.sh"
   },
   "dependencies": {
     "@lexical/react": "^0.45.0",
@@ -64,6 +65,7 @@
     "electron": "^35",
     "electron-builder": "^26.8.1",
     "electron-vite": "^3",
+    "node-api-headers": "1.5.0",
     "postcss": "^8",
     "react": "^19",
     "react-dom": "^19",
