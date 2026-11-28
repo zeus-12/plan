@@ -1901,12 +1901,26 @@ export const MessageList = memo(function MessageList({
     end: number;
   } | null>(null);
   const [indexing, setIndexing] = useState(false);
+  const followingBottomRef = useRef(true);
+  // Offset this component or the row window last put the scroller at — anything
+  // else is someone else moving it (see onScroll).
+  const appliedScrollRef = useRef(-1);
+  const scrollPin = useMemo(
+    () => ({
+      following: () => followingBottomRef.current,
+      wrote: (top: number) => {
+        appliedScrollRef.current = top;
+      },
+    }),
+    [],
+  );
   const rowWindow = useRowWindow(
     parentRef,
     contentRef,
     items,
     findForceRange,
     indexing,
+    scrollPin,
   );
   // Folding a run resizes the document under the reader. The window's own
   // anchor absorbs that, but only on a pass — so ask for one.
@@ -1920,7 +1934,6 @@ export const MessageList = memo(function MessageList({
   // the bottom). Seeded from the module store, which outlives both this pane's
   // hidden state and a workspace remount.
   const savedRef = useRef<ChatScrollPos | null>(null);
-  const followingBottomRef = useRef(true);
   if (scrollKeyRef.current !== scrollKey) {
     scrollKeyRef.current = scrollKey;
     savedRef.current = scrollKey ? getChatScroll(scrollKey) : null;
@@ -1946,10 +1959,6 @@ export const MessageList = memo(function MessageList({
   }, [visible]);
 
   const [showScrollDown, setShowScrollDown] = useState(false);
-
-  // Offset this component last put the scroller at — anything else is someone
-  // else moving it (see onScroll).
-  const appliedScrollRef = useRef(-1);
 
   // Where the restore wants the scroller, applied against the CURRENT layout.
   const applyScrollTarget = useCallback(() => {
@@ -2004,7 +2013,8 @@ export const MessageList = memo(function MessageList({
 
   useEffect(() => {
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
     };
   }, []);
 
@@ -2053,6 +2063,7 @@ export const MessageList = memo(function MessageList({
     if (visibleRef.current && followingBottomRef.current) applyScrollTarget();
   }, [items.length, deferredMessages, working, applyScrollTarget]);
 
+  const scheduleWindow = rowWindow.schedule;
   // Rows grow after their row is committed (shiki, images, a
   // content-visibility'd row rendering for real), which silently walks the
   // viewport away from wherever it was pinned.
@@ -2062,13 +2073,13 @@ export const MessageList = memo(function MessageList({
     const ro = new ResizeObserver(() => {
       if (!visibleRef.current) return;
       // A row that just grew (shiki, an image) has a stale reservation.
-      rowWindow.schedule();
+      scheduleWindow();
       if (followingBottomRef.current) applyScrollTarget();
       else if (performance.now() < settleUntilRef.current) applyScrollTarget();
     });
     ro.observe(content);
     return () => ro.disconnect();
-  }, [applyScrollTarget, rowWindow]);
+  }, [applyScrollTarget, scheduleWindow]);
 
   // Record the position so returning to this chat resumes where it was left.
   // scrollTop lands on every event (cheap); the anchor row is sampled once
@@ -2077,6 +2088,7 @@ export const MessageList = memo(function MessageList({
     const el = parentRef.current;
     if (!el) return;
     let settleTimer = 0;
+    let lastTop = el.scrollTop;
 
     const save = (anchor: boolean) => {
       const prev = savedRef.current;
@@ -2099,6 +2111,8 @@ export const MessageList = memo(function MessageList({
 
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const wentUp = el.scrollTop < lastTop;
+      lastTop = el.scrollTop;
       setShowScrollDown(distance > SCROLL_DOWN_THRESHOLD_PX);
       // A hidden pane reports a collapsed scroller — not the user's position.
       if (!visibleRef.current) return;
@@ -2109,7 +2123,10 @@ export const MessageList = memo(function MessageList({
         if (Math.abs(el.scrollTop - appliedScrollRef.current) <= 1) return;
         settleUntilRef.current = 0;
       }
-      followingBottomRef.current = distance < BOTTOM_EPSILON_PX;
+      // Any move up off the bottom is the reader leaving it. The epsilon only
+      // catches someone arriving; applied going up, it pins them back down.
+      const leaving = wentUp && distance > 1;
+      followingBottomRef.current = !leaving && distance < BOTTOM_EPSILON_PX;
       save(false);
       clearTimeout(settleTimer);
       settleTimer = window.setTimeout(() => save(true), ANCHOR_SAMPLE_MS);

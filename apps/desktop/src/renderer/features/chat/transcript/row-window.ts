@@ -7,8 +7,6 @@ const RENDER_MARGIN = 1.5;
 const KEEP_MARGIN = 3;
 /** Height reserved for a row nobody has measured yet. */
 const SEED_ROW_HEIGHT = 152;
-/** Within this of the end counts as following the newest message. */
-const BOTTOM_EPSILON = 40;
 /** Gap left above a row jumped to, matching the row's own scroll margin. */
 const JUMP_MARGIN = 12;
 /** How many frames a jump keeps re-pinning while heights settle. */
@@ -26,6 +24,15 @@ export interface RowWindow {
   /** Put this message at the top of the viewport and keep it there while the
    *  rows around it render and settle. */
   scrollToRow: (uuid: string) => void;
+}
+
+/** How the window shares the scroll position with the transcript that owns it. */
+export interface ScrollPin {
+  /** Whether the reader is following the newest message. The owner decides. */
+  following: () => boolean;
+  /** Called with every offset the window writes, so the owner can tell its own
+   *  moves from the reader's. */
+  wrote: (top: number) => void;
 }
 
 /**
@@ -57,10 +64,13 @@ export function useRowWindow(
   forceRange: { start: number; end: number } | null,
   /** Hold the window still. The find indexer renders slices all over the chat,
    *  and recomputing the window from that churn feeds back into itself. */
-  frozen = false,
+  frozen: boolean,
+  pin: ScrollPin,
 ): RowWindow {
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const pinRef = useRef(pin);
+  pinRef.current = pin;
 
   // Keyed on the message object: merge-session substitutes a new object when a
   // message changes and keeps the old one when it doesn't, so identity is an
@@ -78,7 +88,6 @@ export function useRowWindow(
     index: number;
     offset: number;
     at: number;
-    atBottom: boolean;
   } | null>(null);
   const jump = useRef<{ uuid: string; frames: number } | null>(null);
   const rafRef = useRef(0);
@@ -153,7 +162,10 @@ export function useRowWindow(
         const row = content.querySelector<HTMLElement>(
           `[data-msg-row="${CSS.escape(goto.uuid)}"]`,
         );
-        if (row) el.scrollTop = row.offsetTop - base - JUMP_MARGIN;
+        if (row) {
+          el.scrollTop = row.offsetTop - base - JUMP_MARGIN;
+          pinRef.current.wrote(el.scrollTop);
+        }
         anchor.current = null;
         if (row && --goto.frames <= 0) jump.current = null;
         else if (!row) jump.current = null;
@@ -179,11 +191,10 @@ export function useRowWindow(
           hold.at - (el.scrollHeight - el.clientHeight),
         );
         const moved = el.scrollTop - hold.at + clampLoss;
-        // Measuring rows changes the document height, so "the bottom" moves. A
-        // reader following the newest message stays there — but only if they
-        // have not scrolled away since, or this would trap them at the bottom.
-        const stillFollowing = hold.atBottom && Math.abs(moved) < 2;
-        const raw = stillFollowing
+        // Measuring rows moves "the bottom". Only the owner knows whether the
+        // reader is following it: an anchor taken before the open restored to
+        // the bottom would otherwise hold a row and strand them above it.
+        const raw = pinRef.current.following()
           ? el.scrollHeight - el.clientHeight
           : el.scrollTop + (rowTop(rows[hold.index]) - hold.offset + moved);
         // Snap to the device pixel grid. The compositor snaps scrollTop anyway,
@@ -191,7 +202,10 @@ export function useRowWindow(
         // re-fires every frame, leaving a permanent half-pixel offset.
         const dpr = window.devicePixelRatio || 1;
         const want = Math.round(raw * dpr) / dpr;
-        if (Math.abs(el.scrollTop - want) > 0.05) el.scrollTop = want;
+        if (Math.abs(el.scrollTop - want) > 0.05) {
+          el.scrollTop = want;
+          pinRef.current.wrote(el.scrollTop);
+        }
       }
       const top = el.scrollTop;
 
@@ -247,7 +261,6 @@ export function useRowWindow(
           index: at,
           offset: rowTop(rows[at]),
           at: top,
-          atBottom: el.scrollHeight - top - vh < BOTTOM_EPSILON,
         };
       }
       // Frozen means the window holds still while the find indexer renders
@@ -282,7 +295,8 @@ export function useRowWindow(
     el.addEventListener("scroll", scheduleStable, { passive: true });
     return () => {
       el.removeEventListener("scroll", scheduleStable);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
     };
   }, [scrollRef, scheduleStable]);
 
